@@ -19,6 +19,7 @@ UNIFIED_SOURCES += [
     'nsSOCKSIOLayer.cpp',
     'nsSOCKSSocketProvider.cpp',
     'nsUDPSocketProvider.cpp',
+    'SDTSocketProvider.cpp',
 ]
 
 FAIL_ON_WARNINGS = True

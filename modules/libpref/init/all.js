@@ -1222,7 +1222,7 @@ pref("network.http.use-cache", true);
 
 // this preference can be set to override the socket type used for normal
 // HTTP traffic.  an empty value indicates the normal TCP/IP socket type.
-pref("network.http.default-socket-type", "");
+pref("network.http.default-socket-type", "moz-sdt");
 
 // There is a problem with some IIS7 servers that don't close the connection
 // properly after it times out (bug #491541). Default timeout on IIS7 is

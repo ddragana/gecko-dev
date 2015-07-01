@@ -20,7 +20,11 @@ static SECStatus dtls_SendSavedWriteData(sslSocket *ss);
 
 /* -28 adjusts for the IP/UDP header */
 static const PRUint16 COMMON_MTU_VALUES[] = {
+#if 0
     1500 - 28,  /* Ethernet MTU */
+#else
+    1384, /* TODO */
+#endif
     1280 - 28,  /* IPv6 minimum MTU */
     576 - 28,   /* Common assumption */
     256 - 28    /* We're in serious trouble now */

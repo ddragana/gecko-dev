@@ -48,6 +48,9 @@
 
 #include "IntolerantFallbackList.inc"
 
+#include "nsISocketProviderService.h"
+#include "nsISocketProvider.h"
+
 using namespace mozilla;
 using namespace mozilla::psm;
 
@@ -1792,6 +1795,7 @@ nsSSLIOLayerHelpers::getWarnLevelMissingRFC5746()
   MutexAutoLock lock(mutex);
   return mWarnLevelMissingRFC5746;
 }
+static NS_DEFINE_CID(kSocketProviderServiceCID, NS_SOCKETPROVIDERSERVICE_CID);
 
 nsresult
 nsSSLIOLayerNewSocket(int32_t family,
@@ -1805,8 +1809,15 @@ nsSSLIOLayerNewSocket(int32_t family,
                       uint32_t flags)
 {
 
-  PRFileDesc* sock = PR_OpenTCPSocket(family);
-  if (!sock) return NS_ERROR_OUT_OF_MEMORY;
+  PRFileDesc* sock;
+  // todo - honor the normal tcp/sdt pref like http:// does
+  nsCOMPtr<nsISocketProviderService> spserv = do_GetService(kSocketProviderServiceCID);
+  nsCOMPtr<nsISocketProvider> provider;
+  spserv->GetSocketProvider("moz-sdt", getter_AddRefs(provider));
+  provider->NewSocket(family,
+                      host, port,
+                      proxyHost, proxyPort,
+                      flags, &sock, info);
 
   nsresult rv = nsSSLIOLayerAddToSocket(family, host, port, proxyHost, proxyPort,
                                         sock, info, forSTARTTLS, flags);
