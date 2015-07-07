@@ -1,25 +1,30 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 
-#include <stdio.h>
-#include <sys/types.h>
-#include <sys/socket.h>
+// this is a badly written proxy for a sdt client that needs tcp on the web
+//
+// the proxy is a gateway between udp/sdt on the front side and proxiable tcp/h1 on the backside.
+// So it is meant to point at a (h1?) proxy such as squid on localhost:3128
+
+#include <assert.h>
+#include "key.h"
 #include <netinet/in.h>
 #include <netinet/ip.h>
-#include <string.h>
-#include <unistd.h>
-#include "key.h"
-#include "ssl.h"
 #include "nss.h"
 #include "pk11pub.h"
 #include "pkcs12.h"
-#include "sechash.h"
-#include "secpkcs7.h"
-#include "secport.h"
 #include "prerror.h"
 #include "sdtlib.h"
+#include "sechash.h"
 #include "secmod.h"
+#include "secpkcs7.h"
+#include "secport.h"
+#include "ssl.h"
 #include "sslproto.h"
-#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #define UDP_LISTEN_PORT 7000
 
@@ -33,28 +38,18 @@
 #define GWHOST 0x7f000001
 
 #if 0
- README
 
 clang++ -g -I ../../../obj-debug-scratch/dist/include/ -I ../../../obj-debug-scratch/dist/include/nss -L ../../../obj-debug-scratch/dist/lib/ -I ../../../obj-debug-scratch/dist/include/nspr/ ../../../obj-debug-scratch/netwerk/socket/sdtlib.o  proxy.cpp ../../../obj-debug-scratch/dist/lib/libssl3.so ../../../obj-debug-scratch/dist/lib/libnss3.so -lnspr4
 
-   * see the flowID for information on the stack of fd handlers
-   * the proxy is a gateway between udp/sdt on the front side and proxiable tcp/h1 on the backside. So it is meant
-     to point at a h1 proxy such as squid on localhost:3128
-
- TODO (at best a partial list)
- * shared header (and code?) between gecko and proxy
+ TODO
  * what does a reused flow with a closed backend mean?
- * a whole lot more thinking about dtls params
  * backside tcp connect is blocking
  * backside tcp writes are lossy on short return and blocking
  * poll
 
 #endif
 
-PRIOMethods cryptoMethods;
-
 static PRFileDesc *udp_socket = NULL;
-
 static CERTCertificate *cert;
 static SECKEYPrivateKey *privKey;
 
@@ -80,26 +75,38 @@ public:
     }
 
     mFD = sdt_ImportFD(layerU, aUUID + 4);
-    assert(mFD); // todo
-    PR_Connect(mFD, sin, PR_INTERVAL_NO_WAIT);
-    PRFileDesc *crypto = sdt_layerC(mFD);
-    assert(crypto); // todo
+    if (mFD) {
+      bool initOK = true;
+      PR_Connect(mFD, sin, PR_INTERVAL_NO_WAIT);
+      PRFileDesc *crypto = sdt_layerC(mFD);
+      SSLKEAType certKEA = NSS_FindCertKEAType(cert);
+      if (SSL_ConfigSecureServer(crypto, cert, privKey, certKEA)
+          != SECSuccess) {
+        initOK = false;
+      }
 
-    SSLKEAType certKEA = NSS_FindCertKEAType(cert);
-    if (SSL_ConfigSecureServer(crypto, cert, privKey, certKEA)
-        != SECSuccess) {
-      assert(false);
+      SECStatus status;
+      status = SSL_OptionSet(crypto, SSL_SECURITY, true);
+      if (status != SECSuccess) {
+        initOK = false;
+      }
+      status = SSL_OptionSet(crypto, SSL_HANDSHAKE_AS_CLIENT, false);
+      if (status != SECSuccess) {
+        initOK = false;
+      }
+      status = SSL_OptionSet(crypto, SSL_HANDSHAKE_AS_SERVER, true);
+      if (status != SECSuccess) {
+        initOK = false;
+      }
+      status = SSL_ResetHandshake(crypto, true);
+      if (status != SECSuccess) {
+        initOK = false;
+      }
+      if (!initOK) {
+        PR_Close(mFD);
+        mFD = NULL;
+      }
     }
-
-    SECStatus status;
-    status = SSL_OptionSet(crypto, SSL_SECURITY, true);
-    assert(status == SECSuccess);
-    status = SSL_OptionSet(crypto, SSL_HANDSHAKE_AS_CLIENT, false);
-    assert(status == SECSuccess);
-    status = SSL_OptionSet(crypto, SSL_HANDSHAKE_AS_SERVER, true);
-    assert(status == SECSuccess);
-    status = SSL_ResetHandshake(crypto, true);
-    assert(status == SECSuccess);
   }
 
   ~flowID() {
@@ -222,6 +229,10 @@ findFlow(unsigned char *uuid, PRNetAddr *sin, bool makeIt)
   }
   if (!rv && makeIt) {
     rv = new flowID(uuid, sin);
+    if (!rv->mFD) {
+      delete rv;
+      rv = NULL;
+    }
   }
   // todo I think this becomes IP addr independent if we
   // just reconnect an old flow id with a changed prnetaddr
@@ -298,6 +309,9 @@ int main()
     assert (rlen <= SDT_MTU); // to be removed (runtime error)
     if (rlen >= SDT_UUIDSIZE) {
       class flowID *flow = findFlow(cipheredBuf, &sin, true);
+      if (!flow) {
+        continue;
+      }
       fprintf(stderr, "udp read %d %p port %d\n", rlen, flow, ntohs(sin.inet.port));
 
       flow->ensureConnect();

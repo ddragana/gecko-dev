@@ -42,9 +42,15 @@ P replay detect, generate ack (or corrupt, or ooo), pass to plaintext
 #define DTLS_TYPE_ALERT         21
 #define DTLS_TYPE_HANDSHAKE     22
 #define DTLS_TYPE_DATA          23
-// DEV_ASSERT's might actually happen in the wild, but should not in development,
-// so we assert them at that time
-#define DEV_ASSERT assert
+
+// DEV_ABORT's might actually happen in the wild, but in the lab are more
+// likely to be a bug.. so we will abort on them for now, but they need a
+// runtime error path too.
+#if 1
+#define DEV_ABORT(x) do { abort(); } while (0)
+#else
+#define DEV_ABORT(x) do { } while (0)
+#endif
 #define nullptr 0
 
 #if 0
@@ -56,7 +62,7 @@ P replay detect, generate ack (or corrupt, or ooo), pass to plaintext
 struct sdt_t
 {
   unsigned char uuid[SDT_UUIDSIZE];
-  PRNetAddr peer; // todo
+  PRNetAddr peer;
   uint8_t connected;
 
   uint8_t  recordType;
@@ -93,23 +99,23 @@ sdt_preprocess(struct sdt_t *handle,
                unsigned char *pkt, uint32_t len)
 {
   if (len < SDT_UUIDSIZE + 11) {
-    DEV_ASSERT(0);
+    DEV_ABORT();
     return 0;
   }
 
   if (!((pkt[0] == 0x88) && (pkt[1] == 0x77) && (pkt[2] == 0x66) && (pkt[3] == 0x00))) {
-    DEV_ASSERT(0);
+    DEV_ABORT();
     return 0;
   }
 
   // sanity check dtls 1.0, 1.1, or 1.2
   if (!((pkt[SDT_UUIDSIZE + 1] == 0xFE) && (pkt[SDT_UUIDSIZE + 2] >= 0xFD))) {
-    DEV_ASSERT(0);
+    DEV_ABORT();
     return 0;
   }
 
   if (memcmp(pkt, handle->uuid, SDT_UUIDSIZE)) {
-    DEV_ASSERT(0);
+    DEV_ABORT();
     return 0;
   }
 
@@ -127,12 +133,12 @@ sdt_preprocess(struct sdt_t *handle,
 
   // we don't allow renogitation which is implied by epoch > 1
   if (handle->epoch > 1) {
-    DEV_ASSERT(0);
+    DEV_ABORT();
     return 0;
   }
   if (!handle->epoch && (handle->recordType == DTLS_TYPE_DATA)) {
     // we should only be handshaking in epoch 0
-    DEV_ASSERT(0);
+    DEV_ABORT();
     return 0;
   }
 
@@ -217,7 +223,7 @@ static int32_t
 notImplemented(PRFileDesc *fd, void *aBuf, int32_t aAmount,
                int flags, PRNetAddr *addr, PRIntervalTime to)
 {
-  DEV_ASSERT(0);
+  DEV_ABORT();
   return -1;
 }
 
@@ -263,7 +269,7 @@ sLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
   }
   // aBuf now contains prefixe and ciphered sdt frame from network
 
-  struct sdt_t *handle = (struct sdt_t *)(aFD->secret); // todo
+  struct sdt_t *handle = (struct sdt_t *)(aFD->secret);
   if (!handle) {
     assert (0);
     return -1;
@@ -292,7 +298,7 @@ pLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
     return -1;
   }
 
-  struct sdt_t *handle = (struct sdt_t *)(aFD->secret); // todo
+  struct sdt_t *handle = (struct sdt_t *)(aFD->secret);
   if (!handle) {
     assert (0);
     return -1;
@@ -367,7 +373,7 @@ sLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
   addr = &(handle->peer);
 
   if (aAmount > SDT_PAYLOADSIZE) {
-    DEV_ASSERT(0);
+    DEV_ABORT();
     // todo set error
     return -1;
   }
@@ -386,7 +392,7 @@ sLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
     return -1;
   }
   if (rv < SDT_UUIDSIZE) {
-    DEV_ASSERT(0);
+    DEV_ABORT();
     // todo set err
     return -1;
   }
@@ -514,7 +520,6 @@ sdtGreenLightAuth(void* arg, PRFileDesc* fd, PRBool arg2, PRBool arg3)
   return SECSuccess;
 }
     
-// todo how is this different for server
 PRFileDesc *
 sdt_ImportFD(PRFileDesc *udp_socket, unsigned char *id_buf_16)
 {

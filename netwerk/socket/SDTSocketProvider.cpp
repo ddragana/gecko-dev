@@ -4,16 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nspr.h"
+#include "mozilla/Logging.h"
 #include "nsCOMPtr.h"
-#include "nsRefPtr.h"
-#include "nsError.h"
 #include "nsIServiceManager.h"
 #include "nsIUUIDGenerator.h"
-#include "mozilla/Logging.h"
-#include "SDTSocketProvider.h"
-#include "ssl.h"
+#include "nspr.h"
 #include "sdtlib.h"
+#include "SDTSocketProvider.h"
 
 #if 0
  README

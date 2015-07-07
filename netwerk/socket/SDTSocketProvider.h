@@ -6,8 +6,8 @@
 #define SDTSocketProvider_h__
 
 #pragma once
-#include "nsISocketProvider.h"
 #include "mozilla/Attributes.h"
+#include "nsISocketProvider.h"
 
 #define NS_SDTSOCKETPROVIDER_CID { 0xf7c9f5f4, 0x4451, 0x41c3, { 0xa2, 0x8a, 0x5b, 0xb2, 0x4f, 0x7f, 0xba, 0xce } }
 
