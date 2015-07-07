@@ -18,8 +18,8 @@ function run_test() {
 
 function setupChannel(path) {
   var ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
-    return chan = ios.newChannel2(
-	"https://www.ducksong.com/resources/mcmanus-headshot.jpg",
+  return ios.newChannel2(
+	"http://www.ducksong.com/misc/sl.gif",
                                "",
                                null,
                                null,      // aLoadingNode

@@ -16,9 +16,12 @@
 #include "secpkcs7.h"
 #include "secport.h"
 #include "prerror.h"
+#include "sdtlib.h"
 #include "secmod.h"
 #include "sslproto.h"
 #include <assert.h>
+
+#define UDP_LISTEN_PORT 7000
 
 // these are the front side dtls server certs
 // currently not checked
@@ -31,7 +34,8 @@
 
 #if 0
  README
-   clang++ -g -I ../../../obj-debug-scratch/dist/include/ -I ../../../obj-debug-scratch/dist/include/nss -L ../../../obj-debug-scratch/dist/lib/ -I ../../../obj-debug-scratch/dist/include/nspr/ proxy.cpp ../../../obj-debug-scratch/dist/lib/libssl3.so ../../../obj-debug-scratch/dist/lib/libnss3.so -lnspr4
+
+clang++ -g -I ../../../obj-debug-scratch/dist/include/ -I ../../../obj-debug-scratch/dist/include/nss -L ../../../obj-debug-scratch/dist/lib/ -I ../../../obj-debug-scratch/dist/include/nspr/ ../../../obj-debug-scratch/netwerk/socket/sdtlib.o  proxy.cpp ../../../obj-debug-scratch/dist/lib/libssl3.so ../../../obj-debug-scratch/dist/lib/libnss3.so -lnspr4
 
    * see the flowID for information on the stack of fd handlers
    * the proxy is a gateway between udp/sdt on the front side and proxiable tcp/h1 on the backside. So it is meant
@@ -47,19 +51,12 @@
 
 #endif
 
-
-PRFileDesc *udp_socket = NULL;
-PRDescIdentity identity;
 PRIOMethods cryptoMethods;
 
-CERTCertificate *cert;
-SECKEYPrivateKey *privKey;
+static PRFileDesc *udp_socket = NULL;
 
-// todo put these in shared header
-#define MTU 1400
-#define UUIDSIZE 20
-#define PAYLOADSIZE (MTU - UUIDSIZE)
-#define CLEARTEXTPAYLOADSIZE (PAYLOADSIZE - 64)
+static CERTCertificate *cert;
+static SECKEYPrivateKey *privKey;
 
 class flowID;
 class flowID *hash[256];
@@ -70,23 +67,23 @@ public:
   flowID(unsigned char *aUUID, PRNetAddr *sin)
   : tcp(-1)
   {
-    // two layers of IO Methods - on the top is dtls, and below it are the sdt layers;
-    // cleartext gets written into the fd, changed to ciphertext and then given to the sdt
-    // layer which is EncryptAndForward. It takes the ciphertext and writes it to the
-    // global muxed udp FD (src port 7000), using send_to of the port associated with this uuid.
-    // On the read side, data is read off the global muxxed fd (7000) and the uuid is taken from
-    // the front and used to find the per flow fd. that fd is then read from and the bottom sdt
-    // handler knows where the ciphertext read from the globalfd lives, and passes it up to the
-    // dtls handler which decrypts returns cleartext.
-
     unsigned char id = HashID(aUUID);
-    memcpy (uuid, aUUID, UUIDSIZE);
+    memcpy (mUUID, aUUID, SDT_UUIDSIZE);
     next = hash[id];
     hash[id] = this;
-    memcpy (&udpPeer, sin, sizeof(PRNetAddr));
-    crypto = PR_CreateIOLayerStub(identity, &cryptoMethods);
-    crypto->secret = (PRFilePrivate *)this;
-    crypto = DTLS_ImportFD(NULL, crypto);
+
+    PRFileDesc *layerU = sdt_layerU(udp_socket);
+    if (!layerU) {
+      // probably just means that udp_socket hasn't been used with a sdt
+      // stack yet
+      layerU = udp_socket;
+    }
+
+    mFD = sdt_ImportFD(layerU, aUUID + 4);
+    assert(mFD); // todo
+    PR_Connect(mFD, sin, PR_INTERVAL_NO_WAIT);
+    PRFileDesc *crypto = sdt_layerC(mFD);
+    assert(crypto); // todo
 
     SSLKEAType certKEA = NSS_FindCertKEAType(cert);
     if (SSL_ConfigSecureServer(crypto, cert, privKey, certKEA)
@@ -109,15 +106,18 @@ public:
     if (tcp != -1) {
       close (tcp);
     }
-    if (crypto) {
-      PR_Close(crypto);
+    if (mFD) {
+      PR_Close(mFD);
     }
   }
 
   static unsigned char HashID(unsigned char *aUUID)
   {
+    // todo runtime err
+    // todo magic should be in sdtlib
+    assert((aUUID[0] == 0x88) && (aUUID[1] == 0x77) && (aUUID[2] == 0x66) && (aUUID[3] == 0x00));
     unsigned char id = aUUID[0];
-    for (unsigned int i = 1; i < UUIDSIZE; ++i) {
+    for (unsigned int i = 1; i < SDT_UUIDSIZE; ++i) {
       id ^= aUUID[i];
     }
     return id;
@@ -138,75 +138,29 @@ public:
     if (connect(tcp, (const struct sockaddr *) &sin, sizeof (sin)) < 0) {
       close(tcp);
       tcp = -1;
-      fprintf(stdout, "tcp connect failed\n");
+      fprintf(stderr, "tcp connect failed\n");
     } else {
-      fprintf(stdout, "tcp connect ok\n");
+      fprintf(stderr, "tcp connect ok\n");
     }
   }
 
-  static int32_t sDecrypt1(PRFileDesc *fd, void *aBuf, int32_t aAmount)
-  {
-    return sDecrypt(fd, aBuf, aAmount, 0, PR_INTERVAL_NO_WAIT);
-  }
-
-  static int32_t sDecrypt(PRFileDesc *fd, void *aBuf, int32_t aAmount,
-                          int , PRIntervalTime)
-  {
-    if (aAmount == 0) {
-      return 0;
-    }
-
-    flowID *self = reinterpret_cast<flowID *>(fd->secret);
-    if (aAmount > self->toDecryptLen) {
-      aAmount = self->toDecryptLen;
-    }
-    if (aAmount < 1) {
-      PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
-      return -1;
-    }
-    memcpy(aBuf, self->toDecrypt, aAmount);
-    self->toDecrypt += aAmount;
-    self->toDecryptLen -= aAmount;
-    return aAmount;
-  }
-
-  static PRStatus sGetPeerName(PRFileDesc *fd, PRNetAddr *addr)
-  {
-    flowID *self = reinterpret_cast<flowID *>(fd->secret);
-    memcpy(addr, &self->udpPeer, sizeof(PRNetAddr));
-    return PR_SUCCESS;
-  }
-
-  static PRStatus sGetSocketOption(PRFileDesc *aFD, PRSocketOptionData *aOpt)
-  {
-    if (aOpt->option == PR_SockOpt_Nonblocking) {
-      aOpt->value.non_blocking = PR_TRUE;
-      return PR_SUCCESS;
-    }
-    return PR_FAILURE;
-  }
-
-  void decryptAndForward(unsigned char *buf, unsigned int l)
+  void processForward()
   {
     // take ciphertext from front, decrypt, and send as plaintext to tcp on back
-    unsigned char clearTextBuf[MTU*2];
+    unsigned char clearTextBuf[SDT_MTU*2];
     int rlen;
     int subtotal = 0;
 
-    // the read from crypto will pull data from toDecrypt in ::sDecrypt()
-    toDecrypt = buf;
-    toDecryptLen = l;
     do {
-      fprintf(stderr,"before decypt we have %d input\n", toDecryptLen);
-      rlen = PR_Read(crypto, clearTextBuf, MTU * 2);
-      fprintf(stderr,"after decypt we have %d input rlen=%d\n", toDecryptLen, rlen);
+      rlen = PR_Read(mFD, clearTextBuf, SDT_MTU * 2);
+      fprintf(stderr,"after decypt we have rlen=%d\n", rlen);
       if (rlen > 0) {
-        fprintf(stdout, "forward %d of decrypted cipher to backend\n", rlen);
+        fprintf(stderr, "forward %d of decrypted cipher to backend\n", rlen);
         forward(clearTextBuf, rlen);
       } else if ((rlen == -1) && (PR_GetError() == PR_WOULD_BLOCK_ERROR)) {
         rlen = 1; // fake it to reloop
       }
-    } while ((rlen > 0) && (toDecryptLen > 0));
+    } while (rlen > 0);
   }
 
   void forward(unsigned char *buf, unsigned int l)
@@ -218,46 +172,23 @@ public:
     write (tcp, buf, l);
   }
 
-  static int32_t sEncryptAndForward1(PRFileDesc *fd, const void *aBuf, int32_t aAmount)
-  {
-    return sEncryptAndForward(fd, aBuf, aAmount, 0, PR_INTERVAL_NO_WAIT);
-  }
-
-  static int32_t sEncryptAndForward(PRFileDesc *fd, const void *aBuf, int32_t aAmount,
-                                    int, PRIntervalTime)
-  {
-    flowID *self = reinterpret_cast<flowID *>(fd->secret);
-    // aBuf contains ciphertext.. our job is to frame it and send it via udp
-    assert(aAmount <= PAYLOADSIZE); // to be removed (runtime error)
-    unsigned char frame[MTU];
-    memcpy (frame, self->uuid, UUIDSIZE);
-    memcpy(frame + UUIDSIZE, (unsigned char *)aBuf, aAmount);
-    int sr = PR_SendTo(udp_socket, frame, UUIDSIZE + aAmount, 0,
-                       &self->udpPeer, PR_INTERVAL_NO_WAIT);
-    fprintf(stdout,"udp socket reply send %d\n", sr);
-    return (sr >= UUIDSIZE) ? (sr - UUIDSIZE) : -1;
-  }
-
-  void reverse()
+  void processReverse()
   {
     if (tcp == -1) {
       return;
     }
 
-    unsigned char cleartext[CLEARTEXTPAYLOADSIZE]; // todo member with fixed uuid
-    int rr = recv(tcp, cleartext, CLEARTEXTPAYLOADSIZE, MSG_DONTWAIT);
+    unsigned char cleartext[SDT_CLEARTEXTPAYLOADSIZE]; // todo member with fixed uuid
+    int rr = recv(tcp, cleartext, SDT_CLEARTEXTPAYLOADSIZE, MSG_DONTWAIT);
     if (rr > 0) {
-      fprintf(stdout,"tcp socket read %d\n", rr);
+      fprintf(stderr,"tcp socket read %d\n", rr);
 
       // we have cleartext.. we need to turn it into ciphertext and
       // stick a uuid on the front of it
 
       int offset = 0;
       do {
-        // each call to PR_Write will take some plaintext encrypt
-        // it.. and then call EncryptAndForward on with the ciphertext which will
-        // put a frame on it and sent it out
-        int iw = PR_Write(crypto, cleartext + offset, rr);
+        int iw = PR_Write(mFD, cleartext + offset, rr);
         if (iw > 0) {
           rr -= iw;
           offset += iw;
@@ -272,24 +203,10 @@ public:
     }
   }
 
-  static void setupMethods()
-  {
-    cryptoMethods = *PR_GetDefaultIOMethods();
-    cryptoMethods.read = sDecrypt1;
-    cryptoMethods.recv = sDecrypt;
-    cryptoMethods.write = sEncryptAndForward1;
-    cryptoMethods.send = sEncryptAndForward;
-    cryptoMethods.getpeername = sGetPeerName;
-    cryptoMethods.getsocketoption = sGetSocketOption;
-  }
-
-  PRNetAddr udpPeer;
-  unsigned char uuid[UUIDSIZE];
-  class flowID *next;
-  int tcp;
-  unsigned char *toDecrypt;
-  unsigned int toDecryptLen;
-  PRFileDesc *crypto;
+  PRFileDesc *mFD;
+  unsigned char mUUID[SDT_UUIDSIZE];
+  class flowID *next; // hash flow table chain
+  int tcp; // tcp file descriptor
 };
 
 class flowID *
@@ -299,18 +216,21 @@ findFlow(unsigned char *uuid, PRNetAddr *sin, bool makeIt)
   class flowID *rv;
 
   for (rv = hash[id]; rv; rv = rv->next) {
-    if (!memcmp(rv->uuid, uuid, UUIDSIZE)) {
+    if (!memcmp(rv->mUUID, uuid, SDT_UUIDSIZE)) {
       break;
     }
   }
   if (!rv && makeIt) {
     rv = new flowID(uuid, sin);
   }
+  // todo I think this becomes IP addr independent if we
+  // just reconnect an old flow id with a changed prnetaddr
   return rv;
 }
 
 // bogus password func, just don't use passwords. :-P
-char* password_func(PK11SlotInfo* slot, PRBool retry, void* arg)
+static char *
+password_func(PK11SlotInfo* slot, PRBool retry, void* arg)
 {
   if (retry) {
     return NULL;
@@ -318,7 +238,7 @@ char* password_func(PK11SlotInfo* slot, PRBool retry, void* arg)
   return strdup("");
 }
 
-int main()
+static void setupNSS()
 {
   PK11_SetPasswordFunc(password_func);
   NSS_GetVersion();
@@ -336,40 +256,59 @@ int main()
   assert(cert);
   privKey =  PK11_FindKeyByAnyCert(cert, NULL);
   assert(privKey);
+}
 
-  flowID::setupMethods();
-
+static void setupListener()
+{
   PRNetAddr sin;
+  sdt_ensureInit();
   sin.inet.family = PR_AF_INET;
-  sin.inet.port = htons(7000);
   sin.inet.ip = 0;
-
-  identity = PR_GetUniqueIdentity("sdt-crypto");
+  sin.inet.port = htons(UDP_LISTEN_PORT);
   udp_socket = PR_OpenUDPSocket(AF_INET);
-  PR_Bind(udp_socket, &sin);
+  if (PR_Bind(udp_socket, &sin) != PR_SUCCESS) {
+    assert(0);
+  }
+  // todo check return vals
+}
 
-  // a flow table.. uid to fd and fd is a tcp connect to proxy
+
+int main()
+{
+  setupNSS();
+  setupListener();
+
+  // a primative flow table.. uid to fd and fd is a tcp connect to proxy
   // write each message to the proxy
   // then need to mux reads from that set of fds and the udp_socket
+  // udp_socket is just that - it has no sdt or crypto io layers
 
-  unsigned char cipheredBuf[MTU + 1];
+  unsigned char cipheredBuf[SDT_MTU + 1];
+
+  PRNetAddr sin;
   while (1) {
     bool didWork = false;
-    int rlen = PR_RecvFrom(udp_socket, cipheredBuf, MTU + 1, 0, &sin, PR_INTERVAL_NO_WAIT);
-    assert (rlen <= MTU); // to be removed (runtime error)
-    if (rlen >= UUIDSIZE) {
+    PRFileDesc *layerU = sdt_layerU(udp_socket);
+    if (!layerU) {
+      // probably just means that udp_socket hasn't been used with a sdt
+      // stack yet
+      layerU = udp_socket;
+    }
+    int rlen = PR_RecvFrom(layerU, cipheredBuf, SDT_MTU + 1, PR_MSG_PEEK, &sin, PR_INTERVAL_NO_WAIT);
+    assert (rlen <= SDT_MTU); // to be removed (runtime error)
+    if (rlen >= SDT_UUIDSIZE) {
       class flowID *flow = findFlow(cipheredBuf, &sin, true);
-      fprintf(stdout, "udp read %d %p port %d\n", rlen, flow, ntohs(sin.inet.port));
+      fprintf(stderr, "udp read %d %p port %d\n", rlen, flow, ntohs(sin.inet.port));
 
       flow->ensureConnect();
-      flow->decryptAndForward(cipheredBuf + UUIDSIZE, rlen - UUIDSIZE);
+      flow->processForward();
       didWork = true;
     }
 
     // this is obviously nothing more than a poc hack that needs todo poll()
     for (unsigned int i = 0; i < 256; ++i) {
       for (flowID *f = hash[i]; f ; f = f->next) {
-        f->reverse();
+        f->processReverse();
       }
     }
 
