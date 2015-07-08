@@ -621,6 +621,8 @@ sdt_layerU(PRFileDesc *sdtFD)
 
   //  p->c->s->q->u
   // todo get by identity I suppose
+  assert (sdtFD->lower->lower->lower->lower);
+  assert (!sdtFD->lower->lower->lower->lower->lower);
   return sdtFD->lower->lower->lower->lower;
 }
 
