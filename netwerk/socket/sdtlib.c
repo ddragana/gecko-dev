@@ -11,11 +11,12 @@
 #include "prio.h"
 #include "sdtlib.h"
 #include "ssl.h"
+#include "unistd.h"
 
 /*
 an SDT Scoket has the following layers, the U layer is passed into the library
 
-P packetizelayer (quantize)
+P packetizelayer (quantize and lock)
 C cryptolayer (dtls)
 S sdtlayer (sdt framing)
 Q queuelayer (pacing, cong contrl, etc..)
@@ -38,6 +39,9 @@ P replay detect, generate ack (or corrupt, or ooo), pass to plaintext
 
 // todo sdtlib-internal.h
 
+/* There is an unfortunate amount of standalone (non reuse) C going on in here
+   in the hope of maximum reusability */
+
 #define DTLS_TYPE_CHANGE_CIPHER 20
 #define DTLS_TYPE_ALERT         21
 #define DTLS_TYPE_HANDSHAKE     22
@@ -59,6 +63,19 @@ P replay detect, generate ack (or corrupt, or ooo), pass to plaintext
   // can tls for https be removed if e2e?
 #endif
 
+static uint32_t qBufferLenMax = 128; // number of queued packets
+
+// our standard time unit is a microsecond
+static uint64_t qMaxCreditsDefault = 80000; // ums worth of full bucket
+static uint64_t qPacingRateDefault =  2000; // send every 2ms (2000ums)
+
+struct qPacket_t
+{
+  int32_t sz;
+  struct qPacket_t *next;
+  // the buffer lives at the end of the struct
+};
+            
 struct sdt_t
 {
   unsigned char uuid[SDT_UUIDSIZE];
@@ -71,7 +88,99 @@ struct sdt_t
 
   uint64_t upperWindow; // SDT_REPLAY_WINDOW - 1
   unsigned char window[SDT_REPLAY_WINDOW / 8];
+
+  uint32_t qBufferLen;
+  PRTime qBufferNextSend;
+  struct qPacket_t *qFirst, *qLast;
+  PRTime qLastCredit;
+  // credits are key in ums
+  uint64_t qCredits;
+  uint64_t qMaxCredits;
+  uint64_t qPacingRate;
+
+  struct sdt_t *next, *prev; // for the transmit thread
+  PRFileDesc *fd; // weak ptr, dont close
 };
+
+static struct sdt_t *transmitHead;
+static PRLock *mutex; // stack mutex.. can improve to stack + per flow
+static PRCondVar *condVar;
+
+static void assert_lock(struct sdt_t *handle)
+{
+  PR_AssertCurrentThreadOwnsLock(mutex);
+}
+
+static void hlock(struct sdt_t *handle)
+{
+  PR_Lock(mutex); // just one for now
+}
+
+static void hunlock(struct sdt_t *handle)
+{
+  PR_Unlock(mutex);
+}
+
+static void
+addToTransmitList_locked(struct sdt_t *handle)
+{
+  // need to insert this sorted by qBufferNextSend
+  // todo need transmitTail to search from rear in common case
+  assert_lock(handle);
+  assert(handle->next == NULL);
+  assert(handle->prev == NULL);
+
+  if (!transmitHead) {
+    transmitHead = handle;
+    return;
+  }
+
+  struct sdt_t *trailingNode = NULL;
+  for (struct sdt_t *i = transmitHead;
+       i && (i->qBufferNextSend < handle->qBufferNextSend); i = i->next) {
+    handle->next = i;
+    if (i) {
+      handle->prev = i->prev;
+    } else {
+      assert(trailingNode);
+      handle->prev = trailingNode;
+    }
+    if (handle->prev) {
+      handle->prev->next = handle;
+    } else {
+      transmitHead = handle;
+    }
+    if (handle->next) {
+      handle->next->prev = handle;
+    }
+    trailingNode = i;
+  }
+}
+
+static void
+removeFromTransmitList_locked(struct sdt_t *handle)
+{
+  assert_lock(handle);
+  if ((!handle->prev) && (transmitHead != handle)) {
+    return; // not on the list!
+  }
+
+  if (transmitHead == handle) { // head of list
+    assert(!handle->prev);
+    transmitHead = handle->next;
+    if (handle->next) {
+      handle->next->prev = NULL;
+    }
+  } else {
+    assert(handle->prev);
+    handle->prev->next = handle->next;
+    if (handle->next) {
+      handle->next->prev = handle->prev;
+    }
+  }
+  handle->next = NULL;
+  handle->prev = NULL;
+}
 
 struct sdt_t *sdt_newHandle(unsigned char *id_buf_16)
 {
@@ -85,12 +194,17 @@ struct sdt_t *sdt_newHandle(unsigned char *id_buf_16)
   handle->uuid[2] = 0x66; // magic
   handle->uuid[3] = 0x00; // version
   memcpy (handle->uuid + 4, id_buf_16, 16);
+  handle->qMaxCredits = qMaxCreditsDefault;
+  handle->qMaxCredits = qPacingRateDefault * 3; // todo
+  handle->qPacingRate = qPacingRateDefault;
   return handle;
 }
 
 static void
 sdt_freeHandle(struct sdt_t *handle)
 {
+  assert_lock(handle);
+  removeFromTransmitList_locked(handle);
   free(handle);
 }
 
@@ -98,6 +212,7 @@ static unsigned int
 sdt_preprocess(struct sdt_t *handle,
                unsigned char *pkt, uint32_t len)
 {
+  assert_lock(handle);
   if (len < SDT_UUIDSIZE + 11) {
     DEV_ABORT();
     return 0;
@@ -155,6 +270,7 @@ sdt_preprocess(struct sdt_t *handle,
 static unsigned int
 sdt_replayCheck(struct sdt_t *handle, uint64_t seqno)
 {
+  assert_lock(handle);
   fprintf(stderr,"replay check %p 0x%lX\n",handle, seqno);
 
   uint64_t lowerWindow = handle->upperWindow - (SDT_REPLAY_WINDOW - 1);
@@ -274,6 +390,7 @@ sLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
     assert (0);
     return -1;
   }
+  assert_lock(handle);
 
   if (!sdt_preprocess(handle, aBuf, rv)) {
     assert (0);
@@ -290,17 +407,18 @@ sLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
 }
 
 static int32_t
-pLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
-           int flags, PRIntervalTime to)
+pLayerRecv_locked(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
+                  int flags, PRIntervalTime to)
 {
-  int32_t rv = aFD->lower->methods->recv(aFD->lower, aBuf, aAmount, flags, to);
-  if (rv < 0) {
-    return -1;
-  }
-
   struct sdt_t *handle = (struct sdt_t *)(aFD->secret);
   if (!handle) {
     assert (0);
+    return -1;
+  }
+  assert_lock(handle);
+
+  int32_t rv = aFD->lower->methods->recv(aFD->lower, aBuf, aAmount, flags, to);
+  if (rv < 0) {
     return -1;
   }
 
@@ -308,8 +426,8 @@ pLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
 
   if (sdt_replayCheck(handle, handle->seq) != 0) {
     // drop it
-    // todo error = wouldblock
-    // this is a dup and should be cc feedback
+    // todo this is a dup and should be cc feedback
+    PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
     return -1;
   }
 
@@ -317,7 +435,23 @@ pLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
 
   // todo cc feedback inclduing ack
   // todo lifecycle handling
+  // todo deal with dtls corruption as feedback
 
+  return rv;
+}
+
+static int32_t
+pLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
+           int flags, PRIntervalTime to)
+{
+  struct sdt_t *handle = (struct sdt_t *)(aFD->secret);
+  if (!handle) {
+    assert (0);
+    return -1;
+  }
+  hlock(handle);
+  int32_t rv = pLayerRecv_locked(aFD, aBuf, aAmount, flags, to);
+  hunlock(handle);
   return rv;
 }
 
@@ -331,16 +465,32 @@ pLayerAvailable(PRFileDesc *fd)
 
   return 0;
 }
-    
+
+static PRStatus
+pLayerClose(PRFileDesc *fd)
+{
+  struct sdt_t *handle = (struct sdt_t *)(fd->secret);
+  if (!handle) {
+    assert (0);
+    return PR_FAILURE;
+  }
+
+  hlock(handle);
+  PRStatus rv = genericClose(fd);
+  hunlock(handle);
+  return rv;
+}
+
 static int32_t
-pLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
-             int flags, const PRNetAddr *addr, PRIntervalTime to)
+pLayerSendTo_locked(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
+                    int flags, const PRNetAddr *addr, PRIntervalTime to)
 {
   struct sdt_t *handle = (struct sdt_t *)(aFD->secret);
   if (!handle) {
     assert (0);
     return -1;
   }
+  assert_lock(handle);
 
   if (aAmount > SDT_CLEARTEXTPAYLOADSIZE) {
     aAmount = SDT_CLEARTEXTPAYLOADSIZE;
@@ -362,6 +512,21 @@ pLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
 }
 
 static int32_t
+pLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
+             int flags, const PRNetAddr *addr, PRIntervalTime to)
+{
+  struct sdt_t *handle = (struct sdt_t *)(aFD->secret);
+  if (!handle) {
+    assert (0);
+    return -1;
+  }
+  hlock(handle);
+  int32_t rv = pLayerSendTo_locked(aFD, aBuf, aAmount, flags, addr, to);
+  hunlock(handle);
+  return rv;
+}
+
+static int32_t
 sLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
              int flags, const PRNetAddr *addr, PRIntervalTime to)
 {
@@ -370,6 +535,7 @@ sLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
     assert (0);
     return -1;
   }
+  assert_lock(handle);
   addr = &(handle->peer);
 
   if (aAmount > SDT_PAYLOADSIZE) {
@@ -399,6 +565,85 @@ sLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
   return rv - SDT_UUIDSIZE;
 }
 
+static
+void updateNextSend_locked(struct sdt_t *handle) 
+{
+  assert_lock(handle);
+  if (handle->qCredits >= handle->qPacingRate) {
+    handle->qBufferNextSend = 0;
+  } else {
+    handle->qBufferNextSend = handle->qPacingRate - handle->qCredits;
+    handle->qBufferNextSend += PR_Now();
+  }
+}
+
+// todo new file
+static int // 0 on ok
+qAdd(struct sdt_t *handle, const void *aBuf, int32_t sz) 
+{
+  assert_lock(handle);
+  struct qPacket_t *pkt = (struct qPacket_t *) malloc(sizeof(struct qPacket_t) + sz);
+  if (!pkt) {
+    return 1;
+  }
+  pkt->next = nullptr;
+  pkt->sz = sz;
+  memcpy(pkt + 1, aBuf, sz);
+
+  if (handle->qBufferLen) {
+    assert(handle->qFirst);
+    assert(handle->qLast);
+    assert(!handle->qLast->next);
+    handle->qLast->next = pkt;
+    handle->qLast = pkt;
+  } else {
+    assert(!handle->qFirst);
+    assert(!handle->qLast);
+    handle->qLast = pkt;
+    handle->qFirst = pkt;
+  }
+  ++handle->qBufferLen;
+  if (handle->qBufferLen == 1) {
+    updateNextSend_locked(handle);
+    addToTransmitList_locked(handle);
+    PR_NotifyCondVar(condVar);
+  }
+  fprintf(stderr,"qadd %p %d\n", handle, handle->qBufferLen);
+  return 0;
+}
+
+int
+qAllowSend(struct sdt_t *handle)
+{
+  assert_lock(handle);
+  // first update credits
+  if (handle->qCredits < handle->qMaxCredits) {
+    PRTime now = PR_Now();
+    PRTime delta = now - handle->qLastCredit;
+    handle->qCredits += delta;
+    fprintf(stderr,"adding %ld credits %ld\n", delta, handle->qCredits);
+    handle->qLastCredit = now;
+    if (handle->qCredits > handle->qMaxCredits) {
+      handle->qCredits = handle->qMaxCredits;
+    }
+  }
+  return (handle->qCredits >= handle->qPacingRate);
+}
+
+void
+qChargeSend(struct sdt_t *handle)
+{
+  assert_lock(handle);
+  if (handle->qCredits < handle->qPacingRate) {
+    DEV_ABORT(0);
+    handle->qCredits = 0;
+    return;
+  }
+
+  handle->qCredits -= handle->qPacingRate;
+  fprintf(stderr,"%p credits are now %ld\n", handle, handle->qCredits);
+}
+
 static int32_t
 qLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
              int flags, const PRNetAddr *addr, PRIntervalTime to)
@@ -408,11 +653,41 @@ qLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
     assert (0);
     return -1;
   }
+  assert_lock(handle);
   addr = &(handle->peer);
 
   // todo - cc check and queue it if necessary
+  // todo cc pluggable
+  // If there are buffers, queue it or reject it
+  if (handle->qBufferLen >= qBufferLenMax) {
+    PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
+    return -1;
+  }
+  if (handle->qBufferLen || !qAllowSend(handle)) {
+    if (qAdd(handle, aBuf, aAmount) != 0) {
+      PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
+      return -1;
+    }
+    return aAmount;
+  }
 
+  // send now
+  qChargeSend(handle);
   return aFD->lower->methods->sendto(aFD->lower, aBuf, aAmount, flags, addr, to);
+}
+
+static PRStatus
+pLayerConnect(PRFileDesc *fd, const PRNetAddr *addr, PRIntervalTime to)
+{
+  struct sdt_t *handle = (struct sdt_t *)(fd->secret);
+  if (!handle) {
+    assert (0);
+    return PR_FAILURE;
+  }
+  hlock(handle);
+  PRStatus rv = fd->lower->methods->connect(fd->lower, addr, to);
+  hunlock(handle);
+  return rv;
 }
 
 static PRStatus
@@ -458,6 +733,72 @@ sLayerSetSocketOption(PRFileDesc *fd, const PRSocketOptionData *aOpt)
   return fd->lower->methods->setsocketoption(fd->lower, aOpt);
 }
 
+static void
+qTransmitThread(void *arg)
+{
+  // the idea is to sleep until the next packet needs to be sent
+  // and transmithead is sorted by wakeup needs
+
+  hlock(NULL);
+  do {
+    for (struct sdt_t *handle = transmitHead; handle; ) {
+      int sentPacket = 0;
+      while (handle->qFirst && qAllowSend(handle)) {
+        fprintf(stderr,"xmit thread %p %d allow=%d\n",
+                handle, handle->qBufferLen, qAllowSend(handle));
+        PRFileDesc *qLayer = sdt_layerQ(handle->fd);
+        unsigned char *buf = (unsigned char *)(handle->qFirst + 1);
+        int32_t rv =
+          qLayer->lower->methods->sendto(qLayer->lower, buf, handle->qFirst->sz, 0, &handle->peer, PR_INTERVAL_NO_WAIT);
+        fprintf(stderr,"xmit thread %p sendto %d\n", handle, rv);
+        sentPacket = 1;
+        if (rv > 1) {
+          qChargeSend(handle);
+          struct qPacket_t *done = handle->qFirst;
+          if (handle->qLast == done) {
+            handle->qLast = NULL;
+          }
+          handle->qFirst = done->next;
+          free (done);
+          --handle->qBufferLen;
+        }
+      }
+      if (!sentPacket) {
+        // ordered by next send time, so we're done
+        break;
+      }
+      if (!handle->qBufferLen) {
+        removeFromTransmitList_locked(handle);
+      } else {
+        updateNextSend_locked(handle);
+        // resort, probly to end of list
+        removeFromTransmitList_locked(handle);
+        addToTransmitList_locked(handle);
+      }
+      handle = transmitHead;
+    }
+    PRIntervalTime to = PR_INTERVAL_NO_TIMEOUT;
+    if (transmitHead) {
+      PRTime sleep_duration;
+      sleep_duration = transmitHead->qBufferNextSend - PR_Now();
+      if (sleep_duration < 1) {
+        sleep_duration = 1;
+      }
+      sleep_duration += 200;
+      fprintf(stderr,"xmit thread sleep %ld usec\n",sleep_duration);
+      to = PR_MicrosecondsToInterval(sleep_duration);
+    } else {
+      fprintf(stderr,"xmit thread sleep INFINITY usec\n");
+    }
+
+    // spend most of our time waiting on the condvar (which releases the lock during wait)
+    PR_WaitCondVar(condVar, to);
+  } while (1);
+  hunlock(NULL);
+  
+  // when to terminate todo
+}
+
 static int sdt_once = 0;
 void
 sdt_ensureInit()
@@ -468,6 +809,12 @@ sdt_ensureInit()
   }
   sdt_once = 1;
 
+  mutex = PR_NewLock();
+  condVar = PR_NewCondVar(mutex);
+
+  PR_CreateThread(PR_USER_THREAD, qTransmitThread, NULL, PR_PRIORITY_NORMAL,
+                  PR_GLOBAL_THREAD, PR_UNJOINABLE_THREAD, 0);
+  
   qIdentity = PR_GetUniqueIdentity("sdt-qLayer");
   sIdentity = PR_GetUniqueIdentity("sdt-sLayer");
   pIdentity = PR_GetUniqueIdentity("sdt-pLayer");
@@ -500,6 +847,7 @@ sdt_ensureInit()
   qMethods.sendto = qLayerSendTo;
 
   // some other general methods
+  sMethods.connect = pLayerConnect;
   sMethods.connect = sLayerConnect;
   sMethods.getsockname = sLayerGetSockName;
   sMethods.getpeername = sLayerGetPeerName;
@@ -508,7 +856,7 @@ sdt_ensureInit()
 
   qMethods.close = genericClose;
   sMethods.close = genericClose;
-  pMethods.close = genericClose;
+  pMethods.close = pLayerClose;
   
   // definitely todo need a poll()
 }
@@ -577,7 +925,8 @@ sdt_ImportFD(PRFileDesc *udp_socket, unsigned char *id_buf_16)
   } else {
     goto fail;
   }
-  
+
+  handle->fd = fd;
   return fd;
 
 fail:

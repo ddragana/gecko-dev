@@ -404,7 +404,8 @@ int main()
     }
 
     if (!didWork) {
-      usleep(5000); // 5ms
+//      usleep(5000); // 5ms
+      usleep(1000); // 1ms
     }
   }
   return 0;

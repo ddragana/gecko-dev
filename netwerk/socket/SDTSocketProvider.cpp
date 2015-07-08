@@ -18,10 +18,12 @@
   * you need to build proxy.cpp and setenv all_proxy http://localhost:7000 to use it (assuming 7000)
 
  TODO (at best a partial list)
+ * happy eyeballs
  * source port should be same for all flows, demux by uuid
  * uuid and h2 should be able to go longer the normal connect/close cycle..
  * timeouts
  * reliabiity
+ * non-reliable option
  * pacing
  * mtu detection
  * congestion control
@@ -31,7 +33,7 @@
  * amplification issues
  * investigate dtlscon pmtu change
  * have psm and http use common pref for finding transport layer
-
+ * better h2 integration where fec is per headers and reliability per stream
 #endif
 
 // dtls 1.2 rfc 6437, tls 1.2 rfc 5246
