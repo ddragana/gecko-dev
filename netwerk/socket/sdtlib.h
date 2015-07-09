@@ -15,6 +15,9 @@ extern "C" {
 PRFileDesc *
 sdt_ImportFD(PRFileDesc *udp_socket, unsigned char *id_buf_16);
 
+PRFileDesc *
+sdt_ImportFDServer(PRFileDesc *udp_socket, unsigned char *id_buf_16);
+
 void sdt_ensureInit();
 
 unsigned char *sdt_Peek(PRFileDesc fd, PRNetAddr *sin, int *rlen);

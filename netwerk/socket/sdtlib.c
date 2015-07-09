@@ -40,7 +40,9 @@ P replay detect, generate ack (or corrupt, or ooo), pass to plaintext
 // todo sdtlib-internal.h
 
 /* There is an unfortunate amount of standalone (non reuse) C going on in here
-   in the hope of maximum reusability */
+   in the hope of maximum reusability.. this might actually be a good candidate
+   for a different runtime (rust?) and a c ABI layer. (can go do that?) But that's
+   premature compared to working on the basics of the protocol atm. */
 
 #define DTLS_TYPE_CHANGE_CIPHER 20
 #define DTLS_TYPE_ALERT         21
@@ -69,6 +71,8 @@ static uint32_t qBufferLenMax = 128; // number of queued packets
 static uint64_t qMaxCreditsDefault = 80000; // ums worth of full bucket
 static uint64_t qPacingRateDefault =  2000; // send every 2ms (2000ums)
 
+static uint32_t amplificationPacket = 2;
+
 struct qPacket_t
 {
   int32_t sz;
@@ -80,11 +84,13 @@ struct sdt_t
 {
   unsigned char uuid[SDT_UUIDSIZE];
   PRNetAddr peer;
-  uint8_t connected;
+  uint8_t isConnected;
+  uint8_t isServer;
 
   uint8_t  recordType;
   uint16_t epoch;
   uint64_t seq;
+  uint64_t sBytesRead;
 
   uint64_t upperWindow; // SDT_REPLAY_WINDOW - 1
   unsigned char window[SDT_REPLAY_WINDOW / 8];
@@ -218,6 +224,8 @@ sdt_preprocess(struct sdt_t *handle,
     return 0;
   }
 
+  // todo deal with bad version
+  // todo encapsulate magic
   if (!((pkt[0] == 0x88) && (pkt[1] == 0x77) && (pkt[2] == 0x66) && (pkt[3] == 0x00))) {
     DEV_ABORT();
     return 0;
@@ -383,7 +391,7 @@ sLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
     assert (0);
     return -1;
   }
-  // aBuf now contains prefixe and ciphered sdt frame from network
+  // aBuf now contains prefixed and ciphered sdt frame from network
 
   struct sdt_t *handle = (struct sdt_t *)(aFD->secret);
   if (!handle) {
@@ -392,16 +400,28 @@ sLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
   }
   assert_lock(handle);
 
+  handle->sBytesRead += rv;
   if (!sdt_preprocess(handle, aBuf, rv)) {
     assert (0);
     return -1;
   }
+
   rv -= SDT_UUIDSIZE;
   memmove(aBuf, aBuf + SDT_UUIDSIZE, rv);
 
   fprintf(stderr,"sLayer Recv got %d (%d) of ciphertext this=%p "
-          "type=%d %X %lX\n", rv, rv + SDT_UUIDSIZE, handle,
-          handle->recordType, handle->epoch, handle->seq);
+          "type=%d %X %lX sBytesRead=%ld\n", rv, rv + SDT_UUIDSIZE, handle,
+          handle->recordType, handle->epoch, handle->seq, handle->sBytesRead);
+
+  if (handle->isServer &&
+      (handle->sBytesRead < (amplificationPacket * SDT_MTU))) {
+    fprintf(stderr,"sLayer Recv %p dropping packet because recv threshold %d"
+            "not met yet (%ld)\n", handle, amplificationPacket * SDT_MTU,
+            handle->sBytesRead);
+    PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
+    return -1;
+  }
+
 
   return rv;
 }
@@ -549,20 +569,33 @@ sLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
   memcpy(buf, handle->uuid, SDT_UUIDSIZE);
   memcpy(buf + SDT_UUIDSIZE, aBuf, aAmount);
 
-  int32_t rv = aFD->lower->methods->sendto(aFD->lower, buf, aAmount + SDT_UUIDSIZE, flags, addr, to);
+  sdt_preprocess(handle, buf, aAmount + SDT_UUIDSIZE);
+  int32_t sendLen = aAmount + SDT_UUIDSIZE;
+  int32_t rv;
+  if (!handle->isServer && (handle->recordType == DTLS_TYPE_HANDSHAKE)) {
+    memset(buf + aAmount + SDT_UUIDSIZE, 0x7d, SDT_MTU - SDT_UUIDSIZE - aAmount);
+    sendLen = SDT_MTU;
+    // this is an extra send(s) to avoid amplification
+    rv = aFD->lower->methods->sendto(aFD->lower, buf, sendLen, flags, addr, to);
+    for (unsigned int i=0; i < amplificationPacket - 1; i++) {
+      aFD->lower->methods->sendto(aFD->lower, buf, sendLen, flags, addr, to);
+    }
+  } else {
+    rv = aFD->lower->methods->sendto(aFD->lower, buf, sendLen, flags, addr, to);
+  }
 
   fprintf(stderr,"sLayer send %p %d (from %d) rv=%d\n", handle,
           aAmount + SDT_UUIDSIZE, aAmount, rv);
 
-  if (rv == -1) {
+  if (rv < 0) {
     return -1;
   }
-  if (rv < SDT_UUIDSIZE) {
+  if (rv < (aAmount + SDT_UUIDSIZE)) {
     DEV_ABORT();
     // todo set err
     return -1;
   }
-  return rv - SDT_UUIDSIZE;
+  return aAmount;
 }
 
 static
@@ -699,7 +732,7 @@ sLayerConnect(PRFileDesc *fd, const PRNetAddr *addr, PRIntervalTime to)
     return PR_FAILURE;
   }
   memcpy(&(handle->peer), addr, sizeof(PRNetAddr));
-  handle->connected = 1;
+  handle->isConnected = 1;
   return PR_SUCCESS;
 }
 
@@ -713,7 +746,7 @@ static PRStatus
 sLayerGetPeerName(PRFileDesc *fd, PRNetAddr *addr)
 {
   struct sdt_t *handle = (struct sdt_t *)(fd->secret);
-  if (!handle || !handle->connected) {
+  if (!handle || !handle->isConnected) {
     return PR_FAILURE;
   }
 
@@ -953,6 +986,20 @@ sdt_layerP(PRFileDesc *sdtFD)
 }
 
 PRFileDesc *
+sdt_ImportFDServer(PRFileDesc *udp_socket, unsigned char *id_buf_16)
+{
+  PRFileDesc *rv = sdt_ImportFD(udp_socket, id_buf_16);
+  if (!rv) {
+    return nullptr;
+  }
+
+  struct sdt_t *handle = (struct sdt_t *)(rv->secret);
+  assert (handle);
+  handle->isServer = 1;
+  return rv;
+}
+
+PRFileDesc *
 sdt_layerC(PRFileDesc *sdtFD)
 {
   if (PR_GetLayersIdentity(sdtFD) != pIdentity) {
@@ -987,3 +1034,8 @@ sdt_layerQ(PRFileDesc *sdtFD)
   assert(PR_GetLayersIdentity(sdtFD->lower->lower->lower) == qIdentity);
   return sdtFD->lower->lower->lower;
 }
+
+// for amplification we hold our first server hello packet
+// until we have read at least 2800 bytes at sLayer
+//
+// sLayer on write adds that extra code

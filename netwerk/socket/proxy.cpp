@@ -75,7 +75,7 @@ public:
 
     PRFileDesc *layerU = PR_CreateIOLayerStub(uIdentity, &uMethods);
     assert(layerU);
-    mFD = sdt_ImportFD(layerU, aUUID + 4);
+    mFD = sdt_ImportFDServer(layerU, aUUID + 4);
     if (mFD) {
       bool initOK = true;
       PR_Connect(mFD, sin, PR_INTERVAL_NO_WAIT);

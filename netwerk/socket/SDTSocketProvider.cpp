@@ -19,18 +19,16 @@
 
  TODO (at best a partial list)
  * happy eyeballs
- * source port should be same for all flows, demux by uuid
+ * source port should be same for all flows in client too, demux by uuid
  * uuid and h2 should be able to go longer the normal connect/close cycle..
  * timeouts
  * reliabiity
  * non-reliable option
- * pacing
  * mtu detection
- * congestion control
+ * congestion control (latency sensitive)
  * poll()
  * fec
  * psm integration (especially, but not only, auth)
- * amplification issues
  * investigate dtlscon pmtu change
  * have psm and http use common pref for finding transport layer
  * better h2 integration where fec is per headers and reliability per stream
