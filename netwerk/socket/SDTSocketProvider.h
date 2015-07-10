@@ -19,9 +19,11 @@ public:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSISOCKETPROVIDER
 
+    SDTSocketProvider();
 private:
-    ~SDTSocketProvider() {};
+    ~SDTSocketProvider();
 
+    PRFileDesc *mUDPSocket4, *mUDPSocket6;
 };
 
 } } // namespace mozilla::net

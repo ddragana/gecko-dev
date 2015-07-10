@@ -18,7 +18,6 @@
   * you need to build proxy.cpp and setenv all_proxy http://localhost:7000 to use it (assuming 7000)
 
  TODO (at best a partial list)
- * source port should be same for all flows in client too, demux by uuid - socketprovider keep udpsocket and shim like proxy
  * reliabiity (optional).. via ack.. notion of deadline notion of ack with uni-tt
  * happy eyeballs
  * uuid and h2 should be able to go longer the normal connect/close cycle..
@@ -27,10 +26,12 @@
  * congestion control (latency sensitive)
  * poll()
  * fec
- * psm integration (especially, but not only, auth)
+ * psm integration for auth and cipher selection
  * investigate dtlscon pmtu change
  * have psm and http use common pref for finding transport layer
  * better h2 integration where fec is per headers and reliability per stream
+ * lib logging
+ * assert normalization
 #endif
 
 // dtls 1.2 rfc 6437, tls 1.2 rfc 5246
@@ -41,6 +42,24 @@ namespace mozilla { namespace net {
 
 static PRLogModuleInfo *gSDTLog = nullptr;
 #define LOG(args) MOZ_LOG(gSDTLog, mozilla::LogLevel::Debug, args)
+
+SDTSocketProvider::SDTSocketProvider()
+{
+  mUDPSocket4 = PR_OpenUDPSocket(PR_AF_INET);
+  mUDPSocket4 = sdt_importSystemFD(mUDPSocket4);
+  mUDPSocket6 = PR_OpenUDPSocket(PR_AF_INET6);
+  mUDPSocket6 = sdt_importSystemFD(mUDPSocket6);
+}
+
+SDTSocketProvider::~SDTSocketProvider()
+{
+  if (mUDPSocket4) {
+    PR_Close(mUDPSocket4);
+  }
+  if (mUDPSocket6) {
+    PR_Close(mUDPSocket6);
+  }
+}
 
 NS_IMETHODIMP
 SDTSocketProvider::NewSocket(int32_t family,
@@ -62,7 +81,12 @@ SDTSocketProvider::NewSocket(int32_t family,
   LOG(("SDTSocketProvider::NewSocket %p\n", this));
   nsCOMPtr<nsIUUIDGenerator> uuidgen;
 
-  fd = PR_OpenUDPSocket(family);
+  if (family == PR_AF_INET6) {
+    fd = sdt_newShimLayerU(mUDPSocket6);
+  } else {
+    fd = sdt_newShimLayerU(mUDPSocket4);
+  }
+
   if (!fd) {
     goto onfail;
   }

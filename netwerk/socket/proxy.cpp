@@ -157,9 +157,8 @@ public:
 
     do {
       rlen = PR_Read(mFD, clearTextBuf, SDT_MTU * 2);
-      fprintf(stderr,"after decypt we have rlen=%d\n", rlen);
       if (rlen > 0) {
-        fprintf(stderr, "forward %d of decrypted cipher to backend\n", rlen);
+        fprintf(stderr, "proxy forward %d of decrypted cipher to backend\n", rlen);
         forward(clearTextBuf, rlen);
       } else if ((rlen == -1) && (PR_GetError() == PR_WOULD_BLOCK_ERROR)) {
         rlen = 1; // fake it to reloop
@@ -277,6 +276,7 @@ static void setupListener()
   if (PR_Bind(udp_socket, &sin) != PR_SUCCESS) {
     assert(0);
   }
+  udp_socket = sdt_importSystemFD(udp_socket);
 }
 
 
@@ -302,7 +302,7 @@ int main()
       if (!flow) {
         continue;
       }
-      fprintf(stderr, "udp read %d %p port %d\n", rlen, flow, ntohs(sin.inet.port));
+      fprintf(stderr, "udp peek %d %p port %d\n", rlen, flow, ntohs(sin.inet.port));
 
       flow->ensureConnect();
       flow->processForward();

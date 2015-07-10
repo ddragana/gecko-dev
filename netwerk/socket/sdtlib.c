@@ -14,27 +14,36 @@
 #include "unistd.h"
 
 /*
-an SDT Scoket has the following layers, the U layer is passed into the library
+an SDT Socket has the following layers, the U layer is passed into the library
 
 P packetizelayer (quantize and lock)
 C cryptolayer (dtls)
 S sdtlayer (sdt framing)
 Q queuelayer (pacing, cong contrl, etc..)
-U udptransport layer (I/O happens here)
+U udptransport layer shim to shared udp_socket
 
 on write -
 P packetizes the data into an MTU acceptable quanta (~1300)
 C applies ciphers (dtls from nss)
 S places UUID on front
 Q queues (and manages timers) or sends to U
-U network write
+U network write via shim to shared udp_socket
 
 on read -
-U network read
+U network read via shim with shared udp_socket
 Q nop
 S find sdt_preprocess (epoch, seq, etc..) remove sdt envelope
 C decrypt (dlts from nss)
 P replay detect, generate ack (or corrupt, or ooo), pass to plaintext
+
+We end up with 2 prFileDesc stacks.. one is the SDT Socket described above,
+the other is the UDP stack. That's two levels deep - on the bottom is a
+real UDP OS file descriptor, generally passed into the SDT library. Above
+that is the multiplexing layer. When a packet is read through it it has to
+know the uuid being read for.. it gets that either out of the matching uuid
+queue or, if empty, from the network. A network read for the wrong uuid
+gets queued. We don't peek and avoid making the wrong read because then a
+poll() implementation for arbitrary uuid would have head of line blocking issues.
 */
 
 // todo sdtlib-internal.h
@@ -89,11 +98,16 @@ struct sdt_t
 
   uint8_t  recordType;
   uint16_t epoch;
+  uint16_t dtlsLen;
   uint64_t seq;
   uint64_t sBytesRead;
 
   uint64_t upperWindow; // SDT_REPLAY_WINDOW - 1
   unsigned char window[SDT_REPLAY_WINDOW / 8];
+
+  unsigned char pLayerRecv[SDT_MTU];
+  int32_t pLayerRecvSize;
+  int32_t pLayerRecvUsed;
 
   uint32_t qBufferLen;
   PRTime qBufferNextSend;
@@ -254,6 +268,9 @@ sdt_preprocess(struct sdt_t *handle,
   handle->seq += ((uint64_t)pkt[SDT_UUIDSIZE + 5]) << 40;
   handle->seq += ((uint64_t)pkt[SDT_UUIDSIZE + 6]) << 32;
 
+  memcpy (&handle->dtlsLen, pkt + SDT_UUIDSIZE + 11, 2);
+  handle->dtlsLen = ntohs(handle->dtlsLen);
+
   // we don't allow renogitation which is implied by epoch > 1
   if (handle->epoch > 1) {
     DEV_ABORT();
@@ -280,7 +297,6 @@ sdt_replayCheck(struct sdt_t *handle, uint64_t seqno)
 {
   assert_lock(handle);
   fprintf(stderr,"replay check %p 0x%lX\n",handle, seqno);
-
   uint64_t lowerWindow = handle->upperWindow - (SDT_REPLAY_WINDOW - 1);
   uint64_t byteIdx = (seqno >> 3) & ((SDT_REPLAY_WINDOW / 8) - 1);
   uint8_t bitno = seqno & 7;
@@ -322,6 +338,10 @@ static PRIOMethods qMethods;
 static PRIOMethods sMethods;
 // cMethods are controlled by nss
 static PRIOMethods pMethods;
+
+// these are for the UDP-STACK
+static PRDescIdentity muxIdentity;
+static PRIOMethods muxMethods;
 
 // a generic read to recv mapping
 static int32_t
@@ -412,12 +432,12 @@ sLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
   memmove(aBuf, aBuf + SDT_UUIDSIZE, rv);
 
   fprintf(stderr,"sLayer Recv got %d (%d) of ciphertext this=%p "
-          "type=%d %X %lX sBytesRead=%ld\n", rv, rv + SDT_UUIDSIZE, handle,
-          handle->recordType, handle->epoch, handle->seq, handle->sBytesRead);
+          "type=%d epoch=%X seq=0x%lX dtlsLen=%d sBytesRead=%ld\n", rv, rv + SDT_UUIDSIZE, handle,
+          handle->recordType, handle->epoch, handle->seq, handle->dtlsLen, handle->sBytesRead);
 
   if (handle->isServer &&
       (handle->sBytesRead < (amplificationPacket * SDT_MTU))) {
-    fprintf(stderr,"sLayer Recv %p dropping packet because recv threshold %d"
+    fprintf(stderr,"sLayer Recv %p dropping packet because recv threshold %d "
             "not met yet (%ld)\n", handle, amplificationPacket * SDT_MTU,
             handle->sBytesRead);
     PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
@@ -426,6 +446,25 @@ sLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
 
 
   return rv;
+}
+
+static int32_t
+pLayerRecvFromBuffer_locked(struct sdt_t *handle, void *aBuf, int32_t aAmount)
+{
+  if (!handle->pLayerRecvSize) {
+    return -1;
+  }
+
+  int32_t sz = handle->pLayerRecvSize - handle->pLayerRecvUsed;
+  if (sz > aAmount) {
+    sz = aAmount;
+  }
+  memcpy (aBuf, handle->pLayerRecv + handle->pLayerRecvUsed, sz);
+  handle->pLayerRecvUsed += sz;
+  if (handle->pLayerRecvUsed == handle->pLayerRecvSize) {
+    handle->pLayerRecvUsed = handle->pLayerRecvSize = 0;
+  }
+  return sz;
 }
 
 static int32_t
@@ -438,8 +477,27 @@ pLayerRecv_locked(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
     return -1;
   }
   assert_lock(handle);
+  int32_t rv = pLayerRecvFromBuffer_locked(handle, aBuf, aAmount);
+  if (rv != -1) {
+    fprintf(stderr,"pLayer Recv got %d of plaintext from holdover buffer this=%p\n", rv, handle);
+    return rv;
+  }
 
-  int32_t rv = aFD->lower->methods->recv(aFD->lower, aBuf, aAmount, flags, to);
+  // read from cLayer
+  //
+  // as cLayer is message oriented, and our callers are stream oriented,
+  // we need to pass in at least a full MTU buffer and be prepared to store any
+  // remainder in the pLayer
+  void *theBuf = (aAmount >= SDT_MTU) ? aBuf : handle->pLayerRecv;
+  rv = aFD->lower->methods->recv(aFD->lower, theBuf, SDT_MTU, flags, to);
+  if ((rv > 0) && (aAmount < SDT_MTU)) {
+    assert (!handle->pLayerRecvUsed);
+    assert (!handle->pLayerRecvSize);
+    handle->pLayerRecvSize = rv;
+    // we read into a stream<->message buffer, copy out of that
+    rv = pLayerRecvFromBuffer_locked(handle, aBuf, aAmount);
+  }
+
   if (rv < 0) {
     return -1;
   }
@@ -448,12 +506,15 @@ pLayerRecv_locked(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
 
   if (sdt_replayCheck(handle, handle->seq) != 0) {
     // drop it
+    fprintf(stderr,"playerRecv %p dropped due to replay check\n", handle);
+    DEV_ABORT(0);
     // todo this is a dup and should be cc feedback
     PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
     return -1;
   }
 
-  fprintf(stderr,"pLayer Recv got %d of plaintext this=%p\n", rv, handle);
+  fprintf(stderr,"pLayer Recv got %d of plaintext this=%p streamBuffer=%d/%d\n", rv, handle,
+          handle->pLayerRecvUsed, handle->pLayerRecvSize);
 
   // todo cc feedback inclduing ack
   // todo lifecycle handling
@@ -771,22 +832,62 @@ sLayerSetSocketOption(PRFileDesc *fd, const PRSocketOptionData *aOpt)
 static int32_t
 uLayerRead(PRFileDesc *fd, void *aBuf, int32_t aAmount)
 {
-  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
-  return PR_Read(udp_socket, aBuf, aAmount);
+  return fd->methods->recv(fd, aBuf, aAmount, 0, PR_INTERVAL_NO_WAIT);
+}
+
+static int32_t
+muxLayerRecvUUID(PRFileDesc *fd, const char *uuid,
+                 void *aBuf, int32_t aAmount, int flags, PRIntervalTime to)
+{
+//  mux_t *info = (mux_t *)(fd->secret);
+  // todo assert identity of fd is muxIdentity
+  PRFileDesc *udp = fd->lower;
+
+  // todo - this needs to be a muxed queue.. but as a shortcut, just peek and return
+  // if it doesn't match
+  PRNetAddr sin;
+  unsigned char buf[SDT_UUIDSIZE];
+  int rlen = PR_RecvFrom(udp, buf, SDT_UUIDSIZE, PR_MSG_PEEK, &sin, PR_INTERVAL_NO_WAIT);
+
+  if (rlen < 1) {
+    return rlen;
+  }
+  if (rlen < SDT_UUIDSIZE) {
+    DEV_ABORT();
+    fprintf(stderr,"muxlayerrecvuuid read short\n");
+    // read it again to get it out of the way
+    rlen = PR_RecvFrom(udp, buf, SDT_UUIDSIZE, 0, &sin, PR_INTERVAL_NO_WAIT);
+    PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
+    return -1;
+  }
+
+  if (memcmp(buf, uuid, SDT_UUIDSIZE)) {
+    fprintf(stderr,"muxlayerrecvuuid read but no match for this handle\n");
+    PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
+    return -1;
+  }
+
+  fprintf(stderr,"muxlayerrecvuuid read confirmed\n");
+  return PR_Recv(udp, aBuf, aAmount, flags, to);
 }
 
 static int32_t
 uLayerRecv(PRFileDesc *fd, void *aBuf, int32_t aAmount, int flags, PRIntervalTime to)
 {
+  assert(PR_GetLayersIdentity(fd->higher) == qIdentity);
   PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
-  return PR_Recv(udp_socket, aBuf, aAmount, flags, to);
-}
+  struct sdt_t *handle = (struct sdt_t *)(fd->higher->secret);
+  if (!handle || !handle->isConnected) {
+    DEV_ABORT();
+    return -1;
+  }
 
-static int32_t
-uLayerRecvFrom(PRFileDesc *fd, void *aBuf, int32_t aAmount, int flags, PRNetAddr *addr, PRIntervalTime to)
-{
-  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
-  return PR_RecvFrom(udp_socket, aBuf, aAmount, flags, addr, to);
+  int32_t rv = muxLayerRecvUUID(udp_socket, handle->uuid,
+                                aBuf, aAmount, flags, to);
+  if (rv != -1) {
+    fprintf(stderr,"ulayer recv %p %d\n", handle, rv);
+  }
+  return rv;
 }
 
 static int32_t
@@ -818,6 +919,13 @@ uLayerSendTo(PRFileDesc *fd, const void *aBuf, int32_t aAmount, int flags, const
 }
 
 static PRStatus
+uLayerGetSockName(PRFileDesc *fd, PRNetAddr *addr)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return udp_socket->methods->getsockname(udp_socket, addr);
+}
+
+static PRStatus
 uLayerGetPeerName(PRFileDesc *fd, PRNetAddr *addr)
 {
   PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
@@ -836,6 +944,45 @@ uLayerSetSocketOption(PRFileDesc *fd, const PRSocketOptionData *aOpt)
 {
   PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
   return PR_SetSocketOption(udp_socket, aOpt);
+}
+
+static PRInt16
+uLayerPoll(PRFileDesc *fd, int16_t inflags, int16_t *outflags)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return udp_socket->methods->poll(udp_socket, inflags, outflags);
+}
+
+static PRStatus
+uClose(PRFileDesc *fd)
+{
+  fd->dtor(fd);
+  return PR_SUCCESS;
+}
+
+static int32_t
+muxLayerRead(PRFileDesc *fd, void *aBuf, int32_t aAmount)
+{
+  // everything should be funneled through muxLayerRecvUUID()
+  assert(0);
+  return -1;
+}
+
+static int32_t
+muxLayerRecv(PRFileDesc *fd, void *aBuf, int32_t aAmount, int flags, PRIntervalTime to)
+{
+  // everything should be funneled through muxLayerRecvUUID()
+  assert(0);
+  return -1;
+}
+
+
+static int32_t
+muxLayerAvailable(PRFileDesc *fd)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  // TODO
+  return PR_Available(udp_socket);
 }
 
 static void
@@ -969,15 +1116,25 @@ sdt_ensureInit()
 
   uMethods.read = uLayerRead;
   uMethods.recv = uLayerRecv;
-  uMethods.recvfrom = uLayerRecvFrom;
+  uMethods.recvfrom = notImplemented;
   uMethods.available = uLayerAvailable;
   uMethods.write = uLayerWrite;
   uMethods.send = uLayerSend;
   uMethods.sendto = uLayerSendTo;
+  uMethods.getsockname = uLayerGetSockName;
   uMethods.getpeername = uLayerGetPeerName;
   uMethods.getsocketoption = uLayerGetSocketOption;
   uMethods.setsocketoption = uLayerSetSocketOption;
-  uMethods.close = genericClose;
+  uMethods.poll = uLayerPoll;
+  uMethods.close = uClose;
+
+  muxIdentity = PR_GetUniqueIdentity("sdt-mux-udpstack");
+  muxMethods = *PR_GetDefaultIOMethods();
+  muxMethods.close = genericClose;
+  // hook just the read functions
+  muxMethods.read = muxLayerRead;
+  muxMethods.recv = muxLayerRecv;
+  muxMethods.available = muxLayerAvailable;
 
 }
 
@@ -1130,8 +1287,27 @@ sdt_layerQ(PRFileDesc *sdtFD)
 PRFileDesc *
 sdt_newShimLayerU(PRFileDesc *udp_socket)
 {
-  PRFileDesc *uLayer = PR_CreateIOLayerStub(uIdentity, &uMethods);
+  sdt_ensureInit();
+
+  // todo now that this is required this can be integrated into normal importfd()
+
+  PRFileDesc *uLayer = PR_CreateIOLayerStub(uIdentity, &uMethods); // PR_NSPR_IO_LAYER
   uLayer->secret = (struct PRFilePrivate *)udp_socket;
   uLayer->dtor = weakDtor;
+  uLayer->identity = PR_NSPR_IO_LAYER; // CraeteIoLayerStub rejects this
   return uLayer;
+}
+
+// use this function to make a system socket.. the system socket can be used
+// for multiple flows by passing it to importFD to make the flow socket
+PRFileDesc *
+sdt_importSystemFD(PRFileDesc *udp_socket)
+{
+  sdt_ensureInit();
+
+  PRFileDesc *muxLayer = PR_CreateIOLayerStub(muxIdentity, &muxMethods);
+  muxLayer->dtor = weakDtor;
+  muxLayer->secret = nullptr;
+  PR_PushIOLayer(udp_socket, PR_GetLayersIdentity(udp_socket), muxLayer);
+  return udp_socket;
 }

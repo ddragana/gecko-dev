@@ -19,6 +19,9 @@ PRFileDesc *
 sdt_ImportFDServer(PRFileDesc *udp_socket, unsigned char *id_buf_16);
 
 PRFileDesc *
+sdt_importSystemFD(PRFileDesc *udp_socket);
+
+PRFileDesc *
 sdt_newShimLayerU(PRFileDesc *udp_socket);
 
 void sdt_ensureInit();
