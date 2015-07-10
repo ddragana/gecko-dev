@@ -18,12 +18,11 @@
   * you need to build proxy.cpp and setenv all_proxy http://localhost:7000 to use it (assuming 7000)
 
  TODO (at best a partial list)
+ * source port should be same for all flows in client too, demux by uuid - socketprovider keep udpsocket and shim like proxy
+ * reliabiity (optional).. via ack.. notion of deadline notion of ack with uni-tt
  * happy eyeballs
- * source port should be same for all flows in client too, demux by uuid
  * uuid and h2 should be able to go longer the normal connect/close cycle..
  * timeouts
- * reliabiity
- * non-reliable option
  * mtu detection
  * congestion control (latency sensitive)
  * poll()

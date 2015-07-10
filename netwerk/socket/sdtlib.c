@@ -312,10 +312,12 @@ sdt_replayCheck(struct sdt_t *handle, uint64_t seqno)
   return 0;
 }
 
+static PRDescIdentity uIdentity;
 static PRDescIdentity qIdentity;
 static PRDescIdentity sIdentity;
 static PRDescIdentity pIdentity;
 
+static PRIOMethods uMethods;
 static PRIOMethods qMethods;
 static PRIOMethods sMethods;
 // cMethods are controlled by nss
@@ -766,6 +768,76 @@ sLayerSetSocketOption(PRFileDesc *fd, const PRSocketOptionData *aOpt)
   return fd->lower->methods->setsocketoption(fd->lower, aOpt);
 }
 
+static int32_t
+uLayerRead(PRFileDesc *fd, void *aBuf, int32_t aAmount)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return PR_Read(udp_socket, aBuf, aAmount);
+}
+
+static int32_t
+uLayerRecv(PRFileDesc *fd, void *aBuf, int32_t aAmount, int flags, PRIntervalTime to)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return PR_Recv(udp_socket, aBuf, aAmount, flags, to);
+}
+
+static int32_t
+uLayerRecvFrom(PRFileDesc *fd, void *aBuf, int32_t aAmount, int flags, PRNetAddr *addr, PRIntervalTime to)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return PR_RecvFrom(udp_socket, aBuf, aAmount, flags, addr, to);
+}
+
+static int32_t
+uLayerAvailable(PRFileDesc *fd)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return PR_Available(udp_socket);
+}
+
+static int32_t
+uLayerWrite(PRFileDesc *fd, const void *aBuf, int32_t aAmount)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return PR_Write(udp_socket, aBuf, aAmount);
+}
+
+static int32_t
+uLayerSend(PRFileDesc *fd, const void *aBuf, int32_t aAmount, int flags, PRIntervalTime to)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return PR_Send(udp_socket, aBuf, aAmount, flags, to);
+}
+
+static int32_t
+uLayerSendTo(PRFileDesc *fd, const void *aBuf, int32_t aAmount, int flags, const PRNetAddr *addr, PRIntervalTime to)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return PR_SendTo(udp_socket, aBuf, aAmount, flags, addr, to);
+}
+
+static PRStatus
+uLayerGetPeerName(PRFileDesc *fd, PRNetAddr *addr)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return PR_GetPeerName(udp_socket, addr);
+}
+
+static PRStatus
+uLayerGetSocketOption(PRFileDesc *fd, PRSocketOptionData *aOpt)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return PR_GetSocketOption(udp_socket, aOpt);
+}
+
+static PRStatus
+uLayerSetSocketOption(PRFileDesc *fd, const PRSocketOptionData *aOpt)
+{
+  PRFileDesc *udp_socket = (PRFileDesc *)(fd->secret);
+  return PR_SetSocketOption(udp_socket, aOpt);
+}
+
 static void
 qTransmitThread(void *arg)
 {
@@ -847,11 +919,13 @@ sdt_ensureInit()
 
   PR_CreateThread(PR_USER_THREAD, qTransmitThread, NULL, PR_PRIORITY_NORMAL,
                   PR_GLOBAL_THREAD, PR_UNJOINABLE_THREAD, 0);
-  
+
+  uIdentity = PR_GetUniqueIdentity("sdt-uShimLayer");
   qIdentity = PR_GetUniqueIdentity("sdt-qLayer");
   sIdentity = PR_GetUniqueIdentity("sdt-sLayer");
   pIdentity = PR_GetUniqueIdentity("sdt-pLayer");
 
+  uMethods = *PR_GetDefaultIOMethods();
   qMethods = *PR_GetDefaultIOMethods();
   sMethods = *PR_GetDefaultIOMethods();
   pMethods = *PR_GetDefaultIOMethods();
@@ -892,6 +966,19 @@ sdt_ensureInit()
   pMethods.close = pLayerClose;
   
   // definitely todo need a poll()
+
+  uMethods.read = uLayerRead;
+  uMethods.recv = uLayerRecv;
+  uMethods.recvfrom = uLayerRecvFrom;
+  uMethods.available = uLayerAvailable;
+  uMethods.write = uLayerWrite;
+  uMethods.send = uLayerSend;
+  uMethods.sendto = uLayerSendTo;
+  uMethods.getpeername = uLayerGetPeerName;
+  uMethods.getsocketoption = uLayerGetSocketOption;
+  uMethods.setsocketoption = uLayerSetSocketOption;
+  uMethods.close = genericClose;
+
 }
 
 static SECStatus
@@ -1035,7 +1122,16 @@ sdt_layerQ(PRFileDesc *sdtFD)
   return sdtFD->lower->lower->lower;
 }
 
-// for amplification we hold our first server hello packet
-// until we have read at least 2800 bytes at sLayer
-//
-// sLayer on write adds that extra code
+// callers to sdtlib can either pass in a real UDP socket to the Import*() functions
+// or they can pass that UDP socket into this function and get a shim layerU that
+// can be passed to the importing function. The shim does I/O with the layerU function
+// but it does not layer it beacuse of data structure problems in the layering with
+// sharing the same layer in multiple stacks simultaneously.
+PRFileDesc *
+sdt_newShimLayerU(PRFileDesc *udp_socket)
+{
+  PRFileDesc *uLayer = PR_CreateIOLayerStub(uIdentity, &uMethods);
+  uLayer->secret = (struct PRFilePrivate *)udp_socket;
+  uLayer->dtor = weakDtor;
+  return uLayer;
+}

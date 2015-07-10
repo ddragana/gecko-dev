@@ -29,7 +29,7 @@
 #define UDP_LISTEN_PORT 7000
 
 // these are the front side dtls server certs
-// currently not checked
+// currently not checked in the client
 #define CERTDIR "/home/mcmanus/proxycerts"
 #define CERTNICK "pgo server certificate"
 
@@ -56,9 +56,6 @@ static SECKEYPrivateKey *privKey;
 class flowID;
 class flowID *hash[256];
 
-static PRDescIdentity uIdentity;
-static PRIOMethods uMethods; // uMethods use global udp_socket
-
 class flowID
 {
 public:
@@ -72,8 +69,7 @@ public:
 
     // layerU needs to be created for each flow and it needs handlers that write to the real udp_socket
     // cannot use udp_socket directly as it can't live in 2 prfiledescs simultaneously (close issues)
-
-    PRFileDesc *layerU = PR_CreateIOLayerStub(uIdentity, &uMethods);
+    PRFileDesc *layerU = sdt_newShimLayerU(udp_socket);
     assert(layerU);
     mFD = sdt_ImportFDServer(layerU, aUUID + 4);
     if (mFD) {
@@ -270,75 +266,6 @@ static void setupNSS()
   assert(privKey);
 }
 
-static int32_t
-uLayerRead(PRFileDesc *fd, void *aBuf, int32_t aAmount)
-{
-  return PR_Read(udp_socket, aBuf, aAmount);
-}
-
-static int32_t
-uLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount, int flags, PRIntervalTime to)
-{
-  return PR_Recv(udp_socket, aBuf, aAmount, flags, to);
-}
-
-static int32_t
-uLayerRecvFrom(PRFileDesc *fd, void *aBuf, int32_t aAmount, int flags, PRNetAddr *addr, PRIntervalTime to)
-{
-  return PR_RecvFrom(udp_socket, aBuf, aAmount, flags, addr, to);
-}
-
-static int32_t
-uLayerAvailable(PRFileDesc *fd)
-{
-  return PR_Available(udp_socket);
-}
-
-static int32_t
-uLayerWrite(PRFileDesc *fd, const void *aBuf, int32_t aAmount)
-{
-  return PR_Write(udp_socket, aBuf, aAmount);
-}
-
-static int32_t
-uLayerSend(PRFileDesc *aFD, const void *aBuf, int32_t aAmount, int flags, PRIntervalTime to)
-{
-  return PR_Send(udp_socket, aBuf, aAmount, flags, to);
-}
-
-static int32_t
-uLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount, int flags, const PRNetAddr *addr, PRIntervalTime to)
-{
-  return PR_SendTo(udp_socket, aBuf, aAmount, flags, addr, to);
-}
-
-static PRStatus
-uLayerGetPeerName(PRFileDesc *fd, PRNetAddr *addr)
-{
-  return PR_GetPeerName(udp_socket, addr);
-}
-
-static PRStatus
-uLayerGetSocketOption(PRFileDesc *fd, PRSocketOptionData *aOpt)
-{
-  return PR_GetSocketOption(udp_socket, aOpt);
-}
-
-static PRStatus
-uLayerSetSocketOption(PRFileDesc *fd, const PRSocketOptionData *aOpt)
-{
-  return PR_SetSocketOption(udp_socket, aOpt);
-}
-
-static PRStatus
-uLayerClose(PRFileDesc *fd)
-{
-  // don't close udp_socket
-  PRFileDesc *thisLayer = PR_PopIOLayer(fd, PR_GetLayersIdentity(fd));
-  thisLayer->dtor(thisLayer);
-  return PR_Close(fd);
-}
-
 static void setupListener()
 {
   PRNetAddr sin;
@@ -350,20 +277,6 @@ static void setupListener()
   if (PR_Bind(udp_socket, &sin) != PR_SUCCESS) {
     assert(0);
   }
-  // todo check return vals
-  uIdentity = PR_GetUniqueIdentity("sdt-proxy-uLayer");
-  uMethods = *PR_GetDefaultIOMethods();
-  uMethods.read = uLayerRead;
-  uMethods.recv = uLayerRecv;
-  uMethods.recvfrom = uLayerRecvFrom;
-  uMethods.available = uLayerAvailable;
-  uMethods.write = uLayerWrite;
-  uMethods.send = uLayerSend;
-  uMethods.sendto = uLayerSendTo;
-  uMethods.getpeername = uLayerGetPeerName;
-  uMethods.getsocketoption = uLayerGetSocketOption;
-  uMethods.setsocketoption = uLayerSetSocketOption;
-  uMethods.close = uLayerClose;
 }
 
 
