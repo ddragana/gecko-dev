@@ -1,0 +1,17 @@
+
+XPIDL_SOURCES += [
+    'NetworkTest.idl',
+]
+
+XPIDL_MODULE = 'network_test'
+
+
+UNIFIED_SOURCES += [
+    'Ack.cpp',
+    'HelpFunctions.cpp',
+    'NetworkTestImp.cpp',
+    'TCP.cpp',
+    'UDP.cpp',
+]
+
+FINAL_LIBRARY = 'xul'

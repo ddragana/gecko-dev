@@ -1,0 +1,44 @@
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set sw=2 ts=2 et ft=cpp : */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+interface NetworkTestListener;
+
+[scriptable, uuid(acd7dbad-38b1-4194-a907-faa1b8593f16)]
+interface NetworkTest : nsISupports
+{
+  void runTest(in NetworkTestListener aListener);
+};
+
+[scriptable, uuid(22d0d3e9-606b-4135-81e2-b589ffc96eb7)]
+interface NetworkTestListener : nsISupports
+{
+  /* todo a string or nsresult or something would help here */
+  void testsFinished(in unsigned long aCount,
+                     [array, size_is(aCount)] in unsigned long long aTCPFromServerRates,
+                     [array, size_is(aCount)] in unsigned long long aUDPFromServerRates,
+                     [array, size_is(aCount)] in unsigned long long aTCPToServerRates,
+                     [array, size_is(aCount)] in unsigned long long aUDPToServerRates);
+  void reachabilityTestsFinished(in unsigned long aCount,
+                                 [array, size_is(aCount)] in unsigned short aPort,
+                                 [array, size_is(aCount)] in bool aTCPReachable,
+                                 [array, size_is(aCount)] in bool aUDPReachable);
+};
+
+%{C++
+
+#define NETWORKTEST_CONTRACTID                      \
+  "@mozilla.org/network-test;1"
+#define NETWORKTEST_CID                             \
+{                                                   \
+  0xf0b4bcb,                                       \
+  0x6d4e,                                           \
+  0x4b22,                                           \
+  {0xb9, 0x1f, 0xd1, 0x77, 0x37, 0x54, 0x94, 0x90}  \
+}
+
+%}
