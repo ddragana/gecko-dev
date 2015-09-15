@@ -9,8 +9,6 @@
 #include "prmem.h"
 #include "nsString.h"
 #include "prlog.h"
-#include "nsCOMPtr.h"
-#include "nsDirectoryServiceUtils.h"
 
 namespace NetworkPath {
 extern PRLogModuleInfo* gClientTestLog;
@@ -118,38 +116,5 @@ LogError(const char *aType)
   return LogErrorWithCode(errCode, aType);
 }
 
-PRFileDesc*
-OpenTmpFileForDataCollection(nsCString aFileName)
-{
-  nsCOMPtr<nsIFile> tmpFile;
-  nsresult rv = NS_GetSpecialDirectory("TmpD", getter_AddRefs(tmpFile));
-
-  rv = tmpFile->AppendNative(NS_LITERAL_CSTRING("network_tests"));
-  if (NS_FAILED(rv)) {
-    return nullptr;
-  }
-  rv = tmpFile->Create(nsIFile::DIRECTORY_TYPE, 0700);
-  if (rv != NS_ERROR_FILE_ALREADY_EXISTS && NS_FAILED(rv)) {
-    return nullptr;
-  }
-
-  rv = tmpFile->AppendNative(aFileName);
-  if (NS_FAILED(rv)) {
-    return nullptr;
-  }
-
-  rv = tmpFile->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0700);
-  if (NS_FAILED(rv)) {
-    return nullptr;
-  }
-
-  PRFileDesc * fd;
-  rv = tmpFile->OpenNSPRFileDesc(PR_RDWR,
-                                 PR_IRWXU, &fd);
-  if (NS_FAILED(rv)) {
-    return nullptr;
-  }
-  return fd;
-}
 } // namespace NetworkPath
 

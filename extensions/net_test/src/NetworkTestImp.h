@@ -29,7 +29,7 @@ public:
 private:
   static const int kNumberOfPorts = 5;
   static const uint16_t mPorts[kNumberOfPorts];
-  static const int kNumberOfRepeats = 10;
+  static const int kNumberOfRepeats = 5;
 
   ~NetworkTestImp();
   int GetHostAddr(nsAutoCString &aAddr);
@@ -38,10 +38,13 @@ private:
   nsresult UdpReachability(PRNetAddr *aNetAddr);
   nsresult TcpReachability(PRNetAddr *aNetAddr);
   nsresult UdpVsTcpPerformanceFromServerToClient(PRNetAddr *aNetAddr,
-                                                 uint16_t aRemotePort);
+                                                 uint16_t aRemotePort,
+                                                 char *aIdStr);
   nsresult UdpVsTcpPerformanceFromClientToServer(PRNetAddr *aNetAddr,
-                                                 uint16_t aRemotePort);
+                                                 uint16_t aRemotePort,
+                                                 char *aIdStr);
 
+  void SendResults(PRNetAddr *aNetAddr,uint16_t aRemotePort, char *aIdStr);
   void TestsFinished();
   void ReachabilityTestsFinished();
   PRAddrInfo *mAddrInfo;
@@ -54,7 +57,6 @@ private:
   uint64_t mUDPToServerRates[kNumberOfRepeats];
   nsCOMPtr<NetworkTestListener> mCallback;
   nsCOMPtr<nsIThread> mThread;
-  nsCOMPtr<nsIUUIDGenerator> mUUIDGenerator;
 };
 
 } // namespace NetworkPath

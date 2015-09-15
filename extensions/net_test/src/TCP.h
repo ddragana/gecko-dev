@@ -8,6 +8,8 @@
 #define TEST_TCP_CLIENT_SIDE_H__
 
 #include "prio.h"
+#include "FileWriter.h"
+
 namespace NetworkPath {
 class TCP
 {
@@ -15,6 +17,7 @@ public:
   TCP(PRNetAddr *aAddr);
   ~TCP();
   nsresult Start(int aTestType, nsCString aFileName);
+  nsresult SendResult(nsCString aFileName);
   uint64_t GetRate() { return mPktPerSec; }
 private:
   nsresult Init();
@@ -25,7 +28,7 @@ private:
   PRFileDesc *mFd;
   int mTestType;
   uint64_t mPktPerSec;
-  PRFileDesc *mLogFile;
+  FileWriter mLogFile;
   // File name [16 random]_test[test number]_itr[iteration number]
   //char mFileName[FILE_NAME_LEN];
   nsCString mLogFileName;

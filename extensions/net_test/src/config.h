@@ -10,6 +10,7 @@
 #define UDP_performanceFromClientToServer "Test_6"
 #define TEST_prefix "Test_"
 #define FINISH "FINISH"
+#define SENDRESULTS "SndRes"
 
 
 /**
@@ -94,12 +95,33 @@
 // File name [16 random]_test[test number]_itr[iteration number]
 #define FILE_NAME_LEN 51
 
+/*
+ * TCP packet format:
+ * The First TCP packet: (always from the client)
+ *                               (only foe sending results)
+ *  |_____6B_____|___ max 51B ___|_______8B_______|
+ *  | test type  |   file name   |  data length   |
+ *  |            |               |                TCP_DATA_START = 65
+ *  |            |               TCP_DATA_LEN_START = 57
+ *  |            TCP_FILE_NAME_START = 6
+ *  |
+ *  TCP_TYPE_START = 0
+ */
+
+#define TCP_TYPE_START 0
+#define TCP_TYPE_LEN 6
+#define TCP_FILE_NAME_START 6
+#define TCP_FILE_NAME_LEN 51
+#define TCP_DATA_LEN_START 57
+#define TCP_DATA_LEN_LEN 8
+#define TCP_DATA_START 65
+
 #define MAXBYTES  2097152
 //TODO:change this to the 12s
 #define MAXTIME 4
 
-#define RETRANSMISSION_TIMEOUT 400
-#define MAX_RETRANSMISSIONS 5
+#define RETRANSMISSION_TIMEOUT 200
+#define MAX_RETRANSMISSIONS 10
 #define SHUTDOWNTIMEOUT 1000
 #define NOPKTTIMEOUT 2000
 #define PAYLOADSIZE 1450

@@ -7,6 +7,9 @@
 #include "TCP.h"
 #include "prerror.h"
 #include "prrng.h"
+#include "nsIInputStream.h"
+#include "nsIFileStreams.h"
+#include "nsNetUtil.h"
 
 namespace NetworkPath {
 
@@ -49,8 +52,8 @@ TCP::Start(int aTestType, nsCString aFileName)
   if (aTestType == 3) {
     mLogFileName = aFileName;
     //  We collect data on the receiver side
-    mLogFile = OpenTmpFileForDataCollection(mLogFileName);
-    if (!mLogFile) {
+    nsresult rv = mLogFile.Init(mLogFileName);
+    if (NS_FAILED(rv)) {
       if (mFd) {
         PR_Close(mFd);
         mFd = nullptr;
@@ -68,13 +71,13 @@ TCP::Start(int aTestType, nsCString aFileName)
       mFd = nullptr;
     }
   }
+  mLogFile.Done();
   return rv;
 }
 
 nsresult
 TCP::Init()
 {
-
   LOG(("NetworkTest TCP client: Open socket"));
   char host[164] = {0};
   PR_NetAddrToString(&mNetAddr, host, sizeof(host));
@@ -86,7 +89,7 @@ TCP::Init()
   } else if (mNetAddr.raw.family == AF_INET6) {
     port = mNetAddr.ipv6.port;
   }
-  LOG(("NetworkTest TCP client: port: %d", port));
+  LOG(("NetworkTest TCP client: port: %d", ntohs(port)));
 
   mFd = PR_OpenTCPSocket(mNetAddr.raw.family);
   if (!mFd) {
@@ -131,7 +134,8 @@ TCP::Init()
       LOG(("NetworkTest TCP client: It is connected"));
       return NS_OK;
     } else if ((PR_WOULD_BLOCK_ERROR == errCode) ||
-               (PR_IN_PROGRESS_ERROR == errCode)) {
+               (PR_IN_PROGRESS_ERROR == errCode) ||
+               (PR_ALREADY_INITIATED_ERROR  == errCode)) {
       PRPollDesc pollElem;
       pollElem.fd = mFd;
       pollElem.in_flags = PR_POLL_WRITE | PR_POLL_EXCEPT;
@@ -179,14 +183,16 @@ TCP::Run()
   PR_GetRandomNoise(&buf, sizeof(buf));
   switch (mTestType) {
     case 2:
-      memcpy(buf, TCP_reachability, 6);
+      memcpy(buf + TCP_TYPE_START, TCP_reachability, TCP_TYPE_LEN);
       break;
     case 3:
-      memcpy(buf, TCP_performanceFromServerToClient, 6);
+      memcpy(buf + TCP_TYPE_START, TCP_performanceFromServerToClient,
+             TCP_TYPE_LEN);
       break;
     case 4:
-      memcpy(buf, TCP_performanceFromClientToServer, 6);
-      memcpy(buf + FILE_NAME_START, mLogFileName.get(), FILE_NAME_LEN);
+      memcpy(buf + TCP_TYPE_START, TCP_performanceFromClientToServer,
+             TCP_TYPE_LEN);
+      memcpy(buf + TCP_FILE_NAME_START, mLogFileName.get(), FILE_NAME_LEN);
       break;
     default:
       PR_Close(mFd);
@@ -197,7 +203,7 @@ TCP::Run()
   LOG(("NetworkTest TCP client: Poll"));
   while (1) {
     pollElem.out_flags = 0;
-    int rv = PR_Poll(&pollElem, 1, 1000);
+    int rv = PR_Poll(&pollElem, 1, 10000);
     if (rv < 0) {
       LOG(("NetworkTest TCP client: Poll error: read bytes %lu", readBytes));
       PR_Close(mFd);
@@ -235,7 +241,7 @@ TCP::Run()
           sprintf(mLogstr, "%lu START TEST 3 %lu\n",
                   (unsigned long)PR_IntervalToMilliseconds(PR_IntervalNow()),
                   (unsigned long)written);
-          PR_Write(mLogFile, mLogstr, strlen(mLogstr));
+          mLogFile.WriteBlocking(mLogstr, strlen(mLogstr));
         }
       } else {
         written = PR_Write(mFd, buf, bufLen);
@@ -298,7 +304,7 @@ TCP::Run()
           sprintf(mLogstr, "%lu RECV %lu\n",
                   (unsigned long)PR_IntervalToMilliseconds(PR_IntervalNow()),
                   (unsigned long)read);
-          PR_Write(mLogFile, mLogstr, strlen(mLogstr));
+          mLogFile.WriteNonBlocking(mLogstr, strlen(mLogstr));
 
           if (PR_IntervalToSeconds(PR_IntervalNow() - timeFirstPktReceived) >=
               2) {
@@ -328,8 +334,15 @@ TCP::Run()
                  PR_IntervalToMilliseconds(PR_IntervalNow() - timeFirstPktReceived),
                  readBytes, MAXBYTES, recvBytesForRate,
                  PR_IntervalNow() - startRateCalc));
+
+            // Log data.
+            sprintf(mLogstr, "%lu FINISH\n",
+                    (unsigned long)PR_IntervalToMilliseconds(PR_IntervalNow()));
+            mLogFile.WriteBlocking(mLogstr, strlen(mLogstr));
+
             PR_Close(mFd);
             mFd = nullptr;
+            mLogFile.Done();
             return NS_OK;
           }
           break;
@@ -357,9 +370,163 @@ void
 TCP::LogLogFormat()
 {
   char line1[] = "Data pkt has been recevied: [timestamp pkt received] RECV [bytes received]\n";
-  PR_Write(mLogFile, line1, strlen(line1));
+  mLogFile.WriteBlocking(line1, strlen(line1));
 
   char line2[] = "The last packet has been sent: [timestamp pkt sent] RECV [bytes sent]\n";
-  PR_Write(mLogFile, line2, strlen(line2));
+  mLogFile.WriteBlocking(line2, strlen(line2));
 }
+
+nsresult
+TCP::SendResult(nsCString aFileName)
+{
+  nsCOMPtr<nsIFile> tmpFile;
+  nsresult rv = NS_GetSpecialDirectory("TmpD", getter_AddRefs(tmpFile));
+
+  rv = tmpFile->AppendNative(NS_LITERAL_CSTRING("network_tests"));
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = tmpFile->Create(nsIFile::DIRECTORY_TYPE, 0700);
+  if (rv != NS_ERROR_FILE_ALREADY_EXISTS && NS_FAILED(rv)) {
+    return rv;
+  }
+
+  rv = tmpFile->AppendNative(aFileName);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  int64_t size;
+  rv = tmpFile->GetFileSize(&size);
+  if (NS_FAILED(rv) || (size <= 0)) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIInputStream> inputStream;
+  rv = NS_NewLocalFileInputStream(getter_AddRefs(inputStream),
+                                   tmpFile,
+                                   PR_RDONLY, 0600,
+                                   nsIFileInputStream::DELETE_ON_CLOSE);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  rv = Init();
+  if (NS_FAILED(rv)) {
+    if(mFd) {
+      PR_Close(mFd);
+      mFd = nullptr;
+    }
+    inputStream->Close();
+    return rv;
+  }
+
+  PRPollDesc pollElem;
+  pollElem.fd = mFd;
+  pollElem.in_flags = PR_POLL_WRITE | PR_POLL_EXCEPT;
+  uint16_t bufLen = PAYLOADSIZE;
+  char buf[bufLen];
+  memcpy(buf + TCP_TYPE_START, SENDRESULTS, TCP_TYPE_LEN);
+  memcpy(buf + TCP_FILE_NAME_START, aFileName.get(), TCP_FILE_NAME_LEN);
+
+  uint64_t dataLen = htonll(size);
+
+  memcpy(buf + TCP_DATA_LEN_START, &dataLen, TCP_DATA_LEN_LEN);
+
+  uint32_t readData;
+  do {
+    rv = inputStream->Read(buf + TCP_DATA_START, bufLen - TCP_DATA_START, &readData);
+  } while (NS_FAILED(rv) && rv == NS_BASE_STREAM_WOULD_BLOCK);
+
+  if (NS_FAILED(rv)) {
+    // We could retry.
+    PR_Close(mFd);
+    mFd = nullptr;
+    inputStream->Close();
+    return NS_ERROR_FAILURE;
+  }
+
+  int toWrite = TCP_DATA_START + readData;
+  size -= readData;
+
+  LOG(("NetworkTest TCP sending resluts: Poll"));
+  while (1) {
+    pollElem.out_flags = 0;
+    int prrv = PR_Poll(&pollElem, 1, 1000);
+    if (prrv < 0) {
+      LOG(("NetworkTest TCP sending resluts finished."));
+      PR_Close(mFd);
+      mFd = nullptr;
+      inputStream->Close();
+      return ErrorAccordingToNSPR("TCP");
+    } else if (prrv == 0) {
+      LOG(("NetworkTest TCP sending resluts finished - timeout"));
+      PR_Close(mFd);
+      mFd = nullptr;
+      inputStream->Close();
+      return ErrorAccordingToNSPR("TCP");
+    }
+    if (pollElem.out_flags & (PR_POLL_ERR | PR_POLL_HUP | PR_POLL_NVAL)) {
+      PRErrorCode errCode = PR_GetError();
+      LOG(("NetworkTest TCP sending resluts finished - Connection error"));
+      if (!(pollElem.out_flags & PR_POLL_NVAL)) {
+        PR_Close(mFd);
+        mFd = nullptr;
+      }
+      inputStream->Close();
+      return ErrorAccordingToNSPRWithCode(errCode, "TCP");
+    }
+
+    if (pollElem.out_flags & PR_POLL_WRITE) {
+      //LOG(("NetworkTest TCP client: Sending data for test %d.", mTestType));
+
+      if (toWrite  != 0) {
+        int written = 0;
+        written = PR_Write(mFd, buf, toWrite);
+
+        if (written < 0) {
+          PRErrorCode code = PR_GetError();
+          if (code == PR_WOULD_BLOCK_ERROR) {
+            continue;
+          }
+          PR_Close(mFd);
+          mFd = nullptr;
+          inputStream->Close();
+          return ErrorAccordingToNSPRWithCode(code, "TCP");
+        }
+
+        if (written < toWrite) {
+          memmove(buf, buf + written, toWrite - written);
+        }
+        toWrite -= written;
+      }
+
+      if (size) {
+        int64_t toRead = (size > bufLen - toWrite) ? bufLen - toWrite
+                                                       : size;
+        rv = inputStream->Read(buf + toWrite, toRead, &readData);
+        if (NS_FAILED(rv)) {
+          if (rv == NS_BASE_STREAM_WOULD_BLOCK) {
+            continue;
+          } else {
+            PR_Close(mFd);
+            mFd = nullptr;
+            inputStream->Close();
+            return NS_ERROR_FAILURE;
+          }
+        }
+        size -= readData;
+        toWrite += readData;
+      }
+
+      if (toWrite <= 0) {
+        // wait for server to receive all data.
+        pollElem.in_flags = PR_POLL_EXCEPT;
+      }
+    }
+  }
+  inputStream->Close();
+  return NS_OK;
+}
+
 } // namespace NetworkPath

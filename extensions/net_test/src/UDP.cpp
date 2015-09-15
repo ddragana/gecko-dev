@@ -81,7 +81,6 @@ UDP::UDP(PRNetAddr *aAddr)
   , mNextPktId(0)
   , mLastPktId(0)
   , mError(false)
-  , mLogFile(nullptr)
 {
 
   memcpy(&mNetAddr, aAddr, sizeof(PRNetAddr));
@@ -96,9 +95,7 @@ UDP::~UDP()
   if (mFd) {
     PR_Close(mFd);
   }
-  if (mLogFile) {
-    PR_Close(mLogFile);
-  }
+  mLogFile.Done();
 }
 
 nsresult
@@ -127,8 +124,8 @@ UDP::Start(int aTestType, uint64_t aRate, nsCString aFileName,
   } else if (aTestType == 6) {
     mLogFileName = aFileName;
     //  We collect data on the sender side
-    mLogFile = OpenTmpFileForDataCollection(aFileName);
-    if (!mLogFile) {
+    rv = mLogFile.Init(aFileName);
+    if (NS_FAILED(rv)) {
       if (mFd) {
         PR_Close(mFd);
         mFd = nullptr;
@@ -143,10 +140,7 @@ UDP::Start(int aTestType, uint64_t aRate, nsCString aFileName,
     PR_Close(mFd);
     mFd = nullptr;
   }
-  if (mLogFile) {
-    PR_Close(mLogFile);
-    mLogFile = nullptr;
-  }
+  mLogFile.Done();
   if (NS_SUCCEEDED(rv) && !mError) {
     aSucceeded = true;
   }
@@ -264,10 +258,7 @@ UDP::Run()
     if (mPhase == TEST_FINISHED) {
       LOG(("NetworkTest UDP client: Test finished."));
       mFd = nullptr;
-      if (mLogFile) {
-        PR_Close(mLogFile);
-        mLogFile = nullptr;
-      }
+      mLogFile.Done();
       return NS_OK;
     }
 
@@ -304,10 +295,7 @@ UDP::Run()
 
   PR_Close(mFd);
   mFd = nullptr;
-  if (mLogFile) {
-    PR_Close(mLogFile);
-    mLogFile = nullptr;
-  }
+  mLogFile.Done();
   return rv;
 }
 
@@ -328,7 +316,7 @@ UDP::StartTestSend()
   if (mTestType == 6) {
     sprintf(mLogstr, "%lu START TEST 6\n",
             (unsigned long)PR_IntervalToMilliseconds(now));
-    PR_Write(mLogFile, mLogstr, strlen(mLogstr));
+    mLogFile.WriteBlocking(mLogstr, strlen(mLogstr));
   }
   int payloadsize = PAYLOADSIZE - (200 * mNumberOfRetrans);
   if (payloadsize < 512) {
@@ -350,6 +338,7 @@ UDP::StartTestSend()
   }
 
   LOG(("NetworkTest UDP client: Sent a start packet for test %d.", mTestType));
+
   mNextTimeToDoSomething = now +
                            PR_MillisecondsToInterval(RETRANSMISSION_TIMEOUT);
   mNumberOfRetrans++;
@@ -408,6 +397,7 @@ UDP::RunTestSend()
                     (unsigned long)PR_IntervalToMilliseconds(now),
                     (unsigned long)mNextPktId,
                     (unsigned long)PR_IntervalToMilliseconds(mNextTimeToDoSomething));
+            mLogFile.WriteNonBlocking(mLogstr, strlen(mLogstr));
 
           } else {
             // Calculate time to do something.
@@ -419,8 +409,8 @@ UDP::RunTestSend()
                     (unsigned long)PR_IntervalToMilliseconds(now),
                     (unsigned long)mNextPktId,
                     (unsigned long)PR_IntervalToMilliseconds(mNextTimeToDoSomething));
+            mLogFile.WriteBlocking(mLogstr, strlen(mLogstr));
           }
-          PR_Write(mLogFile, mLogstr, strlen(mLogstr));
 
           mNextPktId++;
           if (!mFirstPktSent) {
@@ -462,7 +452,7 @@ UDP::SendFinishPacket()
   mSentBytes += count;
 
   sprintf(mLogstr, "%lu FIN\n", (unsigned long)PR_IntervalToMilliseconds(now));
-  PR_Write(mLogFile, mLogstr, strlen(mLogstr));
+  mLogFile.WriteBlocking(mLogstr, strlen(mLogstr));
 
   LOG(("NetworkTest UDP client: Sending finish packet for test %d"
        " - sent %lu bytes - received %lu bytes.",
@@ -674,7 +664,7 @@ UDP::ReadACKPktAndLog(char *aBuf, uint32_t aTS)
           (unsigned long)ts,
           (unsigned long)ntohl(usecReceived),
           (unsigned long)ntohl(usecACKSent));
-  PR_Write(mLogFile, mLogstr, strlen(mLogstr));
+  mLogFile.WriteNonBlocking(mLogstr, strlen(mLogstr));
   return pktId;
 }
 
@@ -686,16 +676,16 @@ UDP::LogLogFormat()
                  "                        sent(this is for the analysis whether the gap between\n"
                  "                        the time it should have been sent and the time it was\n"
                  "                        sent is too large)]\n";
-  PR_Write(mLogFile, line1, strlen(line1));
+  mLogFile.WriteBlocking(line1, strlen(line1));
 
   char line2[] = "The last packet has the same format as data packet\n";
-  PR_Write(mLogFile, line2, strlen(line2));
+  mLogFile.WriteBlocking(line2, strlen(line2));
 
   char line3[] = "An ACK has been received: [timestamp ack was received] ACK [pkt id]\n"
                  "                          [timestamp data pkt was sent by the sender (this\n"
                  "                          host)] [time when data packet was received by the\n"
                  "                          receiver] [time when ack was sent by the receiver]\n";
-  PR_Write(mLogFile, line3, strlen(line3));
+  mLogFile.WriteBlocking(line3, strlen(line3));
 }
 
 } // namespace NetworkPath

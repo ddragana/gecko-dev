@@ -21,7 +21,7 @@ self.port.on("reachability", function(result) {
     udpList.appendChild(el);
 
     var el = document.createElement("li");
-    el.innerHTML = "Port " + ports[i] + ((tcps[i] == "true") ? " is " : " is not ") + 
+    el.innerHTML = "Port " + ports[i] + ((tcps[i]) ? " is " : " is not ") +
                    "reachable using TCP protocol";
     tcpList.appendChild(el);
   }
@@ -48,9 +48,9 @@ self.port.on("rateTestFinished", function(result) {
 
   for (var i = 0; i < tcpS.length; i++) {
     tcpSstr += tcpS[i];
-    udpSstr += tcpS[i];
-    tcpCstr += tcpS[i];
-    udpCstr += tcpS[i];
+    udpSstr += udpS[i];
+    tcpCstr += tcpC[i];
+    udpCstr += udpC[i];
 
     if (i != tcpS.length - 1) {
       tcpSstr += ", ";

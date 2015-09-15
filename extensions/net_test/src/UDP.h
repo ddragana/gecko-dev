@@ -10,6 +10,7 @@
 #include "Ack.h"
 #include "prnetdb.h"
 #include "config.h"
+#include "FileWriter.h"
 #include <vector>
 #include <string>
 
@@ -65,7 +66,7 @@ private:
   PRIntervalTime mNodataTimeout;
   bool mError;
 
-  PRFileDesc *mLogFile;
+  FileWriter mLogFile;
   // File name [16 random]_test[test number]_itr[iteration number]
   //char mFileName[FILE_NAME_LEN];
   nsCString mLogFileName;

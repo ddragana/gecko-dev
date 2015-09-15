@@ -1,56 +1,56 @@
 {
- "abort_on_missing": false, 
- "check_memory": false, 
- "enable_e10s": false, 
- "is-sdk-bundled": false, 
- "jetpackID": "jid1-y9445BN7FbvcTg@jetpack", 
- "loader": "addon-sdk/lib/sdk/loader/cuddlefish.js", 
- "main": "main", 
- "mainPath": "network-test/main", 
+ "abort_on_missing": false,
+ "check_memory": false,
+ "enable_e10s": false,
+ "is-sdk-bundled": false,
+ "jetpackID": "jid1-y9445BN7FbvcTg@jetpack",
+ "loader": "addon-sdk/lib/sdk/loader/cuddlefish.js",
+ "main": "main",
+ "mainPath": "network-test/main",
  "manifest": {
   "network-test/main": {
-   "docsSHA256": null, 
-   "jsSHA256": "d6b76c78f33b2d1620f2c48e7425cc273040a3e8919d650308fcea7fa84ad03e", 
-   "moduleName": "main", 
-   "packageName": "network-test", 
+   "docsSHA256": null,
+   "jsSHA256": "d6b76c78f33b2d1620f2c48e7425cc273040a3e8919d650308fcea7fa84ad03e",
+   "moduleName": "main",
+   "packageName": "network-test",
    "requirements": {
     "chrome": "chrome",
     "sdk/tabs": "sdk/tabs",
     "sdk/page-mod": "sdk/page-mod",
     "sdk/self": "sdk/self",
     "sdk/ui/button/action": "sdk/ui/button/action"
-   }, 
+   },
    "sectionName": "lib"
   }
- }, 
+ },
  "metadata": {
   "addon-sdk": {
-   "description": "Add-on development made easy.", 
+   "description": "Add-on development made easy.",
    "keywords": [
-    "javascript", 
-    "engine", 
-    "addon", 
-    "extension", 
-    "xulrunner", 
-    "firefox", 
+    "javascript",
+    "engine",
+    "addon",
+    "extension",
+    "xulrunner",
+    "firefox",
     "browser"
-   ], 
-   "license": "MPL 2.0", 
+   ],
+   "license": "MPL 2.0",
    "name": "addon-sdk"
   },
   "network-test": {
-   "author": "dragana", 
-   "description": "network path tester", 
-   "license": "MPL 2.0", 
-   "main": "main", 
-   "name": "network-test", 
+   "author": "dragana",
+   "description": "network path tester",
+   "license": "MPL 2.0",
+   "main": "main",
+   "name": "network-test",
    "version": "0.3"
   }
- }, 
- "name": "network-test", 
- "parseable": false, 
- "preferencesBranch": "jid1-y9445BN7FbvcTg@jetpack", 
- "sdkVersion": "1.17", 
- "staticArgs": {}, 
+ },
+ "name": "network-test",
+ "parseable": false,
+ "preferencesBranch": "jid1-y9445BN7FbvcTg@jetpack",
+ "sdkVersion": "1.17",
+ "staticArgs": {},
  "verbose": false
 }

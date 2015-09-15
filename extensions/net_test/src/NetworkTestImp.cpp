@@ -64,6 +64,23 @@ NetworkTestImp::AllTests()
 
   bool complete = false;
 
+  nsresult rv;
+  nsCOMPtr<nsIUUIDGenerator> uuidGenerator;
+  uuidGenerator = do_GetService("@mozilla.org/uuid-generator;1", &rv);
+  if (NS_FAILED(rv)) {
+    goto done;
+  }
+
+  nsID id;
+  rv = uuidGenerator->GenerateUUIDInPlace(&id);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    goto done;
+  }
+
+  char idStr[NSID_LENGTH];
+  id.ToProvidedString(idStr);
+  idStr[NSID_LENGTH-2] = '\0';
+
   LOG(("Get host addr."));
   if (GetHostAddr(address) != 0) {
     goto done;
@@ -98,13 +115,20 @@ NetworkTestImp::AllTests()
       }
     }
     if (portInx != -1) {
-      nsresult rv;
-      mUUIDGenerator = do_GetService("@mozilla.org/uuid-generator;1", &rv);
-      if (NS_FAILED(rv)) {
-        goto done;
+      FileWriter logFile;
+      logFile.Init(nsPrintfCString("%s_test1and2", idStr + 1));
+      char logStr[100];
+      for (int inx = 0; inx < kNumberOfPorts; ++inx) {
+        sprintf(logStr, "Port %d is %s reachable using TCP\n", mPorts[inx],
+                (mTCPReachabilityResults[inx]) ? "" : "not");
+        logFile.WriteNonBlocking(logStr, strlen(logStr));
+         sprintf(logStr, "Port %d is %s reachable using UDP\n", mPorts[inx],
+                (mUDPReachabilityResults[inx]) ? "" : "not");
+        logFile.WriteNonBlocking(logStr, strlen(logStr));
       }
-      UdpVsTcpPerformanceFromServerToClient(&addr, mPorts[portInx]);
-      UdpVsTcpPerformanceFromClientToServer(&addr, mPorts[portInx]);
+      logFile.Done();
+      UdpVsTcpPerformanceFromServerToClient(&addr, mPorts[portInx], idStr + 1);
+      UdpVsTcpPerformanceFromClientToServer(&addr, mPorts[portInx], idStr + 1);
     }
   }
 
@@ -112,6 +136,16 @@ NetworkTestImp::AllTests()
 
 done:
   LOG(("NetworkTest client side: Tests finished %s.", complete ? "ok" : "failed"));
+  int portInx = -1;
+  for (int inx = kNumberOfPorts - 1; inx >= 0; inx--) {
+    if (mTCPReachabilityResults[inx]) {
+      portInx = inx;
+      break;
+    }
+  }
+  if (portInx != -1) {
+    SendResults(&addr, mPorts[portInx], idStr + 1);
+  }
   NS_DispatchToMainThread(NS_NewRunnableMethod(this, &NetworkTestImp::TestsFinished));
 }
 
@@ -154,9 +188,7 @@ NetworkTestImp::TestsFinished()
 void
 NetworkTestImp::ReachabilityTestsFinished()
 {
-  LOG(("DDDD send not 1"));
   if (mCallback) {
-  LOG(("DDDD send not 2"));
     nsCOMPtr<NetworkTestListener> callback;
     callback = mCallback;
     callback->ReachabilityTestsFinished(kNumberOfPorts,
@@ -230,6 +262,7 @@ NetworkTestImp::TcpReachability(PRNetAddr *aNetAddr)
   for (int inx = 0; inx < kNumberOfPorts; inx++) {
     LOG(("NetworkTest: Testing tcp reachability on port %d.", mPorts[inx]));
     AddPort(aNetAddr, mPorts[inx]);
+
     TCP tcp(aNetAddr);
     // This is test 2.
     rv = tcp.Start(2, EmptyCString());
@@ -248,7 +281,8 @@ NetworkTestImp::TcpReachability(PRNetAddr *aNetAddr)
 // UDP vs TCP performance from a server to a client.
 nsresult
 NetworkTestImp::UdpVsTcpPerformanceFromServerToClient(PRNetAddr *aNetAddr,
-                                                      uint16_t aRemotePort)
+                                                      uint16_t aRemotePort,
+                                                      char *aIdStr)
 {
   LOG(("NetworkTest: Testing UDP vs TCP performance from the server to the "
        "client on port %d.", aRemotePort));
@@ -257,19 +291,9 @@ NetworkTestImp::UdpVsTcpPerformanceFromServerToClient(PRNetAddr *aNetAddr,
   bool testSuccess = false;
   nsresult rv;
 
-  nsID id;
-  rv = mUUIDGenerator->GenerateUUIDInPlace(&id);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  char idString[NSID_LENGTH];
-  id.ToProvidedString(idString);
-  idString[NSID_LENGTH-2] = '\0';
-
   for (int iter = 0; iter < kNumberOfRepeats; iter++) {
     rv = tcp.Start(3,
-                   nsPrintfCString("%s_test3_itr%d", idString + 1, iter));
+                   nsPrintfCString("%s_test3_itr%d", aIdStr, iter));
     LOG(("NetworkTest: Testing UDP vs TCP performance from the server to the "
          "client on port %d iteration %d - achieved tcp rate: %llu",
          aRemotePort, iter, tcp.GetRate()));
@@ -280,7 +304,7 @@ NetworkTestImp::UdpVsTcpPerformanceFromServerToClient(PRNetAddr *aNetAddr,
     UDP udp(aNetAddr);
     rv = udp.Start(5,
                    tcp.GetRate(),
-                   nsPrintfCString("%s_test5_itr%d", idString + 1, iter),
+                   nsPrintfCString("%s_test5_itr%d", aIdStr, iter),
                    testSuccess);
     if (NS_FAILED(rv) && !testSuccess) {
       return rv;
@@ -297,7 +321,8 @@ NetworkTestImp::UdpVsTcpPerformanceFromServerToClient(PRNetAddr *aNetAddr,
 // UDP vs. TCP performance from a client to a server.
 nsresult
 NetworkTestImp::UdpVsTcpPerformanceFromClientToServer(PRNetAddr *aNetAddr,
-                                                      uint16_t aRemotePort)
+                                                      uint16_t aRemotePort,
+                                                      char *aIdStr)
 {
   LOG(("NetworkTest: Testing UDP vs TCP performance from the client to the "
        "server on port %d.", aRemotePort));
@@ -306,19 +331,9 @@ NetworkTestImp::UdpVsTcpPerformanceFromClientToServer(PRNetAddr *aNetAddr,
   bool testSuccess = false;
   nsresult rv;
 
-  nsID id;
-  rv = mUUIDGenerator->GenerateUUIDInPlace(&id);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  char idString[NSID_LENGTH];
-  id.ToProvidedString(idString);
-  idString[NSID_LENGTH-2] = '\0';
-
   for (int iter = 0; iter < kNumberOfRepeats; iter++) {
     rv = tcp.Start(4,
-                   nsPrintfCString("%s_test4_itr%d", idString + 1, iter));
+                   nsPrintfCString("%s_test4_itr%d", aIdStr, iter));
     LOG(("NetworkTest: Testing UDP vs TCP performance from the client to the "
          "server on port %d iteration %d - achieved tcp rate: %llu",
          aRemotePort, iter, tcp.GetRate()));
@@ -329,7 +344,7 @@ NetworkTestImp::UdpVsTcpPerformanceFromClientToServer(PRNetAddr *aNetAddr,
     UDP udp(aNetAddr);
     rv = udp.Start(6,
                    tcp.GetRate(),
-                   nsPrintfCString("%s_test6_itr%d", idString + 1, iter),
+                   nsPrintfCString("%s_test6_itr%d", aIdStr, iter),
                    testSuccess);
     if (NS_FAILED(rv) && !testSuccess) {
       LOG(("NetworkTest: UdpVsTcpPerformanceFromClientToServer error: %d %d",
@@ -343,6 +358,22 @@ NetworkTestImp::UdpVsTcpPerformanceFromClientToServer(PRNetAddr *aNetAddr,
     mUDPToServerRates[iter] = udp.GetRate();
   }
   return rv;
+}
+
+void
+NetworkTestImp::SendResults(PRNetAddr *aNetAddr, uint16_t aRemotePort, char *aIdStr)
+{
+  AddPort(aNetAddr, aRemotePort);
+  {
+    TCP tcp(aNetAddr);
+    tcp.SendResult(nsPrintfCString("%s_test1and2", aIdStr));
+  }
+  for (int test = 3; test <= 6; test++) {
+    for (int iter = 0; iter < kNumberOfRepeats; iter++) {
+      TCP tcp(aNetAddr);
+      tcp.SendResult(nsPrintfCString("%s_test%d_itr%d", aIdStr, test, iter));
+    }
+  }
 }
 
 } // namespace NetworkPath

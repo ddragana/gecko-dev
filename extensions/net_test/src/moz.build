@@ -8,6 +8,7 @@ XPIDL_MODULE = 'network_test'
 
 UNIFIED_SOURCES += [
     'Ack.cpp',
+    'FileWriter.cpp',
     'HelpFunctions.cpp',
     'NetworkTestImp.cpp',
     'TCP.cpp',
