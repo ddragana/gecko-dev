@@ -34,12 +34,12 @@ self.port.on("reachability", function(result) {
 
 });
 
-self.port.on("rateTestFinished", function(result) {
+self.port.on("rateTestsFinished", function(result) {
 
-  var tcpS = JSON.parse(result[0]);
-  var udpS = JSON.parse(result[1]);
-  var tcpC = JSON.parse(result[2]);
-  var udpC = JSON.parse(result[3]);
+  var tcpS = JSON.parse(result[1]);
+  var udpS = JSON.parse(result[2]);
+  var tcpC = JSON.parse(result[3]);
+  var udpC = JSON.parse(result[4]);
 
   var tcpSstr = "";
   var udpSstr = "";
@@ -60,11 +60,8 @@ self.port.on("rateTestFinished", function(result) {
     }
   }
 
-  var test = document.getElementById("rate");
-  test.innerHTML = "Rate test finished";
-
   var desc1 = document.createElement("p");
-  desc1.innerHTML = "Sending from the server to the client: ";
+  desc1.innerHTML = "Sending from the server to the client with factor " + result[0] + ":";
 
   var udpSDesc = document.createElement("p");
   udpSDesc.innerHTML = "UDP rate: " + udpSstr;
@@ -72,7 +69,7 @@ self.port.on("rateTestFinished", function(result) {
   tcpSDesc.innerHTML = "TCP rate: " + tcpSstr;
 
   var desc2 = document.createElement("p");
-  desc2.innerHTML = "Sending from the client to the server: ";
+  desc2.innerHTML = "Sending from the client to the server with factor " + result[0] + ":";
 
   var udpCDesc = document.createElement("p");
   udpCDesc.innerHTML = "UDP rate: " + udpCstr;
@@ -86,4 +83,9 @@ self.port.on("rateTestFinished", function(result) {
   testResults.appendChild(desc2);
   testResults.appendChild(udpCDesc);
   testResults.appendChild(tcpCDesc);
+});
+
+self.port.on("testsFinished", function(result) {
+  var test = document.getElementById("rate");
+  test.innerHTML = "Rate test finished";
 });

@@ -448,7 +448,6 @@ TCP::SendResult(nsCString aFileName)
 
   int toWrite = TCP_DATA_START + readData;
   size -= readData;
-
   LOG(("NetworkTest TCP sending resluts: Poll"));
   while (1) {
     pollElem.out_flags = 0;

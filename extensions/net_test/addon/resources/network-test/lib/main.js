@@ -30,14 +30,19 @@ listener.prototype = {
                                           ]);
 
   },
-  testsFinished: function(count, ratesTCPfromS, ratesUDPfromS, ratesTCPfromC, ratesUDPfromC) {
-    console.log("Network tests finished");
-    this.worker.port.emit("rateTestFinished", [ JSON.stringify(ratesTCPfromS),
-                                                JSON.stringify(ratesUDPfromS),
-                                                JSON.stringify(ratesTCPfromC),
-                                                JSON.stringify(ratesUDPfromC),
-                                              ]);
+  rateTestsFinished: function(factor, count, ratesTCPfromS, ratesUDPfromS, ratesTCPfromC, ratesUDPfromC) {
+    console.log("Network rate tests finished");
+    this.worker.port.emit("rateTestsFinished", [ factor,
+                                                 JSON.stringify(ratesTCPfromS),
+                                                 JSON.stringify(ratesUDPfromS),
+                                                 JSON.stringify(ratesTCPfromC),
+                                                 JSON.stringify(ratesUDPfromC),
+                                               ]);
     working = false;
+  },
+  testsFinished: function() {
+    console.log("Network tests finished");
+    this.worker.port.emit("testsFinished");
   },
   QueryInterface: function(aIID) {
     if (aIID.equals(Ci.NetworkTestListener) ||
@@ -51,7 +56,10 @@ listener.prototype = {
 function startTest(worker) {
   console.log("launching network tester");
   var netTest = Cc["@mozilla.org/network-test;1"].getService(Ci.NetworkTest);
-  netTest.runTest(new listener(worker));
+  netTest.runTest(new listener(worker),
+                  Ci.NetworkTest.REACHABILITY_TEST |
+                  Ci.NetworkTest.RATE_TEST |
+                  Ci.NetworkTest.RATE_TEST_WITH_FACTOR_2_0);
 }
 
 function handleClick(state) {

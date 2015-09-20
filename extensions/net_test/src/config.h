@@ -19,7 +19,7 @@
  * Packet formats:
  * The First UDP packet: (always from the client)
  *    for all:                      ( only for Test 5                   )
- *  |___4B___|___4B___|_____6B_____|(|_______8B_______|___ max 51B ___| )
+ *  |___4B___|___4B___|_____6B_____|(|_______8B_______|___ max 56B ___| )
  *  | PKT_ID |   TS   | Test Type  |(|  RATE_TO_SEND  | FILE_NAME |     )
  *  |        |        |            |(|                FILE_NAME_START 22)
  *  |        |        |            |(RATE_TO_SEND_START = 14            )
@@ -93,16 +93,16 @@
 
 #define FILE_NAME_START 22
 // File name [16 random]_test[test number]_itr[iteration number]
-#define FILE_NAME_LEN 51
+#define FILE_NAME_LEN 56
 
 /*
  * TCP packet format:
  * The First TCP packet: (always from the client)
  *                               (only foe sending results)
- *  |_____6B_____|___ max 51B ___|_______8B_______|
+ *  |_____6B_____|___ max 56B ___|_______8B_______|
  *  | test type  |   file name   |  data length   |
- *  |            |               |                TCP_DATA_START = 65
- *  |            |               TCP_DATA_LEN_START = 57
+ *  |            |               |                TCP_DATA_START = 70
+ *  |            |               TCP_DATA_LEN_START = 62
  *  |            TCP_FILE_NAME_START = 6
  *  |
  *  TCP_TYPE_START = 0
@@ -111,10 +111,10 @@
 #define TCP_TYPE_START 0
 #define TCP_TYPE_LEN 6
 #define TCP_FILE_NAME_START 6
-#define TCP_FILE_NAME_LEN 51
-#define TCP_DATA_LEN_START 57
+#define TCP_FILE_NAME_LEN 56
+#define TCP_DATA_LEN_START 62
 #define TCP_DATA_LEN_LEN 8
-#define TCP_DATA_START 65
+#define TCP_DATA_START 70
 
 #define MAXBYTES  2097152
 //TODO:change this to the 12s

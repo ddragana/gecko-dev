@@ -22,7 +22,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
   NetworkTestImp();
-  NS_IMETHOD RunTest(NetworkTestListener *aListener);
+  NS_IMETHOD RunTest(NetworkTestListener *aListener, uint32_t aTestType);
 
   void AllTests();
 
@@ -30,32 +30,37 @@ private:
   static const int kNumberOfPorts = 5;
   static const uint16_t mPorts[kNumberOfPorts];
   static const int kNumberOfRepeats = 5;
+  static const int kNumberOfRateTests = 6;
 
   ~NetworkTestImp();
   int GetHostAddr(nsAutoCString &aAddr);
   nsresult GetNextAddr(PRNetAddr *aAddr);
   void AddPort(PRNetAddr *aAddr, uint16_t aPort);
-  nsresult UdpReachability(PRNetAddr *aNetAddr);
-  nsresult TcpReachability(PRNetAddr *aNetAddr);
-  nsresult UdpVsTcpPerformanceFromServerToClient(PRNetAddr *aNetAddr,
-                                                 uint16_t aRemotePort,
-                                                 char *aIdStr);
-  nsresult UdpVsTcpPerformanceFromClientToServer(PRNetAddr *aNetAddr,
-                                                 uint16_t aRemotePort,
-                                                 char *aIdStr);
+  void RunReachabilityTest();
+  void RunTestWithFactor(uint16_t aPort, uint32_t aRateTestInx);
+  nsresult UdpReachability();
+  nsresult TcpReachability();
+  nsresult UdpVsTcpPerformanceFromServerToClient(uint16_t aRemotePort,
+    uint32_t aRateTestInx);
+  nsresult UdpVsTcpPerformanceFromClientToServer(uint16_t aRemotePort,
+    uint32_t aRateTestInx);
 
-  void SendResults(PRNetAddr *aNetAddr,uint16_t aRemotePort, char *aIdStr);
-  void TestsFinished();
-  void ReachabilityTestsFinished();
+  void SendResults(uint16_t aRemotePort);
+  void CallTestsFinished();
+  void CallReachabilityTestsFinished();
+  void CallRateTestsFinished(uint32_t aRateTestInx);
   PRAddrInfo *mAddrInfo;
   void *mIter;
   bool mTCPReachabilityResults[kNumberOfPorts];
   bool mUDPReachabilityResults[kNumberOfPorts];
-  uint64_t mTCPFromServerRates[kNumberOfRepeats];
-  uint64_t mUDPFromServerRates[kNumberOfRepeats];
-  uint64_t mTCPToServerRates[kNumberOfRepeats];
-  uint64_t mUDPToServerRates[kNumberOfRepeats];
+  uint64_t mTCPFromServerRates[kNumberOfRateTests][kNumberOfRepeats];
+  uint64_t mUDPFromServerRates[kNumberOfRateTests][kNumberOfRepeats];
+  uint64_t mTCPToServerRates[kNumberOfRateTests][kNumberOfRepeats];
+  uint64_t mUDPToServerRates[kNumberOfRateTests][kNumberOfRepeats];
   nsCOMPtr<NetworkTestListener> mCallback;
+  uint32_t mTestType;
+  nsCString mIdStr;
+  PRNetAddr mAddr;
   nsCOMPtr<nsIThread> mThread;
 };
 
