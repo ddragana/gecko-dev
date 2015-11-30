@@ -105,6 +105,7 @@ public:
     bool           IsSpdyEnabled() { return mEnableSpdy; }
     bool           IsSpdyV31Enabled() { return mSpdyV31; }
     bool           IsHttp2Enabled() { return mHttp2Enabled; }
+    bool           IsHttp2sdtEnabled() { return mHttp2sdtEnabled; }
     bool           EnforceHttp2TlsProfile() { return mEnforceHttp2TlsProfile; }
     bool           CoalesceSpdy() { return mCoalesceSpdy; }
     bool           UseSpdyPersistentSettings() { return mSpdyPersistentSettings; }
@@ -156,6 +157,8 @@ public:
     int32_t GetTCPKeepaliveLongLivedIdleTime() {
       return mTCPKeepaliveLongLivedIdleTimeS;
     }
+
+    uint32_t SdtChunkSize() { return mSdtChunkSize; }
 
     // returns the HTTP framing check level preference, as controlled with
     // network.http.enforce-framing.http1 and network.http.enforce-framing.soft
@@ -486,6 +489,7 @@ private:
     uint32_t           mEnableSpdy : 1;
     uint32_t           mSpdyV31 : 1;
     uint32_t           mHttp2Enabled : 1;
+    uint32_t           mHttp2sdtEnabled : 1;
     uint32_t           mUseH2Deps : 1;
     uint32_t           mEnforceHttp2TlsProfile : 1;
     uint32_t           mCoalesceSpdy : 1;
@@ -544,6 +548,8 @@ private:
     // if true, generate NS_ERROR_PARTIAL_TRANSFER for h1 responses with
     // incorrect content lengths or malformed chunked encodings
     FrameCheckLevel mEnforceH1Framing;
+
+    uint32_t mSdtChunkSize;
 
 private:
     // For Rate Pacing Certain Network Events. Only assign this pointer on

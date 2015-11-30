@@ -1222,7 +1222,7 @@ pref("network.http.use-cache", true);
 
 // this preference can be set to override the socket type used for normal
 // HTTP traffic.  an empty value indicates the normal TCP/IP socket type.
-pref("network.http.default-socket-type", "moz-sdt");
+pref("network.http.default-socket-type", "");
 
 // There is a problem with some IIS7 servers that don't close the connection
 // properly after it times out (bug #491541). Default timeout on IIS7 is
@@ -1357,6 +1357,7 @@ pref("network.http.bypass-cachelock-threshold", 250);
 pref("network.http.spdy.enabled", true);
 pref("network.http.spdy.enabled.v3-1", true);
 pref("network.http.spdy.enabled.http2", true);
+pref("network.http.spdy.enabled.http2sdt", true);
 pref("network.http.spdy.enabled.deps", true);
 pref("network.http.spdy.enforce-tls-profile", true);
 pref("network.http.spdy.chunk-size", 16000);
@@ -1369,6 +1370,10 @@ pref("network.http.spdy.send-buffer-size", 131072);
 pref("network.http.spdy.allow-push", true);
 pref("network.http.spdy.push-allowance", 131072);
 pref("network.http.spdy.default-concurrent", 100);
+
+pref("network.http.sdt.chunk-size", 1336);
+// TODO still not used.
+pref("network.http.sdt.default-port", 5300);
 
 // alt-svc allows separation of transport routing from
 // the origin host without using a proxy.

@@ -761,7 +761,7 @@ function test_complete() {
 // a stalled stream when a SETTINGS frame arrives
 var tests = [ test_http2_post_big
             , test_http2_basic
-            , test_http2_concurrent
+           /* , test_http2_concurrent
             , test_http2_concurrent_post
             , test_http2_basic_unblocked_dep
             , test_http2_nospdy
@@ -769,7 +769,7 @@ var tests = [ test_http2_post_big
             , test_http2_push2
             , test_http2_push3
             , test_http2_push4
-            , test_http2_altsvc
+//            , test_http2_altsvc
             , test_http2_doubleheader
             , test_http2_xhr
             , test_http2_header
@@ -787,7 +787,7 @@ var tests = [ test_http2_post_big
             , test_http2_h11required_session
             , test_http2_retry_rst
             , test_http2_wrongsuite
-
+*/
             // cleanup
             , test_complete
             ];
@@ -878,7 +878,7 @@ function resetPrefs() {
 
 function run_test() {
   var env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
-  serverPort = env.get("MOZHTTP2-PORT");
+  serverPort = 5500;//env.get("MOZHTTP2-PORT");
   do_check_neq(serverPort, null);
   dump("using port " + serverPort + "\n");
 

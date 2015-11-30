@@ -53,6 +53,7 @@ UNIFIED_SOURCES += [
     'ConnectionDiagnostics.cpp',
     'Http2Compression.cpp',
     'Http2Push.cpp',
+    'Http2SDTSession.cpp',
     'Http2Session.cpp',
     'Http2Stream.cpp',
     'HttpBaseChannel.cpp',

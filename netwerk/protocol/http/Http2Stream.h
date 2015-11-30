@@ -160,6 +160,7 @@ protected:
   // These internal states track request generation
   enum upstreamStateType {
     GENERATING_HEADERS,
+    GENERATING_BODY_FRAME,
     GENERATING_BODY,
     SENDING_BODY,
     SENDING_FIN_STREAM,
@@ -208,7 +209,8 @@ private:
   void     AdjustPushedPriority();
   void     AdjustInitialWindow();
   nsresult TransmitFrame(const char *, uint32_t *, bool forceCommitment);
-  void     GenerateDataFrameHeader(uint32_t, bool);
+  void     GenerateDataFrameHeader();
+  void     GenerateDataFrameHeaderParam(uint32_t, bool);
 
   // The underlying HTTP transaction. This pointer is used as the key
   // in the Http2Session mStreamTransactionHash so it is important to
@@ -260,7 +262,7 @@ private:
 
   // The InlineFrame and associated data is used for composing control
   // frames and data frame headers.
-  nsAutoArrayPtr<uint8_t>      mTxInlineFrame;
+  nsAutoArrayPtr<char>         mTxInlineFrame;
   uint32_t                     mTxInlineFrameSize;
   uint32_t                     mTxInlineFrameUsed;
 

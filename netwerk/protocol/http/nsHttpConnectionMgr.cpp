@@ -3113,7 +3113,9 @@ nsHalfOpenSocket::SetupStreams(nsISocketTransport **transport,
     uint32_t typeCount = 0;
     bool bypassTLSAuth = false;
     const nsHttpConnectionInfo *ci = mEnt->mConnInfo;
-    if (ci->FirstHopSSL()) {
+    if (!isBackup && gHttpHandler->IsHttp2sdtEnabled()) {
+        socketTypes[typeCount++] = "moz-sdt";
+    } else if (ci->FirstHopSSL()) {
         socketTypes[typeCount++] = "ssl";
 
         if (ci->GetInsecureScheme()) { // http:// over tls

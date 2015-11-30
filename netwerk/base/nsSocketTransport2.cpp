@@ -749,6 +749,7 @@ nsSocketTransport::nsSocketTransport()
     , mKeepaliveIdleTimeS(-1)
     , mKeepaliveRetryIntervalS(-1)
     , mKeepaliveProbeCount(-1)
+    , mMozSdt(false)
 {
     SOCKET_LOG(("creating nsSocketTransport @%p\n", this));
 
@@ -870,6 +871,9 @@ nsSocketTransport::Init(const char **types, uint32_t typeCount,
                 mProxyTransparentResolvesHost = true;
             }
         }
+    }
+    if (mTypeCount) {
+        mMozSdt = strcmp(mTypes[0], "moz-sdt") == 0;
     }
 
     return NS_OK;
@@ -1158,7 +1162,7 @@ nsSocketTransport::BuildSocket(PRFileDesc *&fd, bool &proxyTransparent, bool &us
                 break;
 
             // if the service was ssl or starttls, we want to hold onto the socket info
-            bool isSSL = (strcmp(mTypes[i], "ssl") == 0);
+            bool isSSL = (strcmp(mTypes[i], "ssl") == 0) || mMozSdt;
             if (isSSL || (strcmp(mTypes[i], "starttls") == 0)) {
                 // remember security info and give notification callbacks to PSM...
                 nsCOMPtr<nsIInterfaceRequestor> callbacks;
@@ -2544,6 +2548,9 @@ nsSocketTransport::OnKeepaliveEnabledPrefChange(bool aEnabled)
 nsresult
 nsSocketTransport::SetKeepaliveEnabledInternal(bool aEnable)
 {
+    if (mMozSdt) {
+        return NS_OK;
+    }
     MOZ_ASSERT(mKeepaliveIdleTimeS > 0 &&
                mKeepaliveIdleTimeS <= kMaxTCPKeepIdle);
     MOZ_ASSERT(mKeepaliveRetryIntervalS > 0 &&
@@ -2666,6 +2673,10 @@ NS_IMETHODIMP
 nsSocketTransport::SetKeepaliveVals(int32_t aIdleTime,
                                     int32_t aRetryInterval)
 {
+    if (mMozSdt) {
+        return NS_OK;
+    }
+
 #if defined(XP_WIN) || defined(XP_UNIX) || defined(XP_MACOSX)
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread, "wrong thread");
     if (NS_WARN_IF(aIdleTime <= 0 || kMaxTCPKeepIdle < aIdleTime)) {
@@ -2972,4 +2983,11 @@ nsSocketTransport::PRFileDescAutoLock::SetKeepaliveVals(bool aEnabled,
                "called on unsupported platform!");
     return NS_ERROR_UNEXPECTED;
 #endif
+}
+
+nsresult
+nsSocketTransport::GetMozSDT(bool *aMozSDT)
+{
+  *aMozSDT = mMozSdt;
+  return NS_OK;
 }

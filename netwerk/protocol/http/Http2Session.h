@@ -27,13 +27,16 @@ namespace net {
 class Http2PushedStream;
 class Http2Stream;
 class nsHttpTransaction;
+class Http2SDTSession;
 
-class Http2Session final : public ASpdySession
-                         , public nsAHttpConnection
-                         , public nsAHttpSegmentReader
-                         , public nsAHttpSegmentWriter
+class Http2Session : public ASpdySession
+                   , public nsAHttpConnection
+                   , public nsAHttpSegmentReader
+                   , public nsAHttpSegmentWriter
 {
   ~Http2Session();
+
+  friend class Http2SDTSession;
 
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -42,8 +45,9 @@ public:
   NS_DECL_NSAHTTPSEGMENTREADER
   NS_DECL_NSAHTTPSEGMENTWRITER
 
- Http2Session(nsISocketTransport *, uint32_t version);
+  Http2Session(nsISocketTransport *, uint32_t version);
 
+  virtual bool IsHttp2() { return true; }
   bool AddStream(nsAHttpTransaction *, int32_t,
                  bool, nsIInterfaceRequestor *) override;
   bool CanReuse() override { return !mShouldGoAway && !mClosed; }
@@ -87,7 +91,8 @@ public:
     FRAME_TYPE_WINDOW_UPDATE = 0x8,
     FRAME_TYPE_CONTINUATION  = 0x9,
     FRAME_TYPE_ALTSVC        = 0xA,
-    FRAME_TYPE_LAST          = 0xB
+    FRAME_TYPE_LAST          = 0xB,
+    FRAME_TYPE_PADDING       = 0xC
   };
 
   // NO_ERROR is a macro defined on windows, so we'll name the HTTP2 goaway
@@ -152,14 +157,13 @@ public:
 
   // We limit frames to 2^14 bytes of length in order to preserve responsiveness
   // This is the smallest allowed value for SETTINGS_MAX_FRAME_SIZE
-  const static uint32_t kMaxFrameData = 0x4000;
+  uint32_t mMaxFrameData;
 
   const static uint8_t kFrameLengthBytes = 3;
   const static uint8_t kFrameStreamIDBytes = 4;
   const static uint8_t kFrameFlagBytes = 1;
   const static uint8_t kFrameTypeBytes = 1;
-  const static uint8_t kFrameHeaderBytes = kFrameLengthBytes + kFrameFlagBytes +
-    kFrameTypeBytes + kFrameStreamIDBytes;
+  uint8_t mFrameHeaderBytes;
 
   enum {
     kLeaderGroupID =     0x3,
@@ -182,10 +186,9 @@ public:
 
   char       *EnsureOutputBuffer(uint32_t needed);
 
-  template<typename charType>
-  void CreateFrameHeader(charType dest, uint16_t frameLength,
-                         uint8_t frameType, uint8_t frameFlags,
-                         uint32_t streamID);
+  virtual void CreateFrameHeader(char *dest, uint16_t frameLength,
+                                 uint8_t frameType, uint8_t frameFlags,
+                                 uint32_t streamID);
 
   // For writing the data stream to LOG4
   static void LogIO(Http2Session *, Http2Stream *, const char *,
@@ -198,9 +201,9 @@ public:
   void TransactionHasDataToWrite(Http2Stream *);
 
   // an overload of nsAHttpSegementReader
-  virtual nsresult CommitToSegmentSize(uint32_t size, bool forceCommitment) override;
+  virtual nsresult CommitToSegmentSize(uint32_t size, bool forceCommitment);
   nsresult BufferOutput(const char *, uint32_t, uint32_t *);
-  void     FlushOutputQueue();
+  virtual void     FlushOutputQueue();
   uint32_t AmountOfOutputBuffered() { return mOutputQueueUsed - mOutputQueueSent; }
 
   uint32_t GetServerInitialStreamWindow() { return mServerInitialStreamWindow; }
@@ -227,6 +230,12 @@ public:
   bool MaybeReTunnel(nsAHttpTransaction *) override;
   bool UseH2Deps() { return mUseH2Deps; }
 
+  virtual uint32_t FreePlaceInCurrentPacket(uint32_t aCount)
+  {
+    return aCount;
+  }
+  virtual void PreparePlaceInCurrentPacket(uint32_t aCount) {}
+
 private:
 
   // These internal states do not correspond to the states of the HTTP/2 specification
@@ -244,6 +253,7 @@ private:
 
   static const uint8_t kMagicHello[24];
 
+  void        Init();
   nsresult    ResponseHeadersComplete();
   uint32_t    GetWriteQueueSize();
   void        ChangeDownstreamState(enum internalStateType);
@@ -282,7 +292,7 @@ private:
 
   // a wrapper for all calls to the nshttpconnection level segment writer. Used
   // to track network I/O for timeout purposes
-  nsresult   NetworkRead(nsAHttpSegmentWriter *, char *, uint32_t, uint32_t *);
+  virtual nsresult   NetworkRead(nsAHttpSegmentWriter *, char *, uint32_t, uint32_t *);
 
   static PLDHashOperator ShutdownEnumerator(nsAHttpTransaction *,
                                             nsAutoPtr<Http2Stream> &,
@@ -489,6 +499,22 @@ private:
   void UnRegisterTunnel(Http2Stream *);
   uint32_t FindTunnelCount(nsHttpConnectionInfo *);
   nsDataHashtable<nsCStringHashKey, uint32_t> mTunnelHash;
+};
+
+typedef nsresult (*Http2ControlFx) (Http2Session *self);
+//static Http2ControlFx sControlFunctions[];
+static Http2ControlFx sControlFunctions[] = {
+  nullptr, // type 0 data is not a control function
+  Http2Session::RecvHeaders,
+  Http2Session::RecvPriority,
+  Http2Session::RecvRstStream,
+  Http2Session::RecvSettings,
+  Http2Session::RecvPushPromise,
+  Http2Session::RecvPing,
+  Http2Session::RecvGoAway,
+  Http2Session::RecvWindowUpdate,
+  Http2Session::RecvContinuation,
+  Http2Session::RecvAltSvc // extension for type 0x0A
 };
 
 } // namespace mozilla::net

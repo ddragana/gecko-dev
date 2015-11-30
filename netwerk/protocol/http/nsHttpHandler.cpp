@@ -187,6 +187,7 @@ nsHttpHandler::nsHttpHandler()
     , mEnableSpdy(false)
     , mSpdyV31(true)
     , mHttp2Enabled(true)
+    , mHttp2sdtEnabled(true)
     , mUseH2Deps(true)
     , mEnforceHttp2TlsProfile(true)
     , mCoalesceSpdy(true)
@@ -213,6 +214,7 @@ nsHttpHandler::nsHttpHandler()
     , mTCPKeepaliveLongLivedEnabled(false)
     , mTCPKeepaliveLongLivedIdleTimeS(600)
     , mEnforceH1Framing(FRAMECHECK_BARELY)
+    , mSdtChunkSize(1300)
 {
     gHttpLog = PR_NewLogModule("nsHttp");
 
@@ -1226,6 +1228,12 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
             mHttp2Enabled = cVar;
     }
 
+    if (PREF_CHANGED(HTTP_PREF("spdy.enabled.http2sdt"))) {
+        rv = prefs->GetBoolPref(HTTP_PREF("spdy.enabled.http2sdt"), &cVar);
+        if (NS_SUCCEEDED(rv))
+            mHttp2sdtEnabled = cVar;
+    }
+
     if (PREF_CHANGED(HTTP_PREF("spdy.enabled.deps"))) {
         rv = prefs->GetBoolPref(HTTP_PREF("spdy.enabled.deps"), &cVar);
         if (NS_SUCCEEDED(rv))
@@ -1262,6 +1270,12 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         rv = prefs->GetIntPref(HTTP_PREF("spdy.chunk-size"), &val);
         if (NS_SUCCEEDED(rv))
             mSpdySendingChunkSize = (uint32_t) clamped(val, 1, 0x3fff);
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("sdt.chunk-size"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("sdt.chunk-size"), &val);
+        if (NS_SUCCEEDED(rv))
+            mSdtChunkSize = (uint32_t)val;
     }
 
     // The amount of idle seconds on a spdy connection before initiating a

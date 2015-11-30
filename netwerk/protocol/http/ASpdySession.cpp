@@ -8,7 +8,7 @@
 #include "HttpLog.h"
 
 /*
-  Currently supported are h2 and spdy/3.1
+  Currently supported are h2, h2s and spdy/3.1
 */
 
 #include "nsHttp.h"
@@ -20,6 +20,7 @@
 #include "Http2Push.h"
 #include "SpdySession31.h"
 #include "Http2Session.h"
+#include "Http2SDTSession.h"
 
 #include "mozilla/Telemetry.h"
 
@@ -41,7 +42,8 @@ ASpdySession::NewSpdySession(uint32_t version,
   // This is a necko only interface, so we can enforce version
   // requests as a precondition
   MOZ_ASSERT(version == SPDY_VERSION_31 ||
-             version == HTTP_VERSION_2,
+             version == HTTP_VERSION_2 ||
+             version == SDT_VERSION_1,
              "Unsupported spdy version");
 
   // Don't do a runtime check of IsSpdyV?Enabled() here because pref value
@@ -55,6 +57,8 @@ ASpdySession::NewSpdySession(uint32_t version,
     return new SpdySession31(aTransport);
   } else if (version == HTTP_VERSION_2) {
     return new Http2Session(aTransport, version);
+  } else if (version == SDT_VERSION_1) {
+    return new Http2SDTSession(aTransport, version);
   }
 
   return nullptr;
@@ -71,10 +75,17 @@ SpdyInformation::SpdyInformation()
   Version[0] = SPDY_VERSION_31;
   VersionString[0] = NS_LITERAL_CSTRING("spdy/3.1");
   ALPNCallbacks[0] = SpdySessionTrue;
+  IsMozSDT[0] = false;
 
   Version[1] = HTTP_VERSION_2;
   VersionString[1] = NS_LITERAL_CSTRING("h2");
   ALPNCallbacks[1] = Http2Session::ALPNCallback;
+  IsMozSDT[1] = false;
+
+  Version[2] = SDT_VERSION_1;
+  VersionString[2] = NS_LITERAL_CSTRING("h2s");
+  ALPNCallbacks[2] = Http2SDTSession::ALPNCallback;
+  IsMozSDT[2] = true;
 }
 
 bool
@@ -87,6 +98,8 @@ SpdyInformation::ProtocolEnabled(uint32_t index) const
     return gHttpHandler->IsSpdyV31Enabled();
   case 1:
     return gHttpHandler->IsHttp2Enabled();
+  case 2:
+    return gHttpHandler->IsHttp2sdtEnabled();
   }
   return false;
 }

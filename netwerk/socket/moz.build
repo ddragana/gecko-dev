@@ -19,13 +19,21 @@ UNIFIED_SOURCES += [
     'nsSOCKSIOLayer.cpp',
     'nsSOCKSSocketProvider.cpp',
     'nsUDPSocketProvider.cpp',
-    'SDTSocketProvider.cpp',
+    'SDTLower.cpp',
+    'SDTSocketProvider2.cpp',
+    'SDTUpper.cpp',
 ]
 
 SOURCES += [
-    'sdtlib.c',
+    'sdt.c',
+    'uLayer.c',
 ]
 
 FAIL_ON_WARNINGS = True
 
 FINAL_LIBRARY = 'xul'
+
+LOCAL_INCLUDES += [
+    '/netwerk/base',
+    '/netwerk/dns',
+]

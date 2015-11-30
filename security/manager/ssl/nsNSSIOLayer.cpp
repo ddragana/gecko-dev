@@ -1809,16 +1809,8 @@ nsSSLIOLayerNewSocket(int32_t family,
                       uint32_t flags)
 {
 
-  PRFileDesc* sock;
-  // todo - honor the normal tcp/sdt pref like http:// does
-  nsCOMPtr<nsISocketProviderService> spserv = do_GetService(kSocketProviderServiceCID);
-  nsCOMPtr<nsISocketProvider> provider;
-  spserv->GetSocketProvider("moz-sdt", getter_AddRefs(provider));
-  provider->NewSocket(family,
-                      host, port,
-                      proxyHost, proxyPort,
-                      flags, &sock, info);
-
+  PRFileDesc* sock = PR_OpenTCPSocket(family);
+  if (!sock) return NS_ERROR_OUT_OF_MEMORY;
   nsresult rv = nsSSLIOLayerAddToSocket(family, host, port, proxyHost, proxyPort,
                                         sock, info, forSTARTTLS, flags);
   if (NS_FAILED(rv)) {
@@ -2462,7 +2454,14 @@ nsSSLIOLayerImportFD(PRFileDesc* fd,
                      const char* host)
 {
   nsNSSShutDownPreventionLock locker;
-  PRFileDesc* sslSock = SSL_ImportFD(nullptr, fd);
+  PRFileDesc* sslSock;
+  if (PR_GetDescType(PR_GetIdentitiesLayer(fd, PR_NSPR_IO_LAYER)) ==
+      PR_DESC_SOCKET_UDP) {
+    sslSock = DTLS_ImportFD(nullptr, fd);
+  } else {
+    sslSock = SSL_ImportFD(nullptr, fd);
+  }
+
   if (!sslSock) {
     NS_ASSERTION(false, "NSS: Error importing socket");
     return nullptr;

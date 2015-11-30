@@ -432,6 +432,8 @@ private:
     int32_t mKeepaliveIdleTimeS;
     int32_t mKeepaliveRetryIntervalS;
     int32_t mKeepaliveProbeCount;
+
+    bool mMozSdt;
 };
 
 #endif // !nsSocketTransport_h__

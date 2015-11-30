@@ -3760,6 +3760,7 @@ static PRInt32 _pr_poll_with_poll(
     PRPollDesc *pds, PRIntn npds, PRIntervalTime timeout)
 {
     PRInt32 ready = 0;
+    PRInt32 readyWithoutSysPoll = 0;
     /*
      * For restarting poll() if it is interrupted by a signal.
      * We use these variables to figure out how much time has
@@ -3827,75 +3828,68 @@ static PRInt32 _pr_poll_with_poll(
                     /* this one is ready right now */
                     if (0 == ready)
                     {
-                        /*
-                         * We will return without calling the system
-                         * poll function.  So zero the out_flags
-                         * fields of all the poll descriptors before
-                         * this one.
-                         */
-                        int i;
-                        for (i = 0; i < index; i++)
-                        {
-                            pds[i].out_flags = 0;
-                        }
+                        readyWithoutSysPoll += 1;
+                        pds[index].out_flags = out_flags_read | out_flags_write;
+                        /* make poll() ignore this entry */
+                        syspoll[index].fd = -1;
+                        syspoll[index].events = 0;
                     }
-                    ready += 1;
-                    pds[index].out_flags = out_flags_read | out_flags_write;
                 }
                 else
                 {
                     /* now locate the NSPR layer at the bottom of the stack */
                     PRFileDesc *bottom = PR_GetIdentitiesLayer(
                         pds[index].fd, PR_NSPR_IO_LAYER);
-                    PR_ASSERT(NULL != bottom);  /* what to do about that? */
                     pds[index].out_flags = 0;  /* pre-condition */
-                    if ((NULL != bottom)
-                    && (_PR_FILEDESC_OPEN == bottom->secret->state))
+                    if (NULL != bottom)
                     {
-                        if (0 == ready)
+                        if (_PR_FILEDESC_OPEN == bottom->secret->state)
                         {
-                            syspoll[index].fd = bottom->secret->md.osfd;
-                            syspoll[index].events = 0;
-                            if (in_flags_read & PR_POLL_READ)
+                            if (0 == ready)
                             {
-                                pds[index].out_flags |=
-                                    _PR_POLL_READ_SYS_READ;
-                                syspoll[index].events |= POLLIN;
-                            }
-                            if (in_flags_read & PR_POLL_WRITE)
-                            {
-                                pds[index].out_flags |=
-                                    _PR_POLL_READ_SYS_WRITE;
-                                syspoll[index].events |= POLLOUT;
-                            }
-                            if (in_flags_write & PR_POLL_READ)
-                            {
-                                pds[index].out_flags |=
-                                    _PR_POLL_WRITE_SYS_READ;
-                                syspoll[index].events |= POLLIN;
-                            }
-                            if (in_flags_write & PR_POLL_WRITE)
-                            {
-                                pds[index].out_flags |=
-                                    _PR_POLL_WRITE_SYS_WRITE;
-                                syspoll[index].events |= POLLOUT;
-                            }
-                            if (pds[index].in_flags & PR_POLL_EXCEPT)
-                                syspoll[index].events |= POLLPRI;
-                        }
-                    }
-                    else
-                    {
-                        if (0 == ready)
-                        {
-                            int i;
-                            for (i = 0; i < index; i++)
-                            {
-                                pds[i].out_flags = 0;
+                                syspoll[index].fd = bottom->secret->md.osfd;
+                                syspoll[index].events = 0;
+                                if (in_flags_read & PR_POLL_READ)
+                                {
+                                    pds[index].out_flags |=
+                                        _PR_POLL_READ_SYS_READ;
+                                    syspoll[index].events |= POLLIN;
+                                }
+                                if (in_flags_read & PR_POLL_WRITE)
+                                {
+                                    pds[index].out_flags |=
+                                        _PR_POLL_READ_SYS_WRITE;
+                                    syspoll[index].events |= POLLOUT;
+                                }
+                                if (in_flags_write & PR_POLL_READ)
+                                {
+                                    pds[index].out_flags |=
+                                        _PR_POLL_WRITE_SYS_READ;
+                                    syspoll[index].events |= POLLIN;
+                                }
+                                if (in_flags_write & PR_POLL_WRITE)
+                                {
+                                    pds[index].out_flags |=
+                                        _PR_POLL_WRITE_SYS_WRITE;
+                                    syspoll[index].events |= POLLOUT;
+                                }
+                                if (pds[index].in_flags & PR_POLL_EXCEPT)
+                                    syspoll[index].events |= POLLPRI;
                             }
                         }
-                        ready += 1;  /* this will cause an abrupt return */
-                        pds[index].out_flags = PR_POLL_NVAL;  /* bogii */
+                        else
+                        {
+                            if (0 == ready)
+                            {
+                                int i;
+                                for (i = 0; i < index; i++)
+                                {
+                                    pds[i].out_flags = 0;
+                                }
+                            }
+                            ready += 1;  /* this will cause an abrupt return */
+                            pds[index].out_flags = PR_POLL_NVAL;  /* bogii */
+                        }
                     }
                 }
             }
@@ -3953,53 +3947,56 @@ retry:
             {
                 for (index = 0; index < npds; ++index)
                 {
-                    PRInt16 out_flags = 0;
-                    if ((NULL != pds[index].fd) && (0 != pds[index].in_flags))
+                    if (-1 != syspoll[index].fd)
                     {
-                        if (0 != syspoll[index].revents)
+                        PRInt16 out_flags = 0;
+                        if ((NULL != pds[index].fd) && (0 != pds[index].in_flags))
                         {
-                            if (syspoll[index].revents & POLLIN)
+                            if (0 != syspoll[index].revents)
                             {
-                                if (pds[index].out_flags
-                                & _PR_POLL_READ_SYS_READ)
+                                if (syspoll[index].revents & POLLIN)
                                 {
-                                    out_flags |= PR_POLL_READ;
+                                    if (pds[index].out_flags
+                                    & _PR_POLL_READ_SYS_READ)
+                                    {
+                                        out_flags |= PR_POLL_READ;
+                                    }
+                                    if (pds[index].out_flags
+                                    & _PR_POLL_WRITE_SYS_READ)
+                                    {
+                                        out_flags |= PR_POLL_WRITE;
+                                    }
                                 }
-                                if (pds[index].out_flags
-                                & _PR_POLL_WRITE_SYS_READ)
+                                if (syspoll[index].revents & POLLOUT)
                                 {
-                                    out_flags |= PR_POLL_WRITE;
+                                    if (pds[index].out_flags
+                                    & _PR_POLL_READ_SYS_WRITE)
+                                    {
+                                        out_flags |= PR_POLL_READ;
+                                    }
+                                    if (pds[index].out_flags
+                                    & _PR_POLL_WRITE_SYS_WRITE)
+                                    {
+                                        out_flags |= PR_POLL_WRITE;
+                                    }
                                 }
+                                if (syspoll[index].revents & POLLPRI)
+                                    out_flags |= PR_POLL_EXCEPT;
+                                if (syspoll[index].revents & POLLERR)
+                                    out_flags |= PR_POLL_ERR;
+                                if (syspoll[index].revents & POLLNVAL)
+                                    out_flags |= PR_POLL_NVAL;
+                                if (syspoll[index].revents & POLLHUP)
+                                    out_flags |= PR_POLL_HUP;
                             }
-                            if (syspoll[index].revents & POLLOUT)
-                            {
-                                if (pds[index].out_flags
-                                & _PR_POLL_READ_SYS_WRITE)
-                                {
-                                    out_flags |= PR_POLL_READ;
-                                }
-                                if (pds[index].out_flags
-                                & _PR_POLL_WRITE_SYS_WRITE)
-                                {
-                                    out_flags |= PR_POLL_WRITE;
-                                }
-                            }
-                            if (syspoll[index].revents & POLLPRI)
-                                out_flags |= PR_POLL_EXCEPT;
-                            if (syspoll[index].revents & POLLERR)
-                                out_flags |= PR_POLL_ERR;
-                            if (syspoll[index].revents & POLLNVAL)
-                                out_flags |= PR_POLL_NVAL;
-                            if (syspoll[index].revents & POLLHUP)
-                                out_flags |= PR_POLL_HUP;
                         }
+                        pds[index].out_flags = out_flags;
                     }
-                    pds[index].out_flags = out_flags;
                 }
             }
         }
     }
-    return ready;
+    return ready + readyWithoutSysPoll;
 
 } /* _pr_poll_with_poll */
 
