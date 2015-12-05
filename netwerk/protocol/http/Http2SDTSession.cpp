@@ -86,6 +86,7 @@ Http2SDTSession::GeneratePadding(uint32_t aLength)
                     aLength - mFrameHeaderBytes,
                     Http2Session::FRAME_TYPE_PADDING,
                     0, 0);
+  memset(packet + mFrameHeaderBytes, 0, aLength - mFrameHeaderBytes);
   mOutputQueueUsed += aLength;
 }
 
