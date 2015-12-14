@@ -3761,6 +3761,7 @@ static PRInt32 _pr_poll_with_poll(
 {
     PRInt32 ready = 0;
     PRInt32 readyWithoutSysPoll = 0;
+
     /*
      * For restarting poll() if it is interrupted by a signal.
      * We use these variables to figure out how much time has
@@ -3841,7 +3842,12 @@ static PRInt32 _pr_poll_with_poll(
                     PRFileDesc *bottom = PR_GetIdentitiesLayer(
                         pds[index].fd, PR_NSPR_IO_LAYER);
                     pds[index].out_flags = 0;  /* pre-condition */
-                    if (NULL != bottom)
+                    if (NULL == bottom) {
+                        /* make poll() ignore this entry */
+                        syspoll[index].fd = -1;
+                        syspoll[index].events = 0;
+                    }
+                    else
                     {
                         if (_PR_FILEDESC_OPEN == bottom->secret->state)
                         {
