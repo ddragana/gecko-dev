@@ -224,10 +224,10 @@ struct sdt_t
   PRIntervalTime rto;
   uint8_t waitForFirstAck;
 
-  PRIntervalTime RTOTimer; // TODO
+  PRIntervalTime RTOTimer; // TODO: this is not really a timer, it is check during poll.
   uint8_t RTOTimerSet;
 
-  PRIntervalTime ERTimer; // TODO
+  PRIntervalTime ERTimer; // TODO: the same as RTOTimer
   uint8_t ERTimerSet;
 
   PRTime qLastCredit;
@@ -310,7 +310,7 @@ sdt_freeHandle(struct sdt_t *handle)
     curr = curr->mNext;
     free(done);
   }
-  // TODO delete queued packets...
+
   free(handle);
 }
 
@@ -513,7 +513,7 @@ sLayerSendTo(PRFileDesc *aFD, const void *aBuf, int32_t aAmount,
   }
 
 
-//TODO: TEST
+//TODO: this is implemented in this way because I was using it for testing.
   uint32_t epoch;
   memcpy (&epoch, aBuf + 3, 2);
   epoch = ntohs(epoch);
@@ -875,7 +875,7 @@ RecvAck(struct sdt_t *handle)
 
   handle->aLayerBufferUsed += 1; // Number of timestamps.
   uint64_t tsSeqno[numTS];
-  int32_t tsDelay[numTS];
+  int32_t tsDelay[numTS]; // TODO this sholud be uint32_t
   for (int i = 0; i < numTS; i++) {
     uint8_t delta = handle->aLayerBuffer[handle->aLayerBufferUsed];
     handle->aLayerBufferUsed += 1;
@@ -887,7 +887,7 @@ RecvAck(struct sdt_t *handle)
 
     if (i) {
       tsDelay[i] += tsDelay[i - 1];
-      assert(tsDelay[i] >= 0); //TODO for debug it is ok, but change this later.
+      assert(tsDelay[i] >= 0); //TODO if tsDelay is uint32_t we do not need this.
     }
     tsDelay[i] = PR_MicrosecondsToInterval(tsDelay[i]);
 
