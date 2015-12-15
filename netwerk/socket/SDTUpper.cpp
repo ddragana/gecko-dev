@@ -244,6 +244,17 @@ sdtUpperLayerConnect(PRFileDesc *aFd, const PRNetAddr *addr, PRIntervalTime to)
 }
 
 static PRStatus
+sdtUpperLayerConnectContinue(PRFileDesc *aFd, int16_t oflags)
+{
+  mozilla::net::SDTUpper *handle = (mozilla::net::SDTUpper *)(aFd->secret);
+  if (!handle) {
+    MOZ_ASSERT(false);
+    return PR_FAILURE;
+  }
+  return PR_ConnectContinue(handle->GetLowerFd(), oflags);
+}
+
+static PRStatus
 sdtUpperLayerBind(PRFileDesc *aFd, const PRNetAddr *addr)
 {
   mozilla::net::SDTUpper *handle = (mozilla::net::SDTUpper *)(aFd->secret);
@@ -352,6 +363,7 @@ sdtUpper_ensureInit()
   sdtUpperMethods.close = sdtUpperLayerClose;
   sdtUpperMethods.poll = sdtUpperLayerPoll;
   sdtUpperMethods.connect = sdtUpperLayerConnect;
+  sdtUpperMethods.connectcontinue = sdtUpperLayerConnectContinue;
   sdtUpperMethods.bind = sdtUpperLayerBind;
   sdtUpperMethods.getsockname = sdtUpperLayerGetSockName;
   sdtUpperMethods.getpeername = sdtUpperLayerGetPeerName;

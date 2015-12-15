@@ -1178,6 +1178,24 @@ nsSocketTransport::BuildSocket(PRFileDesc *&fd, bool &proxyTransparent, bool &us
                     secCtrl->SetNotificationCallbacks(callbacks);
                 // remember if socket type is SSL so we can ProxyStartSSL if need be.
                 usingSSL = isSSL;
+                if (mMozSdt) {
+                    // SDT will start DTLS on PR_Connect because udp is
+                    // connectionless and only way to know that a server
+                    // speaks SDT is to send it a DTLS handshake packet so
+                    // we need to setup ALPN here.
+                    nsTArray<nsCString> protocolArray;
+                    for (uint32_t index = SpdyInformation::kCount; index > 0; --index) {
+                        if (mSpdyInfo.IsMozSDT[index - 1] &&
+                            mSpdyInfo.ProtocolEnabled(index - 1) &&
+                            mSpdyInfo.ALPNCallbacks[index - 1](secCtrl)) {
+                            protocolArray.AppendElement(mSpdyInfo.VersionString[index - 1]);
+                        }
+                    }
+                    rv = secCtrl->SetNPNList(protocolArray);
+                    if (NS_FAILED(rv)) {
+                        break;
+                    }
+                }
             }
             else if ((strcmp(mTypes[i], "socks") == 0) ||
                      (strcmp(mTypes[i], "socks4") == 0)) {

@@ -116,6 +116,7 @@ Http2Session::Http2Session(nsISocketTransport *aSocketTransport, uint32_t versio
   mFrameHeaderBytes = kFrameLengthBytes + kFrameFlagBytes + kFrameTypeBytes +
                       kFrameStreamIDBytes;
   mMaxFrameData = 0x4000;
+  Init();
 }
 
 void

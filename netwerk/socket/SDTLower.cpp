@@ -236,6 +236,12 @@ sdtLowerLayerConnect(PRFileDesc *fd, const PRNetAddr *addr, PRIntervalTime to)
   return fd->lower->methods->connect(fd->lower, addr, to);
 }
 
+static PRStatus
+sdtLowerLayerConnectContinue(PRFileDesc *fd, int16_t oflags)
+{
+  return fd->lower->methods->connectcontinue(fd->lower, oflags);
+}
+
 static void
 sdtLowerDtor(PRFileDesc *aFd)
 {
@@ -270,6 +276,7 @@ sdtLower_ensureInit()
   sdtLowerMethods.send = notImplemented2;
   sdtLowerMethods.sendto = notImplemented3;
   sdtLowerMethods.connect = sdtLowerLayerConnect;
+  sdtLowerMethods.connectcontinue = sdtLowerLayerConnectContinue;
   sdtLowerMethods.poll = sdtLowerLayerPoll;
   sdtLowerMethods.close = genericClose;
 }

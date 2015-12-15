@@ -141,9 +141,11 @@ struct range_t
 };
 
 enum SDTConnectionState {
-  SDT_CONNECTING, // Until DTLS handshake finishes
+  SDT_CONNECTING, // Until we receive first packet. This should imitate TCP's
+                  // SYN/SYNACK. So if server does not respond we can fall back
+                  // to normal TCP.
   SDT_TRANSFERRING,
-  SDT_CLOSING
+  SDT_ERROR
 };
 
 struct sdt_t
@@ -155,6 +157,7 @@ struct sdt_t
   uint8_t isServer;
 
   enum SDTConnectionState state;
+  PRErrorCode error;
 
   // Not yet transmitted.
   struct aPacketQueue_t aTransmissionQueue;
@@ -376,7 +379,7 @@ sLayerPacketReceived(struct sdt_t *handle, uint16_t aEpoch, uint64_t aSeq)
   }
 
   fprintf(stderr, "sLayerPacketReceived largest receive till now=%d; this "
-                  "packet seq=%d handle=%p\n", handle->aLargestRecvId, aSeq,
+                  "packet seq=%lu handle=%p\n", handle->aLargestRecvId, aSeq,
                   handle);
 
   PRIntervalTime now = PR_IntervalNow();
@@ -482,6 +485,10 @@ sLayerRecv(PRFileDesc *aFD, void *aBuf, int32_t aAmount,
           "type=%d epoch=%X seq=0x%lX dtlsLen=%d sBytesRead=%ld\n", rv, handle,
           handle->sRecvRecordType, handle->sRecvEpoch, handle->sRecvSeq,
           handle->sRecvDtlsLen, handle->sBytesRead);
+
+  if (handle->state == SDT_CONNECTING) {
+    handle->state = SDT_TRANSFERRING;
+  }
 
   if (handle->sRecvEpoch != 0) {
     uint8_t newPkt = sLayerPacketReceived(handle, handle->sRecvEpoch,
@@ -875,7 +882,7 @@ RecvAck(struct sdt_t *handle)
 
   handle->aLayerBufferUsed += 1; // Number of timestamps.
   uint64_t tsSeqno[numTS];
-  int32_t tsDelay[numTS]; // TODO this sholud be uint32_t
+  uint32_t tsDelay[numTS];
   for (int i = 0; i < numTS; i++) {
     uint8_t delta = handle->aLayerBuffer[handle->aLayerBufferUsed];
     handle->aLayerBufferUsed += 1;
@@ -887,7 +894,6 @@ RecvAck(struct sdt_t *handle)
 
     if (i) {
       tsDelay[i] += tsDelay[i - 1];
-      assert(tsDelay[i] >= 0); //TODO if tsDelay is uint32_t we do not need this.
     }
     tsDelay[i] = PR_MicrosecondsToInterval(tsDelay[i]);
 
@@ -903,8 +909,7 @@ RecvAck(struct sdt_t *handle)
     }
 
     newlyAcked = RemoveRange(handle, handle->aLargestAcked + 1, largestRecv,
-                             numTS, tsDelay,
-                tsSeqno); 
+                             numTS, tsDelay, tsSeqno);
     handle->aLargestAcked = largestRecv;
   } else {
 
@@ -1172,24 +1177,8 @@ aLayerWrite(PRFileDesc *aFD, const void *aBuf, int32_t aAmount)
   switch (handle->state) {
   case SDT_CONNECTING:
     {
-      // DTLS have not finish yet, we need to push it forward.
-      int rv = aFD->lower->methods->write(aFD->lower,
-                                          nullptr,
-                                          0);
-
-      if (rv == 0) {
-        handle->state = SDT_TRANSFERRING;
-        if (aAmount > 0) {
-          PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
-          rv = -1;
-        }
-      } else {
-        PRErrorCode errCode = PR_GetError();
-        if (errCode != PR_WOULD_BLOCK_ERROR) {
-          handle->state = SDT_CLOSING;
-        }
-      }
-      return rv;
+      assert (0);
+      return -1;
     }
   case SDT_TRANSFERRING:
     {
@@ -1219,6 +1208,8 @@ aLayerWrite(PRFileDesc *aFD, const void *aBuf, int32_t aAmount)
         PacketQueueAddNew(&handle->aTransmissionQueue, pkt);
 
         newPktAccepted = 1;
+      } else if (!aAmount) { // we also accept a 0 bytes to write.
+        newPktAccepted = 1;
       }
 
       // 2) Check if a timer expired
@@ -1232,12 +1223,18 @@ aLayerWrite(PRFileDesc *aFD, const void *aBuf, int32_t aAmount)
         handle->aPktTransmit = handle->aRetransmissionQueue.mFirst;
       }
 
-      if (handle->aPktTransmit) {
-        unsigned char *buf = (unsigned char *)(handle->aPktTransmit + 1);
+      if (handle->aPktTransmit || !aAmount) {
+        int rv;
+        if (handle->aPktTransmit) {
+          unsigned char *buf = (unsigned char *)(handle->aPktTransmit + 1);
 //LogBuffer("aLayerSendTo pkt ", buf, aAmount + sizeof(struct aPacket_t));
-        int rv = aFD->lower->methods->write(aFD->lower,
-                                            buf,
-                                            handle->aPktTransmit->sz);
+          rv = aFD->lower->methods->write(aFD->lower,
+                                          buf,
+                                          handle->aPktTransmit->sz);
+        } else {
+          rv = aFD->lower->methods->write(aFD->lower, nullptr, 0);
+        }
+
         if (rv <= 0) {
           handle->aPktTransmit = nullptr;
           PRErrorCode errCode = PR_GetError();
@@ -1289,12 +1286,67 @@ aLayerWrite(PRFileDesc *aFD, const void *aBuf, int32_t aAmount)
       }
       return (newPktAccepted) ? aAmount : -1;
     }
-  case SDT_CLOSING:
-    // TODO CLOSING part!!!
-    assert (0);
+  case SDT_ERROR:
+    {
+      PR_SetError(handle->error, 0);
+      return -1;
+    }
   }
 
   return -1;
+}
+
+static PRStatus
+aLayerConnectContinue(PRFileDesc *fd, int16_t oflags)
+{
+  struct sdt_t *handle = (struct sdt_t *)(fd->secret);
+  if (!handle) {
+    assert (0);
+    return -1;
+  }
+
+  if (handle->state == SDT_TRANSFERRING) {
+    return PR_SUCCESS;
+  }
+
+  // We are in SDT_CONNECTING phase untill we get first packet from server or
+  // an error ocurr.
+  int rv = fd->lower->methods->write(fd->lower,
+                                     nullptr,
+                                     0);
+
+  if (rv != 0) {
+    // This is a bit strange. Since UDP is connectionless, if an error other than
+    // PR_WOULD_BLOCK_ERROR occur it is actually DTLS error so we need to pick it
+    // up during PR_Write not PR_Connect or PR_ConnectContinue.
+    // TODO maybe we can return error here as well.
+    PRErrorCode errCode = PR_GetError();
+    if (errCode != PR_WOULD_BLOCK_ERROR) {
+       handle->state = SDT_ERROR;
+       handle->error = errCode;
+       return PR_SUCCESS;
+    }
+  }
+
+  if (handle->state == SDT_TRANSFERRING) {
+    return PR_SUCCESS;
+  } else {
+    PR_SetError(PR_IN_PROGRESS_ERROR, 0);
+    return PR_FAILURE;
+  }
+}
+
+static PRStatus
+aLayerConnect(PRFileDesc *fd, const PRNetAddr *addr, PRIntervalTime to)
+{
+  // Call aLayer connect.
+  PRStatus rv = fd->lower->methods->connect(fd->lower, addr, to);
+
+  if (rv != PR_SUCCESS) {
+    return rv;
+  }
+  // Now send some packets and wait for replay.
+  return aLayerConnectContinue(fd, 0);
 }
 
 int
@@ -1553,7 +1605,8 @@ sdt_ensureInit()
 
   // some other general methods
   sMethods.connect = sLayerConnect;
-//  qMethods.connect = sLayerConnect;
+  aMethods.connect = aLayerConnect;
+  aMethods.connectcontinue = aLayerConnectContinue;
   sMethods.bind = sLayerBind;
   sMethods.getsockname = sLayerGetSockName;
   sMethods.getpeername = sLayerGetPeerName;
