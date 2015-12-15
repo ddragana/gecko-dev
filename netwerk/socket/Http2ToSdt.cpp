@@ -244,6 +244,9 @@ Http2ToSdt::WriteData(const void *aBuf, int32_t aAmount)
   }
 }
 
+// TODO: http2 does not accept a first packet for stream 7 if packets for
+// stream 9 is received. With the current implementation of SDT it can happen.
+// This need fix!!!
 void
 Http2ToSdt::OrderPackets(std::unique_ptr<Packet> aPacket)
 {

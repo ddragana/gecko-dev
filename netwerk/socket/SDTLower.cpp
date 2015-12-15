@@ -107,6 +107,9 @@ SDTLower::WriteData(const void *aBuf, int32_t aAmount)
   return PR_Write(mFd, aBuf, aAmount);
 }
 
+// TODO: http2 does not accept a first packet for stream 7 if packets for
+// stream 9 is received. With the current implementation of SDT it can happen.
+// This need fix!!! 
 void
 SDTLower::OrderFrames(SDTLower::Packet *aPacket)
 {
