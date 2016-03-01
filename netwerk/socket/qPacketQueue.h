@@ -13,11 +13,12 @@ struct id_t
 
 struct aPacket_t
 {
-  int32_t sz;
+  uint32_t sz;
   // All ids that this packet is sent with.
   struct id_t mIds[NUM_RETRANSMIT_IDS];
   uint32_t mIdsNum;
   uint8_t mForRetransmission;
+  uint8_t mIsPingPkt;
   struct aPacket_t *mNext;
   // the buffer lives at the end of the struct
 };
@@ -28,64 +29,64 @@ struct aPacketQueue_t
   uint32_t mLen;
 };
 
-int PacketQueueAddNew(struct aPacketQueue_t *aQueue, struct aPacket_t *aPkt)
+void PacketQueueAddNew(struct aPacketQueue_t *queue, struct aPacket_t *pkt)
 {
-  aPkt->mNext = NULL;
-  if (aQueue->mLen) {
-    assert(aQueue->mFirst);
-    assert(aQueue->mLast);
-    assert(!aQueue->mLast->mNext);
-    aQueue->mLast->mNext = aPkt;
-    aQueue->mLast = aPkt;
+  pkt->mNext = NULL;
+  if (queue->mLen) {
+    assert(queue->mFirst);
+    assert(queue->mLast);
+    assert(!queue->mLast->mNext);
+    queue->mLast->mNext = pkt;
+    queue->mLast = pkt;
   } else {
-    assert(!aQueue->mFirst);
-    assert(!aQueue->mLast);
-    aQueue->mLast = aPkt;
-    aQueue->mFirst = aPkt;
+    assert(!queue->mFirst);
+    assert(!queue->mLast);
+    queue->mLast = pkt;
+    queue->mFirst = pkt;
   }
-  ++aQueue->mLen;
+  ++queue->mLen;
 }
 
 struct aPacket_t *
-PacketQueueRemoveFirstPkt(struct aPacketQueue_t *aQueue)
+PacketQueueRemoveFirstPkt(struct aPacketQueue_t *queue)
 {
-  if (!aQueue->mFirst) {
+  if (!queue->mFirst) {
     return NULL;
   }
 
-  struct aPacket_t *done = aQueue->mFirst;
-  if (aQueue->mLast == done) {
-    aQueue->mLast = NULL;
+  struct aPacket_t *done = queue->mFirst;
+  if (queue->mLast == done) {
+    queue->mLast = NULL;
   }
-  aQueue->mFirst = done->mNext;
-  --aQueue->mLen;
+  queue->mFirst = done->mNext;
+  --queue->mLen;
   done->mNext = NULL;
   return done;
 }
 
 struct aPacket_t *
-PacketQueueRemovePktWithId(struct aPacketQueue_t *aQueue, uint64_t aId)
+PacketQueueRemovePktWithId(struct aPacketQueue_t *queue, uint64_t id)
 {
-  if (!aQueue->mFirst) {
+  if (!queue->mFirst) {
     return NULL;
   }
 
-  struct aPacket_t *curr = aQueue->mFirst;
+  struct aPacket_t *curr = queue->mFirst;
   struct aPacket_t *prev = NULL;
   uint8_t found = 0;
   while (curr) {
-    for (int i = 0; i < curr->mIdsNum; i++) {
-      if (curr->mIds[i].mSeq == aId) {
+    for (uint32_t i = 0; i < curr->mIdsNum; i++) {
+      if (curr->mIds[i].mSeq == id) {
         if (prev) {
           prev->mNext = curr->mNext;
         } else {
-          aQueue->mFirst = curr->mNext;
+          queue->mFirst = curr->mNext;
         }
         if (!curr->mNext) {
-          aQueue->mLast = prev;
+          queue->mLast = prev;
         }
         curr->mNext = NULL;
-        aQueue->mLen--;
+        queue->mLen--;
         return curr;
       }
     }
@@ -97,19 +98,19 @@ PacketQueueRemovePktWithId(struct aPacketQueue_t *aQueue, uint64_t aId)
 
 
 void
-PacketQueueRemoveAll(struct aPacketQueue_t *aQueue)
+PacketQueueRemoveAll(struct aPacketQueue_t *queue)
 {
-  if (!aQueue->mFirst) {
-    return NULL;
+  if (!queue->mFirst) {
+    return;
   }
 
-  struct aPacket_t *curr = aQueue->mFirst;
+  struct aPacket_t *curr = queue->mFirst;
   struct aPacket_t *done;
   while (curr) {
     done = curr;
     curr = curr->mNext;
     free(done);
   }
-  aQueue->mFirst = aQueue->mLast = NULL;
-  aQueue->mLen = 0;
+  queue->mFirst = queue->mLast = NULL;
+  queue->mLen = 0;
 }

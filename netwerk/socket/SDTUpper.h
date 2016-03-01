@@ -6,7 +6,8 @@
 
 #include "nsASocketHandler.h"
 #include "nsSocketTransportService2.h"
-#include "SDTLower.h"
+#include "nsRefPtr.h"
+#include "sdt.h"
 
 namespace mozilla {
 namespace net {
@@ -17,7 +18,7 @@ class SDTUpper final : public nsASocketHandler {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
-  SDTUpper(PRFileDesc *aFd, SDTLower *aSDTLower);
+  SDTUpper(PRFileDesc *aFd);
   bool HasData();
   bool SocketWritable();
   int32_t ReadData(void *aBuf, int32_t aAmount, int aFlags);
@@ -40,7 +41,6 @@ public:
 private:
   ~SDTUpper() {}
 
-  nsRefPtr<SDTLower> mSDTLower;
   PRFileDesc *mFd;
   bool mIsLocal;
   nsRefPtr<nsSocketTransportService> mSocketTransportService;
@@ -52,7 +52,7 @@ private:
   PRInt16 mPollError;
 };
 
-PRFileDesc * sdt_createSDTSocket(PRFileDesc *aFd, SDTLower *aSdtLower);
+PRFileDesc * sdt_createSDTSocket(PRFileDesc *aFd);
 
 } // namespace mozilla::net
 } // namespace mozilla

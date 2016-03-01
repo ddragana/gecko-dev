@@ -20,7 +20,6 @@
 #include "Http2Push.h"
 #include "SpdySession31.h"
 #include "Http2Session.h"
-#include "Http2SDTSession.h"
 
 #include "mozilla/Telemetry.h"
 
@@ -58,7 +57,8 @@ ASpdySession::NewSpdySession(uint32_t version,
   } else if (version == HTTP_VERSION_2) {
     return new Http2Session(aTransport, version);
   } else if (version == SDT_VERSION_1) {
-    return new Http2SDTSession(aTransport, version);
+    // We use normal http2. A transformation from http2 to sdt is down the stack.
+    return new Http2Session(aTransport, version);
   }
 
   return nullptr;
@@ -84,7 +84,7 @@ SpdyInformation::SpdyInformation()
 
   Version[2] = SDT_VERSION_1;
   VersionString[2] = NS_LITERAL_CSTRING("h2s");
-  ALPNCallbacks[2] = Http2SDTSession::ALPNCallback;
+  ALPNCallbacks[2] = Http2Session::ALPNCallback;
   IsMozSDT[2] = true;
 }
 

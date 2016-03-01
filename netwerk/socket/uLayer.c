@@ -47,7 +47,7 @@ uLayerRecv(PRFileDesc *fd, void *aBuf, int32_t aAmount, int flags, PRIntervalTim
 
   int32_t rv = PR_Recv(udp_socket, aBuf, aAmount, flags, to);
 PRErrorCode errCode = PR_GetError();
-fprintf(stderr, "uLayerRecv res = %d code = %d", rv, errCode);
+fprintf(stderr, "uLayerRecv res = %d code = %d\n", rv, errCode);
 
   if (errCode ==  PR_IO_TIMEOUT_ERROR) {
     PR_SetError(PR_WOULD_BLOCK_ERROR, 0);

@@ -14,9 +14,8 @@ extern PRLogModuleInfo *gSDTLog;
 
 #define LOG(args) MOZ_LOG(mozilla::net::gSDTLog, mozilla::LogLevel::Error, args)
 
-SDTUpper::SDTUpper(PRFileDesc *aFd, SDTLower *aSDTLower)
-  : mSDTLower(aSDTLower)
-  , mFd(aFd)
+SDTUpper::SDTUpper(PRFileDesc *aFd)
+  : mFd(aFd)
   , mSocketTransportService(gSocketTransportService)
   , mAttached(false)
   , mUpperFDDetached(false)
@@ -65,19 +64,19 @@ SDTUpper::ReadData(void *aBuf, int32_t aAmount, int aFlags)
     PR_SetError(mError, 0);
     return -1;
   }
-  return mSDTLower->ReadData(aBuf, aAmount, aFlags);
+  return PR_Recv(mFd, aBuf, aAmount, aFlags, 0);
 }
 
 bool
 SDTUpper::HasData()
 {
-  return mSDTLower->HasData();
+  return sdt_HasData(mFd);
 }
 
 bool
 SDTUpper::SocketWritable()
 {
-  return mSDTLower->SocketWritable();
+  return sdt_SocketWritable(mFd);
 }
 
 int32_t
@@ -88,7 +87,7 @@ SDTUpper::WriteData(const void *aBuf, int32_t aAmount)
     PR_SetError(mError, 0);
     return -1;
   }
-  return mSDTLower->WriteData(aBuf, aAmount);
+  return PR_Write(mFd, aBuf, aAmount);
 }
 
 void
@@ -122,7 +121,7 @@ SDTUpper::OnSocketReady(PRFileDesc *fd, int16_t outFlags)
   }
 
   if (outFlags & ~PR_POLL_WRITE) {
-    int32_t rv = PR_Recv(mFd, nullptr, 0, PR_MSG_PEEK, 0);
+    int32_t rv = sdt_GetData(mFd);
     if (rv < 0) {
       PRErrorCode errCode = PR_GetError();
       if (errCode != PR_WOULD_BLOCK_ERROR) {
@@ -131,7 +130,7 @@ SDTUpper::OnSocketReady(PRFileDesc *fd, int16_t outFlags)
     }
   }
 
-  mPollTimeout = UINT16_MAX; // No timeout.
+  mPollTimeout = sdt_GetNextTimer(mFd);
   mPollFlags = (PR_POLL_READ | PR_POLL_WRITE | PR_POLL_EXCEPT);
 }
 
@@ -144,7 +143,7 @@ SDTUpper::AttachSocket()
     // The nsASocketHandler of the real socket will call PR_Close which will
     // close this socket as well.
     mAttached = true;
-    mPollTimeout = UINT16_MAX; // No timeout.
+    mPollTimeout = sdt_GetNextTimer(mFd);
     mPollFlags = (PR_POLL_READ | PR_POLL_WRITE | PR_POLL_EXCEPT);
   }
   return rv;
@@ -372,7 +371,7 @@ sdtUpper_ensureInit()
 }
 
 PRFileDesc *
-sdt_createSDTSocket(PRFileDesc *aFd, mozilla::net::SDTLower *aSdtLower)
+sdt_createSDTSocket(PRFileDesc *aFd)
 {
   sdtUpper_ensureInit();
 
@@ -390,7 +389,7 @@ sdt_createSDTSocket(PRFileDesc *aFd, mozilla::net::SDTLower *aSdtLower)
   }
   sdtUpperSocket->dtor = sdtUpperDtor;
 
-  handle = new mozilla::net::SDTUpper(aFd, aSdtLower);
+  handle = new mozilla::net::SDTUpper(aFd);
   if (!handle) {
     goto fail;
   }

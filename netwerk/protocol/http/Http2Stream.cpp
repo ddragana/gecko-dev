@@ -82,7 +82,7 @@ Http2Stream::Http2Stream(nsAHttpTransaction *httpTransaction,
   mServerReceiveWindow = session->GetServerInitialStreamWindow();
   mClientReceiveWindow = session->PushAllowance();
 
-  mTxInlineFrame = new char[mTxInlineFrameSize];
+  mTxInlineFrame = new uint8_t[mTxInlineFrameSize];
 
   PR_STATIC_ASSERT(nsISupportsPriority::PRIORITY_LOWEST <= kNormalPriority);
 
@@ -141,7 +141,6 @@ Http2Stream::ReadSegments(nsAHttpSegmentReader *reader,
 
   switch (mUpstreamState) {
   case GENERATING_HEADERS:
-  case GENERATING_BODY_FRAME:
   case GENERATING_BODY:
   case SENDING_BODY:
     // Call into the HTTP Transaction to generate the HTTP request
@@ -194,8 +193,7 @@ Http2Stream::ReadSegments(nsAHttpSegmentReader *reader,
       if (mSentFin) {
         ChangeState(UPSTREAM_COMPLETE);
       } else {
-        GenerateDataFrameHeader();
-        GenerateDataFrameHeaderParam(0, true);
+        GenerateDataFrameHeader(0, true);
         ChangeState(SENDING_FIN_STREAM);
         mSession->TransactionHasDataToWrite(this);
         rv = NS_BASE_STREAM_WOULD_BLOCK;
@@ -517,34 +515,29 @@ Http2Stream::GenerateOpen()
   MOZ_ASSERT(!mTxInlineFrameUsed);
 
   uint32_t dataLength = compressedData.Length();
-  uint32_t maxFrameData;
+  uint32_t maxFrameData = Http2Session::kMaxFrameData - 5; // 5 bytes for priority
   uint32_t numFrames = 1;
 
-  if (mSession->IsHttp2()) {
-    maxFrameData = mSession->mMaxFrameData - 5; // 5 bytes for priority
-  } else {
-    maxFrameData = mSession->FreePlaceInCurrentPacket(dataLength + 5);
-    maxFrameData -= 5;
-  }
-
   if (dataLength > maxFrameData) {
-    numFrames += ((dataLength - maxFrameData) + mSession->mMaxFrameData - 1) /
-      mSession->mMaxFrameData;
+    numFrames += ((dataLength - maxFrameData) + Http2Session::kMaxFrameData - 1) /
+      Http2Session::kMaxFrameData;
     MOZ_ASSERT (numFrames > 1);
   }
 
   // note that we could still have 1 frame for 0 bytes of data. that's ok.
 
   uint32_t messageSize = dataLength;
-  messageSize += mSession->mFrameHeaderBytes + 5; // frame header + priority overhead in HEADERS frame
-  messageSize += (numFrames - 1) * mSession->mFrameHeaderBytes; // frame header overhead in CONTINUATION frames
-  EnsureBuffer(mTxInlineFrame, messageSize,
+  messageSize += Http2Session::kFrameHeaderBytes + 5; // frame header + priority overhead in HEADERS frame
+  messageSize += (numFrames - 1) * Http2Session::kFrameHeaderBytes; // frame header overhead in CONTINUATION frames
+
+  EnsureBuffer(mTxInlineFrame, dataLength + messageSize,
                mTxInlineFrameUsed, mTxInlineFrameSize);
 
+  mTxInlineFrameUsed += messageSize;
   UpdatePriorityDependency();
   LOG3(("Http2Stream %p Generating %d bytes of HEADERS for stream 0x%X with "
         "priority weight %u dep 0x%X frames %u uri=%s\n",
-        this, dataLength, mStreamID, mPriorityWeight,
+        this, mTxInlineFrameUsed, mStreamID, mPriorityWeight,
         mPriorityDependency, numFrames, nsCString(head->RequestURI()).get()));
 
   uint32_t outputOffset = 0;
@@ -558,7 +551,7 @@ Http2Stream::GenerateOpen()
     if (!idx) {
       flags |= firstFrameFlags;
       // Only the first frame needs the 4-byte offset
-      maxFrameData = mSession->mMaxFrameData;
+      maxFrameData = Http2Session::kMaxFrameData;
     }
     if (lastFrame) {
       frameLen = dataLength;
@@ -571,26 +564,19 @@ Http2Stream::GenerateOpen()
       frameLen + (idx ? 0 : 5),
       (idx) ? Http2Session::FRAME_TYPE_CONTINUATION : Http2Session::FRAME_TYPE_HEADERS,
       flags, mStreamID);
+    outputOffset += Http2Session::kFrameHeaderBytes;
 
-    outputOffset += mSession->mFrameHeaderBytes;
-    mTxInlineFrameUsed += mSession->mFrameHeaderBytes;
     if (!idx) {
       uint32_t wireDep = PR_htonl(mPriorityDependency);
       memcpy(mTxInlineFrame.get() + outputOffset, &wireDep, 4);
       memcpy(mTxInlineFrame.get() + outputOffset + 4, &mPriorityWeight, 1);
       outputOffset += 5;
-      mTxInlineFrameUsed += 5;
     }
 
     memcpy(mTxInlineFrame.get() + outputOffset,
            compressedData.BeginReading() + compressedDataOffset, frameLen);
     compressedDataOffset += frameLen;
-    mTxInlineFrameUsed += frameLen;
-    outputOffset = 0;
-    nsresult rv = TransmitFrame(nullptr, nullptr, true);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
+    outputOffset += frameLen;
   }
 
   Telemetry::Accumulate(Telemetry::SPDY_SYN_SIZE, compressedData.Length());
@@ -643,10 +629,10 @@ Http2Stream::AdjustInitialWindow()
     return;
   }
 
-  EnsureBuffer(mTxInlineFrame, mTxInlineFrameUsed + mSession->mFrameHeaderBytes + 4,
+  uint8_t *packet = mTxInlineFrame.get() + mTxInlineFrameUsed;
+  EnsureBuffer(mTxInlineFrame, mTxInlineFrameUsed + Http2Session::kFrameHeaderBytes + 4,
                mTxInlineFrameUsed, mTxInlineFrameSize);
-  char *packet = mTxInlineFrame.get() + mTxInlineFrameUsed;
-  mTxInlineFrameUsed += mSession->mFrameHeaderBytes + 4;
+  mTxInlineFrameUsed += Http2Session::kFrameHeaderBytes + 4;
 
   mSession->CreateFrameHeader(packet, 4,
                               Http2Session::FRAME_TYPE_WINDOW_UPDATE,
@@ -654,7 +640,7 @@ Http2Stream::AdjustInitialWindow()
 
   mClientReceiveWindow += bump;
   bump = PR_htonl(bump);
-  memcpy(packet + mSession->mFrameHeaderBytes, &bump, 4);
+  memcpy(packet + Http2Session::kFrameHeaderBytes, &bump, 4);
   LOG3(("AdjustInitialwindow increased flow control window %p 0x%X\n",
         this, stream->mStreamID));
 }
@@ -675,10 +661,10 @@ Http2Stream::AdjustPushedPriority()
   if (mPushSource->RecvdFin() || mPushSource->RecvdReset())
     return;
 
-  EnsureBuffer(mTxInlineFrame, mTxInlineFrameUsed + mSession->mFrameHeaderBytes + 5,
+  uint8_t *packet = mTxInlineFrame.get() + mTxInlineFrameUsed;
+  EnsureBuffer(mTxInlineFrame, mTxInlineFrameUsed + Http2Session::kFrameHeaderBytes + 5,
                mTxInlineFrameUsed, mTxInlineFrameSize);
-  char *packet = mTxInlineFrame.get() + mTxInlineFrameUsed;
-  mTxInlineFrameUsed += mSession->mFrameHeaderBytes + 5;
+  mTxInlineFrameUsed += Http2Session::kFrameHeaderBytes + 5;
 
   mSession->CreateFrameHeader(packet, 5,
                               Http2Session::FRAME_TYPE_PRIORITY,
@@ -686,8 +672,8 @@ Http2Stream::AdjustPushedPriority()
                               mPushSource->mStreamID);
 
   mPushSource->SetPriority(mPriority);
-  memset(packet + mSession->mFrameHeaderBytes, 0, 4);
-  memcpy(packet + mSession->mFrameHeaderBytes + 4, &mPriorityWeight, 1);
+  memset(packet + Http2Session::kFrameHeaderBytes, 0, 4);
+  memcpy(packet + Http2Session::kFrameHeaderBytes + 4, &mPriorityWeight, 1);
 
   LOG3(("AdjustPushedPriority %p id 0x%X to weight %X\n", this, mPushSource->mStreamID,
         mPriorityWeight));
@@ -772,17 +758,6 @@ Http2Stream::TransmitFrame(const char *buf,
   uint32_t transmittedCount;
   nsresult rv;
 
-  rv =
-    mSegmentReader->CommitToSegmentSize(mTxStreamFrameSize + mTxInlineFrameUsed,
-                                        forceCommitment);
-
-  if (rv == NS_BASE_STREAM_WOULD_BLOCK) {
-    MOZ_ASSERT(!forceCommitment, "forceCommitment with WOULD_BLOCK");
-    mSession->TransactionHasDataToWrite(this);
-  }
-  if (NS_FAILED(rv))     // this will include WOULD_BLOCK
-    return rv;
-
   // In the (relatively common) event that we have a small amount of data
   // split between the inlineframe and the streamframe, then move the stream
   // data into the inlineframe via copy in order to coalesce into one write.
@@ -793,12 +768,22 @@ Http2Stream::TransmitFrame(const char *buf,
     LOG3(("Coalesce Transmit"));
     memcpy (mTxInlineFrame + mTxInlineFrameUsed,
             buf, mTxStreamFrameSize);
-
     if (countUsed)
       *countUsed += mTxStreamFrameSize;
     mTxInlineFrameUsed += mTxStreamFrameSize;
     mTxStreamFrameSize = 0;
   }
+
+  rv =
+    mSegmentReader->CommitToSegmentSize(mTxStreamFrameSize + mTxInlineFrameUsed,
+                                        forceCommitment);
+
+  if (rv == NS_BASE_STREAM_WOULD_BLOCK) {
+    MOZ_ASSERT(!forceCommitment, "forceCommitment with WOULD_BLOCK");
+    mSession->TransactionHasDataToWrite(this);
+  }
+  if (NS_FAILED(rv))     // this will include WOULD_BLOCK
+    return rv;
 
   // This function calls mSegmentReader->OnReadSegment to report the actual http/2
   // bytes through to the session object and then the HttpConnection which calls
@@ -883,39 +868,29 @@ Http2Stream::ChangeState(enum upstreamStateType newState)
 }
 
 void
-Http2Stream::GenerateDataFrameHeaderParam(uint32_t dataLength, bool lastFrame)
-{
-  LOG3(("Http2Stream::GenerateDataFrameHeaderParam %p len=%d last=%d",
-        this, dataLength, lastFrame));
-
-  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
-  MOZ_ASSERT(mTxInlineFrameUsed == mSession->mFrameHeaderBytes, "inline frame not empty");
-  MOZ_ASSERT(!mTxStreamFrameSize, "stream frame not empty");
-
-  if (lastFrame) {
-    uint8_t frameFlags = Http2Session::kFlag_END_STREAM;
-    mTxInlineFrame[4] = frameFlags;
-  }
-
-  NetworkEndian::writeUint16(mTxInlineFrame.get() + 1, dataLength);
-  mTxStreamFrameSize = dataLength;
-}
-
-void
-Http2Stream::GenerateDataFrameHeader()
+Http2Stream::GenerateDataFrameHeader(uint32_t dataLength, bool lastFrame)
 {
   LOG3(("Http2Stream::GenerateDataFrameHeader %p len=%d last=%d",
-        this));
+        this, dataLength, lastFrame));
 
   MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
   MOZ_ASSERT(!mTxInlineFrameUsed, "inline frame not empty");
   MOZ_ASSERT(!mTxStreamFrameSize, "stream frame not empty");
 
+  uint8_t frameFlags = 0;
+  if (lastFrame) {
+    frameFlags |= Http2Session::kFlag_END_STREAM;
+    if (dataLength)
+      SetSentFin(true);
+  }
+
   mSession->CreateFrameHeader(mTxInlineFrame.get(),
-                              0,
+                              dataLength,
                               Http2Session::FRAME_TYPE_DATA,
-                              0, mStreamID);
-  mTxInlineFrameUsed = mSession->mFrameHeaderBytes;
+                              frameFlags, mStreamID);
+
+  mTxInlineFrameUsed = Http2Session::kFrameHeaderBytes;
+  mTxStreamFrameSize = dataLength;
 }
 
 // ConvertResponseHeaders is used to convert the response headers
@@ -1042,9 +1017,6 @@ Http2Stream::SetAllHeadersReceived()
     LOG3(("Http2Stream::SetAllHeadersReceived %p state OPEN from reserved\n", this));
     mState = OPEN;
     AdjustInitialWindow();
-    if (mSegmentReader) {
-      TransmitFrame(nullptr, nullptr, true);
-    }
   }
 
   mAllHeadersReceived = 1;
@@ -1207,7 +1179,7 @@ Http2Stream::OnReadSegment(const char *buf,
   MOZ_ASSERT(mSegmentReader, "OnReadSegment with null mSegmentReader");
 
   nsresult rv = NS_ERROR_UNEXPECTED;
-  uint32_t dataLength = 0;
+  uint32_t dataLength;
 
   switch (mUpstreamState) {
   case GENERATING_HEADERS:
@@ -1242,13 +1214,13 @@ Http2Stream::OnReadSegment(const char *buf,
       AdjustInitialWindow();
       // This version of TransmitFrame cannot block
       rv = TransmitFrame(nullptr, nullptr, true);
-      ChangeState(GENERATING_BODY_FRAME);
+      ChangeState(GENERATING_BODY);
       break;
     }
     MOZ_ASSERT(*countRead == count, "Header parsing not complete but unused data");
     break;
 
-  case GENERATING_BODY_FRAME:
+  case GENERATING_BODY:
     // if there is session flow control and either the stream window is active and
     // exhaused or the session window is exhausted then suspend
     if (!AllowFlowControlledWrite()) {
@@ -1261,17 +1233,13 @@ Http2Stream::OnReadSegment(const char *buf,
     }
     mBlockedOnRwin = false;
 
-    GenerateDataFrameHeader();
-    ChangeState(GENERATING_BODY);
-    // NO BREAK
-
-  case GENERATING_BODY:
     // The chunk is the smallest of: availableData, configured chunkSize,
     // stream window, session window, or 14 bit framing limit.
     // Its amazing we send anything at all.
     dataLength = std::min(count, mChunkSize);
-    if (dataLength > mSession->mMaxFrameData)
-      dataLength = mSession->mMaxFrameData;
+
+    if (dataLength > Http2Session::kMaxFrameData)
+      dataLength = Http2Session::kMaxFrameData;
 
     if (dataLength > mSession->ServerSessionWindow())
       dataLength = static_cast<uint32_t>(mSession->ServerSessionWindow());
@@ -1279,15 +1247,14 @@ Http2Stream::OnReadSegment(const char *buf,
     if (dataLength > mServerReceiveWindow)
       dataLength = static_cast<uint32_t>(mServerReceiveWindow);
 
-    if (!mSession->IsHttp2()) {
-      dataLength = mSession->FreePlaceInCurrentPacket(dataLength);
-    }
-
     LOG3(("Http2Stream this=%p id 0x%X send calculation "
           "avail=%d chunksize=%d stream window=%d session window=%d "
           "max frame=%d USING=%d\n", this, mStreamID,
           count, mChunkSize, mServerReceiveWindow, mSession->ServerSessionWindow(),
-          mSession->mMaxFrameData, dataLength));
+          Http2Session::kMaxFrameData, dataLength));
+
+    mSession->DecrementServerSessionWindow(dataLength);
+    mServerReceiveWindow -= dataLength;
 
     LOG3(("Http2Stream %p id %x request len remaining %u, "
           "count avail %u, chunk used %u",
@@ -1298,8 +1265,8 @@ Http2Stream::OnReadSegment(const char *buf,
     if (dataLength > mRequestBodyLenRemaining) {
       return NS_ERROR_UNEXPECTED;
     }
-
-    GenerateDataFrameHeaderParam(dataLength, dataLength == mRequestBodyLenRemaining);
+    mRequestBodyLenRemaining -= dataLength;
+    GenerateDataFrameHeader(dataLength, !mRequestBodyLenRemaining);
     ChangeState(SENDING_BODY);
     // NO BREAK
 
@@ -1320,17 +1287,8 @@ Http2Stream::OnReadSegment(const char *buf,
       rv = NS_OK;
 
     // If that frame was all sent, look for another one
-    if (!mTxInlineFrameUsed) {
-      mSession->DecrementServerSessionWindow(dataLength);
-      mServerReceiveWindow -= dataLength;
-      mRequestBodyLenRemaining -= dataLength;
-      if (dataLength)
-        SetSentFin(true);
-      ChangeState(GENERATING_BODY_FRAME);
-    } else {
-      mTxStreamFrameSize = 0;
+    if (!mTxInlineFrameUsed)
       ChangeState(GENERATING_BODY);
-    }
     break;
 
   case SENDING_FIN_STREAM:

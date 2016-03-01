@@ -16,6 +16,12 @@ PRFileDesc *sdt_openSocket(PRIntn af);
 PRFileDesc *sdt_addSDTLayers(PRFileDesc *aFd);
 PRFileDesc *sdt_addALayer(PRFileDesc *aFd);
 void sdt_ensureInit();
+
+uint16_t sdt_GetNextTimer(PRFileDesc *aFd);
+
+//Needed for FF socketThread loop.
+int32_t sdt_GetData(PRFileDesc *aFd);
+uint8_t sdt_HasData(PRFileDesc *aFd);
 uint8_t sdt_SocketWritable(PRFileDesc *aFd);
 
 #ifdef __cplusplus

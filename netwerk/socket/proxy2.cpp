@@ -27,7 +27,6 @@
 #include <unistd.h>
 #include "prnetdb.h"
 #include "uLayer.h"
-#include "Http2ToSdt.h"
 
 #define UDP_LISTEN_PORT 5500
 
@@ -43,7 +42,7 @@
 
 #if 0
 
-clang++ -g -I ../../../obj-debug-scratch/dist/include/ -I ../../../obj-debug-scratch/dist/include/nss -L ../../../obj-debug-scratch/dist/lib/ -I ../../../obj-debug-scratch/dist/include/nspr/ ../../../obj-debug-scratch/netwerk/socket/sdtlib.o  proxy2.cpp Http2ToSdt.cpp ../../../obj-debug-scratch/dist/lib/libssl3.so ../../../obj-debug-scratch/dist/lib/libnss3.so -lnspr4 -std=c++11
+clang++ -g -I ../../../obj-debug-scratch/dist/include/ -I ../../../obj-debug-scratch/dist/include/nss -L ../../../obj-debug-scratch/dist/lib/ -I ../../../obj-debug-scratch/dist/include/nspr/ ../../../obj-debug-scratch/netwerk/socket/sdt.o ../../../obj-debug-scratch/netwerk/socket/uLayer.o  proxy2.cpp ../../../obj-debug-scratch/dist/lib/libssl3.so ../../../obj-debug-scratch/dist/lib/libnss3.so -lnspr4
 
 #endif
 
@@ -97,8 +96,8 @@ class flowID
 public:
   flowID(PRNetAddr *addr)
   : tcp(NULL)
-  , bufSDT2TCPUsed(0)
-  , bufTCP2SDTUsed(0)
+  , bufSDT2TCPLen(0)
+  , bufTCP2SDTLen(0)
   , mTCPConnected(false)
   {
     if (addr->raw.family == AF_INET) {
@@ -165,11 +164,6 @@ public:
       assert(0);
     }
 
-    sdt = sdt_addHttp2ToSdtLayer(sdt);
-    if (!sdt) {
-      assert(0);
-    }
-
     PR_Connect(sdt, addr, NS_SOCKET_CONNECT_TIMEOUT);
 
     if (!initOK) {
@@ -195,9 +189,9 @@ public:
 
     tcp = PR_OpenTCPSocket(AF_INET);
     if (!tcp) {
-      fprintf(stderr, "tcp connect failed\n");
+      fprintf(stderr, "tcp: opening socket failed\n");
     } else {
-      fprintf(stderr, "tcp connect ok\n");
+      fprintf(stderr, "tcp: socket opened\n");
     }
 
     PRStatus status;
@@ -240,7 +234,6 @@ public:
     if (mTCPConnected) {
       return;
     }
-    mTCPConnected = true;
 
     PRStatus status;
     PRNetAddr addr;
@@ -252,9 +245,11 @@ public:
     if (status != PR_SUCCESS) {
       PRErrorCode errCode = PR_GetError();
       if (PR_IS_CONNECTED_ERROR == errCode) {
+        mTCPConnected = true;
         fprintf(stderr, "TCP - It is connected\n");
       } else if ((PR_WOULD_BLOCK_ERROR == errCode) ||
-                 (PR_IN_PROGRESS_ERROR == errCode)) {
+                 (PR_IN_PROGRESS_ERROR == errCode) ||
+                 (PR_NOT_CONNECTED_ERROR == errCode)) {
         PRPollDesc pollElem;
         pollElem.fd = tcp;
         pollElem.in_flags = PR_POLL_WRITE | PR_POLL_EXCEPT;
@@ -264,15 +259,18 @@ public:
           PR_Poll(&pollElem, 1, PR_INTERVAL_NO_WAIT);
           if ( pollElem.out_flags & PR_POLL_WRITE ) {
             fprintf(stderr, "TCP - Connected.\n");
+            mTCPConnected = true;
             break;
           } else if (pollElem.out_flags &
                      (PR_POLL_ERR | PR_POLL_HUP | PR_POLL_NVAL)) {
             PRErrorCode errCode = PR_GetError();
+
             if ((PR_WOULD_BLOCK_ERROR == errCode) ||
-                (PR_IN_PROGRESS_ERROR == errCode)) {
+                (PR_IN_PROGRESS_ERROR == errCode) ||
+                (PR_NOT_CONNECTED_ERROR == errCode)) {
               continue;
             }
-            fprintf(stderr, "TCP - Could not connect.\n");
+            fprintf(stderr, "TCP - Could not connect. error=%d\n", errCode);
             PR_Close(tcp);
             tcp = NULL;
             return;
@@ -285,105 +283,107 @@ public:
     }
   }
 
+  // returns: -1 on error (a non would_block error),
+  //          otherwise buffer length
   int readSDT()
   {
-    if (bufSDT2TCPUsed) {
-      return 0;
-    }
-    while (SDT_CLEARTEXTPAYLOADSIZE > bufSDT2TCPUsed) {
+    if (bufSDT2TCPLen < SDT_CLEARTEXTPAYLOADSIZE) {
       int read = PR_Read(sdt,
-                         bufSDT2TCP + bufSDT2TCPUsed,
-                         SDT_CLEARTEXTPAYLOADSIZE - bufSDT2TCPUsed);
+                         bufSDT2TCP + bufSDT2TCPLen,
+                         SDT_CLEARTEXTPAYLOADSIZE - bufSDT2TCPLen);
       if (read < 1) {
         PRErrorCode code = PR_GetError();
         if (code && (code != PR_WOULD_BLOCK_ERROR)) {  
           return -1;
-        } else {
-          return bufSDT2TCPUsed;
         }
       } else {
-        bufSDT2TCPUsed += read;
-        LogIO("SDT read", bufSDT2TCP, bufSDT2TCPUsed);
+        bufSDT2TCPLen += read;
+//        LogIO("SDT read", bufSDT2TCP, bufSDT2TCPLen);
       }
     }
-    return bufSDT2TCPUsed;
+    return bufSDT2TCPLen;
   }
 
+  // returns: -1 on error (non would_block error),
+  //          otherwise buffer length
   int readTCP()
   {
-    if (bufTCP2SDTUsed) {
-      return 0;
-    }
-    int read = PR_Read(tcp, bufTCP2SDT, SDT_CLEARTEXTPAYLOADSIZE);
-    if (read < 1) {
-      PRErrorCode code = PR_GetError();
+    if (bufTCP2SDTLen < SDT_CLEARTEXTPAYLOADSIZE) {
+      int read = PR_Read(tcp, bufTCP2SDT + bufTCP2SDTLen,
+                         SDT_CLEARTEXTPAYLOADSIZE - bufTCP2SDTLen);
+      if (read < 1) {
+        PRErrorCode code = PR_GetError();
 //fprintf(stderr, "TCP read err %d\n", code);
-      if ((code != PR_WOULD_BLOCK_ERROR)) {  
-        return -1;
+        if ((code != PR_WOULD_BLOCK_ERROR)) {
+          return -1;
+        }
       } else {
-        return 0;
+        bufTCP2SDTLen += read;
+//        LogIO("TCP read", bufTCP2SDT, bufTCP2SDTLen);
       }
-    } else {
-//fprintf(stderr, "TCP read %d\n", read);
-      bufTCP2SDTUsed = read;
-      LogIO("TCP read", bufTCP2SDT, bufTCP2SDTUsed);
     }
-    return read;
+    return bufTCP2SDTLen;
   }
 
+  // returns: -1 on error (non would_block error),
+  //          oterwise buffer length
   int writeSDT()
   {
-    if (!bufTCP2SDTUsed) {
+    if (!bufTCP2SDTLen) {
       return 0;
     }
-    int written = PR_Write(sdt, bufTCP2SDT, bufTCP2SDTUsed);//SDT_CLEARTEXTPAYLOADSIZE);
+    int written = PR_Write(sdt, bufTCP2SDT, bufTCP2SDTLen);
     if (written < 0) {
       PRErrorCode code = PR_GetError();
 //fprintf(stderr, "SDT written err %d\n", code);
-      if (code && (code != PR_WOULD_BLOCK_ERROR)) {  
+      if (code != PR_WOULD_BLOCK_ERROR) {
         return -1;
-      } else {
-        return 0;
       }
     } else {
-//fprintf(stderr, "SDT written %d %d\n", written, bufTCP2SDTUsed);
-//      LogIO("SDT write", bufTCP2SDT, bufTCP2SDTUsed);
-      assert (written == bufTCP2SDTUsed);
-      bufTCP2SDTUsed = 0;
+      if (written < bufTCP2SDTLen) {
+        memmove(bufTCP2SDT, bufTCP2SDT + written, bufTCP2SDTLen - written);
+      }
+      bufTCP2SDTLen -= written;
+//      LogIO("SDT write", bufTCP2SDT, bufTCP2SDTLen);
     }
-    return written;
+    return bufTCP2SDTLen;
   }
 
+  // returns: -1 on error (non would_block error),
+  //          otherwise buffer length
   int writeTCP()
   {
-    if (!bufSDT2TCPUsed) {
+    if (!bufSDT2TCPLen) {
       return 0;
     }
-    int written = PR_Write(tcp, bufSDT2TCP, bufSDT2TCPUsed);
+    int written = PR_Write(tcp, bufSDT2TCP, bufSDT2TCPLen);
     if (written < 0) {
       PRErrorCode code = PR_GetError();
 //fprintf(stderr, "TCP written err %d\n", code);
       if ((code != PR_WOULD_BLOCK_ERROR)) {  
         return -1;
-      } else {
-        return 0;
       }
     } else {
-fprintf(stderr, "TCP written %d\n", written);
-      LogIO("T write", bufSDT2TCP, bufSDT2TCPUsed);
-      //assert (written == SDT_CLEARTEXTPAYLOADSIZE);
-      bufSDT2TCPUsed = 0;
+      if (written < bufSDT2TCPLen) {
+        memmove(bufSDT2TCP, bufSDT2TCP + written, bufSDT2TCPLen - written);
+      }
+      bufSDT2TCPLen -= written;
+//      LogIO("T write", bufSDT2TCP, bufSDT2TCPLen);
     }
-    return written;
+    return bufSDT2TCPLen;
+  }
+
+  uint16_t getTimeout() {
+    return sdt_GetNextTimer(sdt);
   }
 
   PRFileDesc *sdt;
   int mPort;
   PRFileDesc *tcp; // tcp file descriptor
   char bufSDT2TCP[SDT_CLEARTEXTPAYLOADSIZE];
-  int bufSDT2TCPUsed;
+  int bufSDT2TCPLen;
   char bufTCP2SDT[SDT_CLEARTEXTPAYLOADSIZE];
-  int bufTCP2SDTUsed;
+  int bufTCP2SDTLen;
   bool mTCPConnected;
 };
 
@@ -476,13 +476,19 @@ int main()
   pollElem[0].in_flags = PR_POLL_READ | PR_POLL_WRITE | PR_POLL_EXCEPT;
 
   char udpBuf[SDT_CLEARTEXTPAYLOADSIZE];
-
+  uint16_t timer;
   while (1) {
-    for (int i = 0; i < (flowCount + 1); i++) {
-      pollElem[i].out_flags = 0;
+    timer = UINT16_MAX;
+    pollElem[0].out_flags = 0;
+    for (int i = 0; i < flowCount; i++) {
+      pollElem[i + 1].out_flags = 0;
+      uint16_t t = flows[i]->getTimeout();
+      if (timer > t) {
+        timer = t;
+      }
     }
     int rv;
-    rv = PR_Poll(pollElem, flowCount + 1, 1000);
+    rv = PR_Poll(pollElem, flowCount + 1, timer);
 
     if (rv < 0) {
       fprintf(stderr, "Poll error\n");
@@ -544,11 +550,22 @@ int main()
           if (!flows[flow]->tcp) {
             flows[flow]->connectTCP();
             flows[flow]->ensureConnected();
-            pollElem[flow + 1].fd = flows[flow]->tcp;
-            pollElem[flow + 1].in_flags = PR_POLL_READ | PR_POLL_EXCEPT;
+            if (!flows[flow]->tcp) {
+              delete flows[flow];
+              for (int inx = flow; inx < flowCount - 1; inx++) {
+                pollElem[inx + 1] = pollElem[inx + 2];
+                flows[inx] = flows[inx + 1];
+              }
+              flowCount--;
+            } else {
+              pollElem[flow + 1].fd = flows[flow]->tcp;
+              pollElem[flow + 1].in_flags = PR_POLL_READ | PR_POLL_WRITE |
+                                            PR_POLL_EXCEPT;
+              pollElem[flow + 1].out_flags = 0;
+            }
+          } else {
+            pollElem[flow + 1].in_flags |= PR_POLL_WRITE;
           }
-          pollElem[flow + 1].in_flags |= PR_POLL_WRITE;
-          pollElem[flow + 1].out_flags = 0;
         }
       }
     }
@@ -556,6 +573,7 @@ int main()
     
     int i = 0;
     if ((pollElem[0].out_flags & PR_POLL_WRITE)) {
+      // TODO change this. This is in my next iteration.
       while (i < flowCount) {
         int written = flows[i]->writeSDT();
         if (written < 0) {
@@ -566,7 +584,7 @@ int main()
           }
           flowCount--;
           continue;
-        } else if (written > 0) {
+        } else if (written < SDT_CLEARTEXTPAYLOADSIZE) {
           pollElem[i + 1].in_flags |= PR_POLL_READ;
         }
         i++;
@@ -585,8 +603,8 @@ int main()
           }
           flowCount--;
           continue;
-        } else if (read > 0) {
-          pollElem[i + 1].in_flags ^= PR_POLL_READ;
+        } else if (read == SDT_CLEARTEXTPAYLOADSIZE) {
+          pollElem[i + 1].in_flags &= ~PR_POLL_READ; // buffer is full
         }
       }
 
@@ -601,8 +619,8 @@ int main()
           }
           flowCount--;
           continue;
-        } else if (written > 0) {
-          pollElem[i + 1].in_flags ^= PR_POLL_WRITE;
+        } else if (written == 0) {
+          pollElem[i + 1].in_flags &= ~PR_POLL_WRITE;
         }
       }
 

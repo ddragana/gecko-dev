@@ -19,7 +19,6 @@ UNIFIED_SOURCES += [
     'nsSOCKSIOLayer.cpp',
     'nsSOCKSSocketProvider.cpp',
     'nsUDPSocketProvider.cpp',
-    'SDTLower.cpp',
     'SDTSocketProvider2.cpp',
     'SDTUpper.cpp',
 ]

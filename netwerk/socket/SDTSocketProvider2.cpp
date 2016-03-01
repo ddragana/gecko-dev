@@ -14,7 +14,6 @@
 #include "nsISocketProviderService.h"
 #include "nsNetCID.h"
 #include "SDTUpper.h"
-#include "SDTLower.h"
 
 #if 0
  README
@@ -68,7 +67,6 @@ SDTSocketProvider::NewSocket(int32_t family,
   nsCOMPtr<nsISocketProvider> provider;
   nsCOMPtr<nsISupports> secInfo;
   nsCOMPtr<nsISocketProviderService> spserv;
-  nsRefPtr<SDTLower> sdtLower = nullptr;
 
   nsresult rv;
 
@@ -107,14 +105,7 @@ SDTSocketProvider::NewSocket(int32_t family,
     goto onfail;
   }
 
-  sdtLower = new SDTLower();
-  
-  fd = sdt_addSDTLowerLayer(fd, sdtLower.get());
-  if (fd <= 0) {
-    goto onfail;
-  }
-
-  sdtFd = sdt_createSDTSocket(fd, sdtLower);
+  sdtFd = sdt_createSDTSocket(fd);
   if (sdtFd <= 0) {
     goto onfail;
   }
