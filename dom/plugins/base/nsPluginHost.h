@@ -37,8 +37,8 @@ namespace mozilla {
 namespace plugins {
 class PluginAsyncSurrogate;
 class PluginTag;
-} // namespace mozilla
 } // namespace plugins
+} // namespace mozilla
 
 class nsNPAPIPlugin;
 class nsIFile;
@@ -114,7 +114,9 @@ public:
                               /* out */ nsACString & aMimeType,
                               PluginFilter aFilter = eExcludeDisabled);
 
-  void GetPlugins(nsTArray<nsRefPtr<nsPluginTag> >& aPluginArray);
+  void GetPlugins(nsTArray<nsRefPtr<nsPluginTag> >& aPluginArray,
+                  bool aIncludeDisabled = false);
+
   void FindPluginsForContent(uint32_t aPluginEpoch,
                              nsTArray<mozilla::plugins::PluginTag>* aPlugins,
                              uint32_t* aNewPluginEpoch);
@@ -243,6 +245,11 @@ public:
 
   void CreateWidget(nsPluginInstanceOwner* aOwner);
 
+  nsresult EnumerateSiteData(const nsACString& domain,
+                             const InfallibleTArray<nsCString>& sites,
+                             InfallibleTArray<nsCString>& result,
+                             bool firstMatchOnly);
+
 private:
   friend class nsPluginUnloadRunnable;
 
@@ -333,6 +340,10 @@ private:
   uint32_t ChromeEpochForContent();
   void SetChromeEpochForContent(uint32_t aEpoch);
 
+  // On certain platforms, we only want to load certain plugins. This function
+  // centralizes loading rules.
+  bool ShouldAddPlugin(nsPluginTag* aPluginTag);
+
   nsRefPtr<nsPluginTag> mPlugins;
   nsRefPtr<nsPluginTag> mCachedPlugins;
   nsRefPtr<nsInvalidPluginTag> mInvalidPlugins;
@@ -366,10 +377,6 @@ private:
 
   // Helpers for ClearSiteData and SiteHasData.
   nsresult NormalizeHostname(nsCString& host);
-  nsresult EnumerateSiteData(const nsACString& domain,
-                             const InfallibleTArray<nsCString>& sites,
-                             InfallibleTArray<nsCString>& result,
-                             bool firstMatchOnly);
 
   nsWeakPtr mCurrentDocument; // weak reference, we use it to id document only
 

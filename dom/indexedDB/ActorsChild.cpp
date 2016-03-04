@@ -818,7 +818,7 @@ public:
     : PermissionRequestBase(aElement, aPrincipal)
     , mChallenge(aChallenge)
   {
-    MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+    MOZ_ASSERT(XRE_IsParentProcess());
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(aChallenge);
   }
@@ -844,7 +844,7 @@ public:
                                           WorkerPermissionChallenge* aChallenge)
     : mChallenge(aChallenge)
   {
-    MOZ_ASSERT(XRE_GetProcessType() != GeckoProcessType_Default);
+    MOZ_ASSERT(!XRE_IsParentProcess());
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(aChallenge);
   }
@@ -950,7 +950,7 @@ private:
       return true;
     }
 
-    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    if (XRE_IsParentProcess()) {
       nsCOMPtr<Element> ownerElement =
         do_QueryInterface(window->GetChromeEventHandler());
       if (NS_WARN_IF(!ownerElement)) {
@@ -1014,7 +1014,7 @@ WorkerPermissionRequestChildProcessActor::Recv__delete__(
   return true;
 }
 
-} // anonymous namespace
+} // namespace
 
 /*******************************************************************************
  * Local class implementations
@@ -1399,7 +1399,7 @@ BackgroundFactoryRequestChild::RecvPermissionChallenge(
     return false;
   }
 
-  if (XRE_GetProcessType() == GeckoProcessType_Default) {
+  if (XRE_IsParentProcess()) {
     nsCOMPtr<nsPIDOMWindow> window = mFactory->GetParentObject();
     MOZ_ASSERT(window);
 
@@ -2349,28 +2349,33 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
  * BackgroundCursorChild
  ******************************************************************************/
 
-class BackgroundCursorChild::DelayedDeleteRunnable final
+class BackgroundCursorChild::DelayedActionRunnable final
   : public nsICancelableRunnable
 {
+  using ActionFunc = void (BackgroundCursorChild::*)();
+
   BackgroundCursorChild* mActor;
   nsRefPtr<IDBRequest> mRequest;
+  ActionFunc mActionFunc;
 
 public:
   explicit
-  DelayedDeleteRunnable(BackgroundCursorChild* aActor)
+  DelayedActionRunnable(BackgroundCursorChild* aActor, ActionFunc aActionFunc)
     : mActor(aActor)
     , mRequest(aActor->mRequest)
+    , mActionFunc(aActionFunc)
   {
     MOZ_ASSERT(aActor);
     aActor->AssertIsOnOwningThread();
     MOZ_ASSERT(mRequest);
+    MOZ_ASSERT(mActionFunc);
   }
 
   // Does not need to be threadsafe since this only runs on one thread.
   NS_DECL_ISUPPORTS
 
 private:
-  ~DelayedDeleteRunnable()
+  ~DelayedActionRunnable()
   { }
 
   NS_DECL_NSIRUNNABLE
@@ -2510,7 +2515,8 @@ BackgroundCursorChild::HandleResponse(const void_t& aResponse)
   DispatchSuccessEvent(&helper);
 
   if (!mCursor) {
-    nsCOMPtr<nsIRunnable> deleteRunnable = new DelayedDeleteRunnable(this);
+    nsCOMPtr<nsIRunnable> deleteRunnable = new DelayedActionRunnable(
+      this, &BackgroundCursorChild::SendDeleteMeInternal);
     MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(deleteRunnable)));
   }
 }
@@ -2745,19 +2751,20 @@ DispatchMutableFileResult(IDBRequest* aRequest,
   }
 }
 
-NS_IMPL_ISUPPORTS(BackgroundCursorChild::DelayedDeleteRunnable,
+NS_IMPL_ISUPPORTS(BackgroundCursorChild::DelayedActionRunnable,
                   nsIRunnable,
                   nsICancelableRunnable)
 
 NS_IMETHODIMP
 BackgroundCursorChild::
-DelayedDeleteRunnable::Run()
+DelayedActionRunnable::Run()
 {
   MOZ_ASSERT(mActor);
   mActor->AssertIsOnOwningThread();
   MOZ_ASSERT(mRequest);
+  MOZ_ASSERT(mActionFunc);
 
-  mActor->SendDeleteMeInternal();
+  (mActor->*mActionFunc)();
 
   mActor = nullptr;
   mRequest = nullptr;
@@ -2767,7 +2774,7 @@ DelayedDeleteRunnable::Run()
 
 NS_IMETHODIMP
 BackgroundCursorChild::
-DelayedDeleteRunnable::Cancel()
+DelayedActionRunnable::Cancel()
 {
   if (NS_WARN_IF(!mActor)) {
     return NS_ERROR_UNEXPECTED;

@@ -7989,7 +7989,7 @@ nsRuleNode::ComputeTableBorderData(void* aStartStruct,
               table->mCaptionSide, conditions,
               SETDSC_ENUMERATED | SETDSC_UNSET_INHERIT,
               parentTable->mCaptionSide,
-              NS_STYLE_CAPTION_SIDE_TOP, 0, 0, 0, 0);
+              NS_STYLE_CAPTION_SIDE_BSTART, 0, 0, 0, 0);
 
   // empty-cells: enum, inherit, initial
   SetDiscrete(*aRuleData->ValueForEmptyCells(),
@@ -8899,7 +8899,7 @@ nsRuleNode::SetStyleClipPathToCSSValue(nsStyleClipPath* aStyleClipPath,
   const nsCSSValueList* cur = aValue->GetListValue();
 
   uint8_t sizingBox = NS_STYLE_CLIP_SHAPE_SIZING_NOBOX;
-  nsStyleBasicShape* basicShape = nullptr;
+  nsRefPtr<nsStyleBasicShape> basicShape;
   for (unsigned i = 0; i < 2; ++i) {
     if (!cur) {
       break;
@@ -9375,7 +9375,7 @@ nsRuleNode::SweepChildren(nsTArray<nsRuleNode*>& aSweepQueue)
   if (ChildrenAreHashed()) {
     PLDHashTable* children = ChildrenHash();
     uint32_t oldChildCount = children->EntryCount();
-    for (auto iter = children->RemovingIter(); !iter.Done(); iter.Next()) {
+    for (auto iter = children->Iter(); !iter.Done(); iter.Next()) {
       auto entry = static_cast<ChildrenHashEntry*>(iter.Get());
       nsRuleNode* node = entry->mRuleNode;
       if (node->DestroyIfNotMarked()) {

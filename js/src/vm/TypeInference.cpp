@@ -2449,57 +2449,6 @@ js::ClassCanHaveExtraProperties(const Class* clasp)
         || IsAnyTypedArrayClass(clasp);
 }
 
-static bool
-PrototypeHasIndexedProperty(CompilerConstraintList* constraints, JSObject* obj)
-{
-    do {
-        TypeSet::ObjectKey* key = TypeSet::ObjectKey::get(obj);
-        if (ClassCanHaveExtraProperties(key->clasp()))
-            return true;
-        if (key->unknownProperties())
-            return true;
-        HeapTypeSetKey index = key->property(JSID_VOID);
-        if (index.nonData(constraints) || index.isOwnProperty(constraints))
-            return true;
-        obj = obj->getProto();
-    } while (obj);
-
-    return false;
-}
-
-bool
-js::ArrayPrototypeHasIndexedProperty(CompilerConstraintList* constraints, JSScript* script)
-{
-    if (JSObject* proto = script->global().maybeGetArrayPrototype())
-        return PrototypeHasIndexedProperty(constraints, proto);
-    return true;
-}
-
-bool
-js::TypeCanHaveExtraIndexedProperties(CompilerConstraintList* constraints,
-                                      TemporaryTypeSet* types)
-{
-    const Class* clasp = types->getKnownClass(constraints);
-
-    // Note: typed arrays have indexed properties not accounted for by type
-    // information, though these are all in bounds and will be accounted for
-    // by JIT paths.
-    if (!clasp || (ClassCanHaveExtraProperties(clasp) && !IsAnyTypedArrayClass(clasp)))
-        return true;
-
-    if (types->hasObjectFlags(constraints, OBJECT_FLAG_SPARSE_INDEXES))
-        return true;
-
-    JSObject* proto;
-    if (!types->getCommonPrototype(constraints, &proto))
-        return true;
-
-    if (!proto)
-        return false;
-
-    return PrototypeHasIndexedProperty(constraints, proto);
-}
-
 void
 TypeZone::processPendingRecompiles(FreeOp* fop, RecompileInfoVector& recompiles)
 {
@@ -2884,9 +2833,6 @@ ObjectGroup::markUnknown(ExclusiveContext* cx)
     clearNewScript(cx);
     ObjectStateChange(cx, this, true);
 
-    if (ObjectGroup* unboxedGroup = maybeOriginalUnboxedGroup())
-        unboxedGroup->markUnknown(cx);
-
     /*
      * Existing constraints may have already been added to this object, which we need
      * to do the right thing for. We can't ensure that we will mark all unknown
@@ -2905,6 +2851,8 @@ ObjectGroup::markUnknown(ExclusiveContext* cx)
         }
     }
 
+    if (ObjectGroup* unboxedGroup = maybeOriginalUnboxedGroup())
+        MarkObjectGroupUnknownProperties(cx, unboxedGroup);
     if (maybeUnboxedLayout() && maybeUnboxedLayout()->nativeGroup())
         MarkObjectGroupUnknownProperties(cx, maybeUnboxedLayout()->nativeGroup());
     if (ObjectGroup* unboxedGroup = maybeOriginalUnboxedGroup())
@@ -3289,8 +3237,10 @@ JSScript::makeTypes(JSContext* cx)
 
     TypeScript* typeScript = (TypeScript*)
         zone()->pod_calloc<uint8_t>(TypeScript::SizeIncludingTypeArray(count));
-    if (!typeScript)
+    if (!typeScript) {
+        ReportOutOfMemory(cx);
         return false;
+    }
 
     types_ = typeScript;
     setTypesGeneration(cx->zone()->types.generation);
@@ -3367,6 +3317,16 @@ PreliminaryObjectArray::full() const
 {
     for (size_t i = 0; i < COUNT; i++) {
         if (!objects[i])
+            return false;
+    }
+    return true;
+}
+
+bool
+PreliminaryObjectArray::empty() const
+{
+    for (size_t i = 0; i < COUNT; i++) {
+        if (objects[i])
             return false;
     }
     return true;
@@ -3543,8 +3503,10 @@ TypeNewScript::makeNativeVersion(JSContext* cx, TypeNewScript* newScript,
     size_t initializerLength = cursor - newScript->initializerList + 1;
 
     nativeNewScript->initializerList = cx->zone()->pod_calloc<Initializer>(initializerLength);
-    if (!nativeNewScript->initializerList)
+    if (!nativeNewScript->initializerList) {
+        ReportOutOfMemory(cx);
         return nullptr;
+    }
     PodCopy(nativeNewScript->initializerList, newScript->initializerList, initializerLength);
 
     return nativeNewScript.forget();
@@ -3604,7 +3566,7 @@ struct DestroyTypeNewScript
     }
 };
 
-} // anonymous namespace
+} // namespace
 
 bool
 TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group, bool* regenerate, bool force)
@@ -3751,8 +3713,10 @@ TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group, bool* regenerate,
             return false;
 
         initializerList = group->zone()->pod_calloc<Initializer>(initializerVector.length());
-        if (!initializerList)
+        if (!initializerList) {
+            ReportOutOfMemory(cx);
             return false;
+        }
         PodCopy(initializerList, initializerVector.begin(), initializerVector.length());
     }
 

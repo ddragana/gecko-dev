@@ -12,6 +12,7 @@
 
 #include "nsHttpHandler.h"
 #include "nsMimeTypes.h"
+#include "nsNetCID.h"
 #include "nsNetUtil.h"
 
 #include "nsICachingChannel.h"
@@ -38,6 +39,7 @@
 #include "nsINetworkInterceptController.h"
 #include "mozIThirdPartyUtil.h"
 #include "nsStreamUtils.h"
+#include "nsContentSecurityManager.h"
 
 #include <algorithm>
 
@@ -187,7 +189,6 @@ NS_INTERFACE_MAP_BEGIN(HttpBaseChannel)
   NS_INTERFACE_MAP_ENTRY(nsIHttpChannel)
   NS_INTERFACE_MAP_ENTRY(nsIHttpChannelInternal)
   NS_INTERFACE_MAP_ENTRY(nsIForcePendingChannel)
-  NS_INTERFACE_MAP_ENTRY(nsIRedirectHistory)
   NS_INTERFACE_MAP_ENTRY(nsIUploadChannel)
   NS_INTERFACE_MAP_ENTRY(nsIUploadChannel2)
   NS_INTERFACE_MAP_ENTRY(nsISupportsPriority)
@@ -508,6 +509,15 @@ HttpBaseChannel::Open(nsIInputStream **aResult)
 {
   NS_ENSURE_TRUE(!mWasOpened, NS_ERROR_IN_PROGRESS);
   return NS_ImplementChannelOpen(this, aResult);
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::Open2(nsIInputStream** aStream)
+{
+  nsCOMPtr<nsIStreamListener> listener;
+  nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return Open(aStream);
 }
 
 //-----------------------------------------------------------------------------
@@ -1536,15 +1546,6 @@ HttpBaseChannel::RedirectTo(nsIURI *newURI)
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-HttpBaseChannel::ContinueBeginConnect()
-{
-  MOZ_ASSERT(XRE_GetProcessType() != GeckoProcessType_Default,
-             "The parent overrides this");
-  MOZ_ASSERT(false, "This method must be overridden");
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 HttpBaseChannel::GetTopWindowURI(nsIURI **aTopWindowURI)
 {
   nsresult rv = NS_OK;
@@ -1645,7 +1646,7 @@ private:
   NS_ConvertASCIItoUTF16 mCookie;
 };
 
-} // anonymous namespace
+} // namespace
 
 NS_IMETHODIMP
 HttpBaseChannel::SetCookie(const char *aCookieHeader)
@@ -1930,13 +1931,6 @@ HttpBaseChannel::SetResponseTimeoutEnabled(bool aEnable)
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::AddRedirect(nsIPrincipal *aRedirect)
-{
-  mRedirects.AppendObject(aRedirect);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 HttpBaseChannel::ForcePending(bool aForcePending)
 {
   mForcePending = aForcePending;
@@ -2102,24 +2096,6 @@ HttpBaseChannel::ShouldIntercept()
   return shouldIntercept;
 }
 
-// nsIRedirectHistory
-NS_IMETHODIMP
-HttpBaseChannel::GetRedirects(nsIArray * *aRedirects)
-{
-  nsresult rv;
-  nsCOMPtr<nsIMutableArray> redirects =
-    do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  for (int i = 0; i < mRedirects.Count(); ++i) {
-    rv = redirects->AppendElement(mRedirects[i], false);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-  *aRedirects = redirects;
-  NS_IF_ADDREF(*aRedirects);
-  return NS_OK;
-}
-
 //-----------------------------------------------------------------------------
 // nsHttpChannel::nsITraceableChannel
 //-----------------------------------------------------------------------------
@@ -2192,7 +2168,7 @@ HttpBaseChannel::AddCookiesToRequest()
   }
 
   bool useCookieService =
-    (XRE_GetProcessType() == GeckoProcessType_Default);
+    (XRE_IsParentProcess());
   nsXPIDLCString cookie;
   if (useCookieService) {
     nsICookieService *cs = gHttpHandler->GetCookieService();
@@ -2387,28 +2363,6 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
              "[this=%p] transferring chain of redirect cache-keys", this));
         httpInternal->SetCacheKeysRedirectChain(mRedirectedCachekeys.forget());
     }
-    // Transfer existing redirect information. Add all of our existing
-    // redirects to the new channel.
-    for (int32_t i = 0; i < mRedirects.Count(); ++i) {
-      if (LOG_ENABLED()) {
-        nsCOMPtr<nsIURI> uri;
-        mRedirects[i]->GetURI(getter_AddRefs(uri));
-        nsCString spec;
-        if (uri) {
-          uri->GetSpec(spec);
-        }
-        LOG(("HttpBaseChannel::SetupReplacementChannel adding redirect \'%s\' "
-             "[this=%p]", spec.get(), this));
-      }
-
-      httpInternal->AddRedirect(mRedirects[i]);
-    }
-
-    // Add our own principal to the redirect information on the new channel. If
-    // the redirect is vetoed, then newChannel->AsyncOpen won't be called.
-    // However, the new channel's redirect chain will still be complete.
-    nsCOMPtr<nsIPrincipal> principal = GetURIPrincipal();
-    httpInternal->AddRedirect(principal);
   }
 
   // transfer application cache information
@@ -2770,6 +2724,6 @@ HttpBaseChannel::GetPerformance()
 
 //------------------------------------------------------------------------------
 
-}  // namespace net
-}  // namespace mozilla
+} // namespace net
+} // namespace mozilla
 

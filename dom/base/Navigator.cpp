@@ -62,6 +62,9 @@
 #include "nsIPermissionManager.h"
 #include "nsMimeTypes.h"
 #include "nsNetUtil.h"
+#include "nsStringStream.h"
+#include "nsComponentManagerUtils.h"
+#include "nsIStringStream.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
 #include "TimeManager.h"
@@ -775,7 +778,7 @@ VibrateWindowListener::RemoveListener()
                                     true /* use capture */);
 }
 
-} // anonymous namespace
+} // namespace
 
 void
 Navigator::AddIdleObserver(MozIdleObserver& aIdleObserver, ErrorResult& aRv)
@@ -1481,7 +1484,7 @@ Navigator::GetFeature(const nsAString& aName, ErrorResult& aRv)
 #if defined(XP_LINUX)
   if (aName.EqualsLiteral("hardware.memory")) {
     // with seccomp enabled, fopen() should be in a non-sandboxed process
-    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    if (XRE_IsParentProcess()) {
       uint32_t memLevel = mozilla::hal::GetTotalSystemMemoryLevel();
       if (memLevel == 0) {
         p->MaybeReject(NS_ERROR_NOT_AVAILABLE);
@@ -1499,9 +1502,12 @@ Navigator::GetFeature(const nsAString& aName, ErrorResult& aRv)
 #endif
 
 #ifdef MOZ_WIDGET_GONK
-  if (aName.EqualsLiteral("acl.version")) {
+  if (StringBeginsWith(aName, NS_LITERAL_STRING("acl.")) &&
+      (aName.EqualsLiteral("acl.version") || CheckPermission("external-app"))) {
     char value[PROPERTY_VALUE_MAX];
-    uint32_t len = property_get("persist.acl.version", value, nullptr);
+    nsCString propertyKey("persist.");
+    propertyKey.Append(NS_ConvertUTF16toUTF8(aName));
+    uint32_t len = property_get(propertyKey.get(), value, nullptr);
     if (len > 0) {
       p->MaybeResolve(NS_ConvertUTF8toUTF16(value));
       return p.forget();
@@ -2308,35 +2314,6 @@ Navigator::MayResolve(jsid aId)
   return nameSpaceManager->LookupNavigatorName(name);
 }
 
-struct NavigatorNameEnumeratorClosure
-{
-  NavigatorNameEnumeratorClosure(JSContext* aCx, JSObject* aWrapper,
-                                 nsTArray<nsString>& aNames)
-    : mCx(aCx),
-      mWrapper(aCx, aWrapper),
-      mNames(aNames)
-  {
-  }
-
-  JSContext* mCx;
-  JS::Rooted<JSObject*> mWrapper;
-  nsTArray<nsString>& mNames;
-};
-
-static PLDHashOperator
-SaveNavigatorName(const nsAString& aName,
-                  const nsGlobalNameStruct& aNameStruct,
-                  void* aClosure)
-{
-  NavigatorNameEnumeratorClosure* closure =
-    static_cast<NavigatorNameEnumeratorClosure*>(aClosure);
-  if (!aNameStruct.mConstructorEnabled ||
-      aNameStruct.mConstructorEnabled(closure->mCx, closure->mWrapper)) {
-    closure->mNames.AppendElement(aName);
-  }
-  return PL_DHASH_NEXT;
-}
-
 void
 Navigator::GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
                                ErrorResult& aRv)
@@ -2348,8 +2325,14 @@ Navigator::GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
     return;
   }
 
-  NavigatorNameEnumeratorClosure closure(aCx, GetWrapper(), aNames);
-  nameSpaceManager->EnumerateNavigatorNames(SaveNavigatorName, &closure);
+  JS::Rooted<JSObject*> wrapper(aCx, GetWrapper());
+  for (auto i = nameSpaceManager->NavigatorNameIter(); !i.Done(); i.Next()) {
+    const GlobalNameMapEntry* entry = i.Get();
+    if (!entry->mGlobalName.mConstructorEnabled ||
+        entry->mGlobalName.mConstructorEnabled(aCx, wrapper)) {
+      aNames.AppendElement(entry->mKey);
+    }
+  }
 }
 
 JSObject*
@@ -2572,7 +2555,7 @@ Navigator::HasTVSupport(JSContext* aCx, JSObject* aGlobal)
 bool
 Navigator::IsE10sEnabled(JSContext* aCx, JSObject* aGlobal)
 {
-  return XRE_GetProcessType() == GeckoProcessType_Content;
+  return XRE_IsContentProcess();
 }
 
 bool

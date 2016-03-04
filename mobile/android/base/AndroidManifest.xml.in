@@ -8,6 +8,7 @@
 #ifdef MOZ_ANDROID_SHARED_ID
       android:sharedUserId="@MOZ_ANDROID_SHARED_ID@"
 #endif
+      android:theme="@style/FilteredTouches"
       >
     <uses-sdk android:minSdkVersion="@MOZ_ANDROID_MIN_SDK_VERSION@"
 #ifdef MOZ_ANDROID_MAX_SDK_VERSION
@@ -241,6 +242,10 @@
             </intent-filter>
         </activity-alias>
 
+        <activity android:name="org.mozilla.gecko.trackingprotection.TrackingProtectionPrompt"
+                  android:launchMode="singleTop"
+                  android:theme="@style/OverlayActivity" />
+
 #ifdef MOZ_ANDROID_TAB_QUEUE
         <!-- The main reason for the Tab Queue build flag is to not mess with the VIEW intent filter
              before the rest of the plumbing is in place -->
@@ -402,12 +407,7 @@
 
         <provider android:name="org.mozilla.gecko.db.BrowserProvider"
                   android:authorities="@ANDROID_PACKAGE_NAME@.db.browser"
-                  android:permission="@ANDROID_PACKAGE_NAME@.permissions.BROWSER_PROVIDER">
-
-            <path-permission android:pathPrefix="/search_suggest_query"
-                             android:readPermission="android.permission.GLOBAL_SEARCH" />
-
-        </provider>
+                  android:permission="@ANDROID_PACKAGE_NAME@.permissions.BROWSER_PROVIDER"/>
 
 #ifdef MOZ_ANDROID_SHARE_OVERLAY
         <!-- Share overlay activity

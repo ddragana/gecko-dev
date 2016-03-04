@@ -54,7 +54,7 @@ namespace {
   // The mechanism should be revised once we know the exact time at which
   // Dialer stops playing.
   static int sBusyToneInterval = 3700; //unit: ms
-} // anonymous namespace
+} // namespace
 
 const int BluetoothHfpManager::MAX_NUM_CLIENTS = 1;
 
@@ -238,7 +238,7 @@ bool
 BluetoothHfpManager::Init()
 {
   // The function must run at b2g process since it would access SettingsService.
-  MOZ_ASSERT(IsMainProcess());
+  MOZ_ASSERT(XRE_IsParentProcess());
 
   MOZ_ASSERT(NS_IsMainThread());
 

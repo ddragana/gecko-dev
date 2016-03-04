@@ -36,7 +36,6 @@
 #include "mozilla/layers/ISurfaceAllocator.h"
 #include "gfxReusableSurfaceWrapper.h"
 #include "pratom.h"                     // For PR_ATOMIC_INCREMENT/DECREMENT
-#include "gfxPrefs.h"
 
 namespace mozilla {
 namespace layers {
@@ -202,7 +201,7 @@ struct TileClient
     }
   }
 
-  void Release()
+  void DiscardBuffers()
   {
     DiscardFrontBuffer();
     DiscardBackBuffer();
@@ -416,12 +415,13 @@ public:
 
   void PaintThebes(const nsIntRegion& aNewValidRegion,
                    const nsIntRegion& aPaintRegion,
+                   const nsIntRegion& aDirtyRegion,
                    LayerManager::DrawPaintedLayerCallback aCallback,
                    void* aCallbackData);
 
-  void ReadLock();
+  void Update(const nsIntRegion& aNewValidRegion, const nsIntRegion& aPaintRegion);
 
-  void Release();
+  void ReadLock();
 
   void DiscardBuffers();
 
@@ -453,18 +453,23 @@ public:
     mResolution = aResolution;
   }
 
+  void ResetPaintedAndValidState() {
+    mPaintedRegion.SetEmpty();
+    mValidRegion.SetEmpty();
+    mTiles.mSize.width = 0;
+    mTiles.mSize.height = 0;
+    DiscardBuffers();
+    mRetainedTiles.Clear();
+  }
+
 protected:
-  TileClient ValidateTile(TileClient aTile,
-                          const nsIntPoint& aTileRect,
-                          const nsIntRegion& dirtyRect);
+  bool ValidateTile(TileClient& aTile,
+                    const nsIntPoint& aTileRect,
+                    const nsIntRegion& dirtyRect);
 
   void PostValidate(const nsIntRegion& aPaintRegion);
 
-  void UnlockTile(TileClient aTile);
-
-  void ReleaseTile(TileClient aTile) { aTile.Release(); }
-
-  void SwapTiles(TileClient& aTileA, TileClient& aTileB) { std::swap(aTileA, aTileB); }
+  void UnlockTile(TileClient& aTile);
 
   TileClient GetPlaceholderTile() const { return TileClient(); }
 
@@ -541,8 +546,8 @@ protected:
     MOZ_COUNT_DTOR(TiledContentClient);
 
     mDestroyed = true;
-    mTiledBuffer.Release();
-    mLowPrecisionTiledBuffer.Release();
+    mTiledBuffer.DiscardBuffers();
+    mLowPrecisionTiledBuffer.DiscardBuffers();
   }
 
   virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix);
@@ -571,7 +576,7 @@ private:
   ClientTiledLayerBuffer mLowPrecisionTiledBuffer;
 };
 
-}
-}
+} // namespace layers
+} // namespace mozilla
 
 #endif

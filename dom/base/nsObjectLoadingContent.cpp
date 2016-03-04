@@ -20,6 +20,7 @@
 #include "nsIDOMHTMLObjectElement.h"
 #include "nsIDOMHTMLAppletElement.h"
 #include "nsIExternalProtocolHandler.h"
+#include "nsIInterfaceRequestorUtils.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIObjectFrame.h"
 #include "nsIPermissionManager.h"
@@ -549,6 +550,11 @@ IsPluginEnabledByExtension(nsIURI* uri, nsCString& mimeType)
   GetExtensionFromURI(uri, ext);
 
   if (ext.IsEmpty()) {
+    return false;
+  }
+
+  // Disables any native PDF plugins, when internal PDF viewer is enabled.
+  if (ext.EqualsIgnoreCase("pdf") && nsContentUtils::IsPDFJSEnabled()) {
     return false;
   }
 
@@ -1479,8 +1485,10 @@ nsObjectLoadingContent::CheckLoadPolicy(int16_t *aContentPolicy)
 
   nsIDocument* doc = thisContent->OwnerDoc();
 
+  nsContentPolicyType contentPolicyType = GetContentPolicyType();
+
   *aContentPolicy = nsIContentPolicy::ACCEPT;
-  nsresult rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_OBJECT,
+  nsresult rv = NS_CheckContentLoadPolicy(contentPolicyType,
                                           mURI,
                                           doc->NodePrincipal(),
                                           thisContent,
@@ -1526,7 +1534,7 @@ nsObjectLoadingContent::CheckProcessPolicy(int16_t *aContentPolicy)
       objectType = nsIContentPolicy::TYPE_DOCUMENT;
       break;
     case eType_Plugin:
-      objectType = nsIContentPolicy::TYPE_OBJECT;
+      objectType = GetContentPolicyType();
       break;
     default:
       NS_NOTREACHED("Calling checkProcessPolicy with a unloadable type");
@@ -2479,11 +2487,13 @@ nsObjectLoadingContent::OpenChannel()
     securityFlags |= nsILoadInfo::SEC_SANDBOXED;
   }
 
+  nsContentPolicyType contentPolicyType = GetContentPolicyType();
+
   rv = NS_NewChannel(getter_AddRefs(chan),
                      mURI,
                      thisContent,
                      securityFlags,
-                     nsIContentPolicy::TYPE_OBJECT,
+                     contentPolicyType,
                      group, // aLoadGroup
                      shim,  // aCallbacks
                      nsIChannel::LOAD_CALL_CONTENT_SNIFFERS |
@@ -2670,6 +2680,13 @@ nsObjectLoadingContent::GetTypeOfContent(const nsCString& aMIMEType)
 
   if ((caps & eSupportImages) && IsSupportedImage(aMIMEType)) {
     return eType_Image;
+  }
+
+  // Faking support of the PDF content as a document for EMBED tags
+  // when internal PDF viewer is enabled.
+  if (aMIMEType.LowerCaseEqualsLiteral("application/pdf") &&
+      nsContentUtils::IsPDFJSEnabled()) {
+    return eType_Document;
   }
 
   // SVGs load as documents, but are their own capability
@@ -3199,7 +3216,7 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentTyp
     sPrefsInitialized = true;
   }
 
-  if (XRE_GetProcessType() == GeckoProcessType_Default &&
+  if (XRE_IsParentProcess() &&
       BrowserTabsRemoteAutostart()) {
     // Plugins running OOP from the chrome process along with plugins running
     // OOP from the content process will hang. Let's prevent that situation.

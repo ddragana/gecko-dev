@@ -19,6 +19,7 @@
     "Services": true,
     "Task": true,
     "XPCOMUtils": true,
+    "XPCNativeWrapper": true,
   },
   "rules": {
     // These are the rules that have been configured so far to match the
@@ -281,7 +282,7 @@
     // Don't require quotes around object literal property names.
     "quote-props": 0,
     // Double quotes should be used.
-    "quotes": [1, "double"],
+    "quotes": [1, "double", "avoid-escape"],
     // Require use of the second argument for parseInt().
     "radix": 2,
     // Always require use of semicolons wherever they are valid.

@@ -5,8 +5,6 @@
 
 package org.mozilla.gecko;
 
-import com.nineoldandroids.animation.Animator;
-import com.nineoldandroids.animation.ObjectAnimator;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.DynamicToolbar.PinReason;
 import org.mozilla.gecko.DynamicToolbar.VisibilityTransition;
@@ -71,6 +69,7 @@ import org.mozilla.gecko.toolbar.AutocompleteHandler;
 import org.mozilla.gecko.toolbar.BrowserToolbar;
 import org.mozilla.gecko.toolbar.BrowserToolbar.TabEditingState;
 import org.mozilla.gecko.toolbar.ToolbarProgressView;
+import org.mozilla.gecko.trackingprotection.TrackingProtectionPrompt;
 import org.mozilla.gecko.util.ActivityUtils;
 import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.EventCallback;
@@ -139,6 +138,8 @@ import android.widget.ListView;
 import android.widget.RelativeLayout;
 import android.widget.Toast;
 import android.widget.ViewFlipper;
+import com.nineoldandroids.animation.Animator;
+import com.nineoldandroids.animation.ObjectAnimator;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -1319,7 +1320,7 @@ public class BrowserApp extends GeckoApp
         if (itemId == R.id.copyurl) {
             Tab tab = Tabs.getInstance().getSelectedTab();
             if (tab != null) {
-                String url = tab.getURL();
+                String url = ReaderModeUtils.stripAboutReaderUrl(tab.getURL());
                 if (url != null) {
                     Clipboard.setText(url);
                     Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.CONTEXT_MENU, "copyurl");
@@ -1687,14 +1688,20 @@ public class BrowserApp extends GeckoApp
                 final byte[] unwrapkB = Utils.hex2Byte(json.getString("unwrapBKey"));
                 final byte[] sessionToken = Utils.hex2Byte(json.getString("sessionToken"));
                 final byte[] keyFetchToken = Utils.hex2Byte(json.getString("keyFetchToken"));
+                final String authServerEndpoint =
+                    json.optString("authServerEndpoint", FxAccountConstants.DEFAULT_AUTH_SERVER_ENDPOINT);
+                final String tokenServerEndpoint =
+                    json.optString("tokenServerEndpoint", FxAccountConstants.DEFAULT_TOKEN_SERVER_ENDPOINT);
+                final String profileServerEndpoint =
+                    json.optString("profileServerEndpoint", FxAccountConstants.DEFAULT_PROFILE_SERVER_ENDPOINT);
                 // TODO: handle choose what to Sync.
                 State state = new Engaged(email, uid, verified, unwrapkB, sessionToken, keyFetchToken);
                 fxAccount = AndroidFxAccount.addAndroidAccount(this,
                         email,
                         getProfile().getName(),
-                        FxAccountConstants.DEFAULT_AUTH_SERVER_ENDPOINT,
-                        FxAccountConstants.DEFAULT_TOKEN_SERVER_ENDPOINT,
-                        FxAccountConstants.DEFAULT_PROFILE_SERVER_ENDPOINT,
+                        authServerEndpoint,
+                        tokenServerEndpoint,
+                        profileServerEndpoint,
                         state,
                         AndroidFxAccount.DEFAULT_AUTHORITIES_TO_SYNC_AUTOMATICALLY_MAP);
             } catch (Exception e) {
@@ -2050,6 +2057,22 @@ public class BrowserApp extends GeckoApp
     @Override
     public void addPrivateTab() {
         Tabs.getInstance().addPrivateTab();
+
+        showTrackingProtectionPromptIfApplicable();
+    }
+
+    private void showTrackingProtectionPromptIfApplicable() {
+        final SharedPreferences prefs = getSharedPreferences();
+
+        final boolean hasTrackingProtectionPromptBeShownBefore = prefs.getBoolean(GeckoPreferences.PREFS_TRACKING_PROTECTION_PROMPT_SHOWN, false);
+
+        if (hasTrackingProtectionPromptBeShownBefore) {
+            return;
+        }
+
+        prefs.edit().putBoolean(GeckoPreferences.PREFS_TRACKING_PROTECTION_PROMPT_SHOWN, true).apply();
+
+        startActivity(new Intent(BrowserApp.this, TrackingProtectionPrompt.class));
     }
 
     @Override
@@ -2101,6 +2124,9 @@ public class BrowserApp extends GeckoApp
                 mDoorHangerPopup.disable();
             }
             mTabsPanel.show(panel);
+
+            // Hide potentially visible "find in page" bar (Bug 1177338)
+            mFindInPageBar.hide();
         }
     }
 
@@ -2633,6 +2659,12 @@ public class BrowserApp extends GeckoApp
             return;
         }
 
+        // This must be called before the dynamic toolbar is set visible because it calls
+        // FormAssistPopup.onMetricsChanged, which queues a runnable that undoes the effect of hide.
+        // With hide first, onMetricsChanged will return early instead.
+        mFormAssistPopup.hide();
+        mFindInPageBar.hide();
+
         // Refresh toolbar height to possibly restore the toolbar padding
         refreshToolbarHeight();
 
@@ -2786,9 +2818,6 @@ public class BrowserApp extends GeckoApp
         // We do this here because there are glitches when unlocking a device with
         // BrowserSearch in the foreground if we use BrowserSearch.onStart/Stop.
         getActivity().getWindow().setBackgroundDrawableResource(android.R.color.white);
-
-        // Hide potentially visible "find in page" bar (bug 1175434).
-        mFindInPageBar.hide();
     }
 
     private void hideBrowserSearch() {
@@ -3260,7 +3289,6 @@ public class BrowserApp extends GeckoApp
         share.setVisible(shareVisible);
         final boolean shareEnabled = StringUtils.isShareableUrl(url) && shareVisible;
         share.setEnabled(shareEnabled);
-        MenuUtils.safeSetEnabled(aMenu, R.id.apps, RestrictedProfiles.isAllowed(this, RestrictedProfiles.Restriction.DISALLOW_INSTALL_APPS));
         MenuUtils.safeSetEnabled(aMenu, R.id.addons, RestrictedProfiles.isAllowed(this, RestrictedProfiles.Restriction.DISALLOW_INSTALL_EXTENSION));
         MenuUtils.safeSetEnabled(aMenu, R.id.downloads, RestrictedProfiles.isAllowed(this, RestrictedProfiles.Restriction.DISALLOW_DOWNLOADS));
 
@@ -3325,6 +3353,10 @@ public class BrowserApp extends GeckoApp
                 }
             }
         }
+
+        // Hide tools menu if restriction is active
+        final boolean toolsVisible = RestrictedProfiles.isAllowed(this, RestrictedProfiles.Restriction.DISALLOW_TOOLS_MENU);
+        MenuUtils.safeSetVisible(aMenu, R.id.tools, toolsVisible);
 
         // Disable save as PDF for about:home and xul pages.
         saveAsPDF.setEnabled(!(isAboutHome(tab) ||
@@ -3471,11 +3503,6 @@ public class BrowserApp extends GeckoApp
 
         if (itemId == R.id.logins) {
             Tabs.getInstance().loadUrlInTab(AboutPages.LOGINS);
-            return true;
-        }
-
-        if (itemId == R.id.apps) {
-            Tabs.getInstance().loadUrlInTab(AboutPages.APPS);
             return true;
         }
 
@@ -3926,5 +3953,14 @@ public class BrowserApp extends GeckoApp
 
     public static interface Refreshable {
         public void refresh();
+    }
+
+    @Override
+    protected StartupAction getStartupAction(final String passedURL) {
+        final boolean inGuestMode = GeckoProfile.get(this).inGuestMode();
+        if (inGuestMode) {
+            return StartupAction.GUEST;
+        }
+        return (passedURL == null ? StartupAction.NORMAL : StartupAction.URL);
     }
 }

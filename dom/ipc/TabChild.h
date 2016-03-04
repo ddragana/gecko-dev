@@ -21,7 +21,6 @@
 #include "nsIDocShell.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsFrameMessageManager.h"
-#include "nsIWebProgressListener.h"
 #include "nsIPresShell.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsWeakReference.h"
@@ -43,21 +42,22 @@ class nsIDOMWindowUtils;
 namespace mozilla {
 namespace layout {
 class RenderFrameChild;
-}
+} // namespace layout
 
 namespace layers {
 class APZEventState;
+class ImageCompositeNotification;
 struct SetTargetAPZCCallback;
 struct SetAllowedTouchBehaviorCallback;
-}
+} // namespace layers
 
 namespace widget {
 struct AutoCacheNativeKeyCommands;
-}
+} // namespace widget
 
 namespace plugins {
 class PluginWidgetChild;
-}
+} // namespace plugins
 
 namespace dom {
 
@@ -182,12 +182,6 @@ public:
     virtual nsIWebNavigation* WebNavigation() const = 0;
     virtual PuppetWidget* WebWidget() = 0;
     nsIPrincipal* GetPrincipal() { return mPrincipal; }
-    // Recalculates the display state, including the CSS
-    // viewport. This should be called whenever we believe the
-    // viewport data on a document may have changed. If it didn't
-    // change, this function doesn't do anything.  However, it should
-    // not be called all the time as it is fairly expensive.
-    bool HandlePossibleViewportChange(const ScreenIntSize& aOldScreenSize);
     virtual bool DoUpdateZoomConstraints(const uint32_t& aPresShellId,
                                          const mozilla::layers::FrameMetrics::ViewID& aViewId,
                                          const Maybe<mozilla::layers::ZoomConstraints>& aConstraints) = 0;
@@ -196,18 +190,11 @@ public:
 
 protected:
     virtual ~TabChildBase();
-    CSSSize GetPageSize(nsCOMPtr<nsIDocument> aDocument, const CSSSize& aViewport);
 
-    // Get the DOMWindowUtils for the top-level window in this tab.
-    already_AddRefed<nsIDOMWindowUtils> GetDOMWindowUtils();
     // Get the Document for the top-level window in this tab.
     already_AddRefed<nsIDocument> GetDocument() const;
     // Get the pres-shell of the document for the top-level window in this tab.
     already_AddRefed<nsIPresShell> GetPresShell() const;
-
-    // Wrapper for nsIDOMWindowUtils.setCSSViewport(). This updates some state
-    // variables local to this class before setting it.
-    void SetCSSViewport(const CSSSize& aSize);
 
     // Wraps up a JSON object as a structured clone and sends it to the browser
     // chrome script.
@@ -217,17 +204,12 @@ protected:
     void DispatchMessageManagerMessage(const nsAString& aMessageName,
                                        const nsAString& aJSONData);
 
-    void InitializeRootMetrics();
-
-    mozilla::layers::FrameMetrics ProcessUpdateFrame(const mozilla::layers::FrameMetrics& aFrameMetrics);
+    void ProcessUpdateFrame(const mozilla::layers::FrameMetrics& aFrameMetrics);
 
     bool UpdateFrameHandler(const mozilla::layers::FrameMetrics& aFrameMetrics);
 
 protected:
-    CSSSize mOldViewportSize;
-    bool mContentDocumentIsDisplayed;
     nsRefPtr<TabChildGlobal> mTabChildGlobal;
-    mozilla::layers::FrameMetrics mLastRootMetrics;
     nsCOMPtr<nsIWebBrowserChrome3> mWebBrowserChrome;
 };
 
@@ -238,8 +220,6 @@ class TabChild final : public TabChildBase,
                        public nsIWebBrowserChromeFocus,
                        public nsIInterfaceRequestor,
                        public nsIWindowProvider,
-                       public nsIDOMEventListener,
-                       public nsIWebProgressListener,
                        public nsSupportsWeakReference,
                        public nsITabChild,
                        public nsIObserver,
@@ -287,8 +267,6 @@ public:
     NS_DECL_NSIWEBBROWSERCHROMEFOCUS
     NS_DECL_NSIINTERFACEREQUESTOR
     NS_DECL_NSIWINDOWPROVIDER
-    NS_DECL_NSIDOMEVENTLISTENER
-    NS_DECL_NSIWEBPROGRESSLISTENER
     NS_DECL_NSITABCHILD
     NS_DECL_NSIOBSERVER
     NS_DECL_NSITOOLTIPLISTENER
@@ -524,10 +502,15 @@ protected:
     virtual bool RecvDestroy() override;
     virtual bool RecvSetUpdateHitRegion(const bool& aEnabled) override;
     virtual bool RecvSetIsDocShellActive(const bool& aIsActive) override;
+    virtual bool RecvNavigateByKey(const bool& aForward, const bool& aForDocumentNavigation) override;
 
     virtual bool RecvRequestNotifyAfterRemotePaint() override;
 
     virtual bool RecvParentActivated(const bool& aActivated) override;
+
+    virtual bool RecvStopIMEStateManagement() override;
+    virtual bool RecvMenuKeyboardListenerInstalled(
+                   const bool& aInstalled) override;
 
 #ifdef MOZ_WIDGET_GONK
     void MaybeRequestPreinitCamera();
@@ -654,13 +637,14 @@ private:
     double mDefaultScale;
     bool mIPCOpen;
     bool mParentIsActive;
+    bool mAudioChannelActive;
     bool mAsyncPanZoomEnabled;
     CSSSize mUnscaledInnerSize;
 
     DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };
 
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_TabChild_h

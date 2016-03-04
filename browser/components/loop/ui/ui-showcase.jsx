@@ -32,13 +32,12 @@
 
   // 3. Shared components
   var ConversationToolbar = loop.shared.views.ConversationToolbar;
-  var FeedbackView = loop.shared.views.FeedbackView;
+  var FeedbackView = loop.feedbackViews.FeedbackView;
   var Checkbox = loop.shared.views.Checkbox;
   var TextChatView = loop.shared.views.chat.TextChatView;
 
   // Store constants
   var ROOM_STATES = loop.store.ROOM_STATES;
-  var FEEDBACK_STATES = loop.store.FEEDBACK_STATES;
   var CALL_TYPES = loop.shared.utils.CALL_TYPES;
 
   // Local helpers
@@ -75,14 +74,6 @@
   loop.shared.mixins.setRootObject(rootObject);
 
   var dispatcher = new loop.Dispatcher();
-
-  // Feedback API client configured to send data to the stage input server,
-  // which is available at https://input.allizom.org
-  var stageFeedbackApiClient = new loop.FeedbackAPIClient(
-    "https://input.allizom.org/api/v1/feedback", {
-      product: "Loop"
-    }
-  );
 
   var mockSDK = _.extend({
     sendTextChatMessage: function(message) {
@@ -281,9 +272,6 @@
     activeRoomStore: desktopRemoteFaceMuteActiveRoomStore
   });
 
-  var feedbackStore = new loop.store.FeedbackStore(dispatcher, {
-    feedbackClient: stageFeedbackApiClient
-  });
   var conversationStore = new loop.store.ConversationStore(dispatcher, {
     client: {},
     mozLoop: navigator.mozLoop,
@@ -354,7 +342,6 @@
   loop.store.StoreMixin.register({
     activeRoomStore: activeRoomStore,
     conversationStore: conversationStore,
-    feedbackStore: feedbackStore,
     textChatStore: textChatStore
   });
 
@@ -421,8 +408,8 @@
     shapes: {
       "10x10": ["close", "close-active", "close-disabled", "dropdown",
         "dropdown-white", "dropdown-active", "dropdown-disabled", "edit",
-        "edit-active", "edit-disabled", "expand", "expand-active", "expand-disabled",
-        "minimize", "minimize-active", "minimize-disabled"
+        "edit-active", "edit-disabled", "edit-white", "expand", "expand-active",
+        "expand-disabled", "minimize", "minimize-active", "minimize-disabled"
       ],
       "14x14": ["audio", "audio-active", "audio-disabled", "facemute",
         "facemute-active", "facemute-disabled", "hangup", "hangup-active",
@@ -862,23 +849,12 @@
 
           <Section name="FeedbackView">
             <p className="note">
-              <strong>Note:</strong> For the useable demo, you can access submitted data at&nbsp;
-              <a href="https://input.allizom.org/">input.allizom.org</a>.
             </p>
             <Example dashed={true}
                      style={{width: "300px", height: "272px"}}
                      summary="Default (useable demo)">
-              <FeedbackView feedbackStore={feedbackStore} />
-            </Example>
-            <Example dashed={true}
-                     style={{width: "300px", height: "272px"}}
-                     summary="Detailed form">
-              <FeedbackView feedbackState={FEEDBACK_STATES.DETAILS} feedbackStore={feedbackStore} />
-            </Example>
-            <Example dashed={true}
-                     style={{width: "300px", height: "272px"}}
-                     summary="Thank you!">
-              <FeedbackView feedbackState={FEEDBACK_STATES.SENT} feedbackStore={feedbackStore}/>
+              <FeedbackView mozLoop={{}}
+                            onAfterFeedbackReceived={function() {}} />
             </Example>
           </Section>
 
@@ -926,6 +902,7 @@
                   dispatcher={dispatcher}
                   localPosterUrl="sample-img/video-screen-local.png"
                   mozLoop={navigator.mozLoop}
+                  onCallTerminated={function(){}}
                   roomState={ROOM_STATES.INIT}
                   roomStore={invitationRoomStore} />
               </div>
@@ -943,6 +920,7 @@
                   dispatcher={dispatcher}
                   localPosterUrl="sample-img/video-screen-local.png"
                   mozLoop={navigator.mozLoop}
+                  onCallTerminated={function(){}}
                   remotePosterUrl="sample-img/video-screen-remote.png"
                   roomState={ROOM_STATES.HAS_PARTICIPANTS}
                   roomStore={desktopRoomStoreLoading} />
@@ -956,6 +934,7 @@
                   dispatcher={dispatcher}
                   localPosterUrl="sample-img/video-screen-local.png"
                   mozLoop={navigator.mozLoop}
+                  onCallTerminated={function(){}}
                   remotePosterUrl="sample-img/video-screen-remote.png"
                   roomState={ROOM_STATES.HAS_PARTICIPANTS}
                   roomStore={roomStore} />
@@ -970,6 +949,7 @@
                 <DesktopRoomConversationView
                   dispatcher={dispatcher}
                   mozLoop={navigator.mozLoop}
+                  onCallTerminated={function(){}}
                   remotePosterUrl="sample-img/video-screen-remote.png"
                   roomStore={desktopLocalFaceMuteRoomStore} />
               </div>
@@ -983,6 +963,7 @@
                   dispatcher={dispatcher}
                   localPosterUrl="sample-img/video-screen-local.png"
                   mozLoop={navigator.mozLoop}
+                  onCallTerminated={function(){}}
                   roomStore={desktopRemoteFaceMuteRoomStore} />
               </div>
             </FramedExample>
@@ -1174,20 +1155,6 @@
             <FramedExample cssClass="standalone"
                            dashed={true}
                            height={483}
-                           summary="Standalone room conversation (feedback)"
-                           width={644}>
-              <div className="standalone">
-                <StandaloneRoomView
-                  activeRoomStore={endedRoomStore}
-                  dispatcher={dispatcher}
-                  feedbackStore={feedbackStore}
-                  isFirefox={false} />
-              </div>
-            </FramedExample>
-
-            <FramedExample cssClass="standalone"
-                           dashed={true}
-                           height={483}
                            summary="Standalone room conversation (failed)"
                            width={644} >
               <div className="standalone">
@@ -1219,6 +1186,8 @@
             </FramedExample>
 
             <FramedExample
+              cssClass="standalone"
+              dashed={true}
               height={480}
               onContentsRendered={updatingSharingRoomStore.forcedUpdate}
               summary="Standalone room convo (has-participants, receivingScreenShare, 600x480)"
@@ -1243,8 +1212,8 @@
                            width={298}>
               <div className="fx-embedded">
                 <TextChatView dispatcher={dispatcher}
-                              showAlways={false}
-                              showRoomName={false} />
+                              showRoomName={false}
+                              useDesktopPaths={false} />
               </div>
             </FramedExample>
 
@@ -1257,8 +1226,8 @@
                 <div className="media-wrapper">
                   <TextChatView
                     dispatcher={dispatcher}
-                    showAlways={true}
-                    showRoomName={true} />
+                    showRoomName={true}
+                    useDesktopPaths={false} />
                 </div>
               </div>
             </FramedExample>
@@ -1282,6 +1251,15 @@
   });
 
   window.addEventListener("DOMContentLoaded", function() {
+    var uncaughtError;
+    var consoleWarn = console.warn;
+    var caughtWarnings = [];
+    console.warn = function() {
+      var args = Array.slice(arguments);
+      caughtWarnings.push(args);
+      consoleWarn.apply(console, args);
+    };
+
     try {
       React.renderComponent(<App />, document.getElementById("main"));
 
@@ -1304,12 +1282,23 @@
 
       // This simulates the mocha layout for errors which means we can run
       // this alongside our other unit tests but use the same harness.
-      if (uncaughtError) {
-        $("#results").append("<div class='failures'><em>1</em></div>");
-        $("#results").append("<li class='test fail'>" +
-          "<h2>Errors rendering UI-Showcase</h2>" +
-          "<pre class='error'>" + uncaughtError + "\n" + uncaughtError.stack + "</pre>" +
-          "</li>");
+      var expectedWarningsCount = 23;
+      var warningsMismatch = caughtWarnings.length !== expectedWarningsCount;
+      if (uncaughtError || warningsMismatch) {
+        $("#results").append("<div class='failures'><em>" +
+          ((uncaughtError && warningsMismatch) ? 2 : 1) + "</em></div>");
+        if (warningsMismatch) {
+          $("#results").append("<li class='test fail'>" +
+            "<h2>Unexpected number of warnings detected in UI-Showcase</h2>" +
+            "<pre class='error'>Got: " + caughtWarnings.length + "\n" +
+            "Expected: " + expectedWarningsCount + "</pre></li>");
+        }
+        if (uncaughtError) {
+          $("#results").append("<li class='test fail'>" +
+            "<h2>Errors rendering UI-Showcase</h2>" +
+            "<pre class='error'>" + uncaughtError + "\n" + uncaughtError.stack + "</pre>" +
+            "</li>");
+        }
       } else {
         $("#results").append("<div class='failures'><em>0</em></div>");
       }

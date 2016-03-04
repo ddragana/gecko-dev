@@ -10,6 +10,7 @@
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/Exceptions.h"
 #include "mozilla/dom/File.h"
+#include "mozilla/dom/StructuredCloneHelper.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/Maybe.h"
 #include "nsCycleCollectionParticipant.h"
@@ -73,87 +74,6 @@ ConsoleStructuredCloneData
  * in these cases, we convert them to strings.
  * It's not the best, but at least we are able to show something.
  */
-
-// This method is called by the Structured Clone Algorithm when some data has
-// to be read.
-static JSObject*
-ConsoleStructuredCloneCallbacksRead(JSContext* aCx,
-                                    JSStructuredCloneReader* /* unused */,
-                                    uint32_t aTag, uint32_t aIndex,
-                                    void* aClosure)
-{
-  AssertIsOnMainThread();
-  ConsoleStructuredCloneData* data =
-    static_cast<ConsoleStructuredCloneData*>(aClosure);
-  MOZ_ASSERT(data);
-
-  if (aTag == CONSOLE_TAG_BLOB) {
-    MOZ_ASSERT(data->mBlobs.Length() > aIndex);
-
-    JS::Rooted<JS::Value> val(aCx);
-    {
-      nsRefPtr<Blob> blob =
-        Blob::Create(data->mParent, data->mBlobs.ElementAt(aIndex));
-      if (!ToJSValue(aCx, blob, &val)) {
-        return nullptr;
-      }
-    }
-
-    return &val.toObject();
-  }
-
-  MOZ_CRASH("No other tags are supported.");
-  return nullptr;
-}
-
-// This method is called by the Structured Clone Algorithm when some data has
-// to be written.
-static bool
-ConsoleStructuredCloneCallbacksWrite(JSContext* aCx,
-                                     JSStructuredCloneWriter* aWriter,
-                                     JS::Handle<JSObject*> aObj,
-                                     void* aClosure)
-{
-  ConsoleStructuredCloneData* data =
-    static_cast<ConsoleStructuredCloneData*>(aClosure);
-  MOZ_ASSERT(data);
-
-  nsRefPtr<Blob> blob;
-  if (NS_SUCCEEDED(UNWRAP_OBJECT(Blob, aObj, blob)) &&
-      blob->Impl()->MayBeClonedToOtherThreads()) {
-    if (!JS_WriteUint32Pair(aWriter, CONSOLE_TAG_BLOB, data->mBlobs.Length())) {
-      return false;
-    }
-
-    data->mBlobs.AppendElement(blob->Impl());
-    return true;
-  }
-
-  JS::Rooted<JS::Value> value(aCx, JS::ObjectOrNullValue(aObj));
-  JS::Rooted<JSString*> jsString(aCx, JS::ToString(aCx, value));
-  if (!jsString) {
-    return false;
-  }
-
-  if (!JS_WriteString(aWriter, jsString)) {
-    return false;
-  }
-
-  return true;
-}
-
-static void
-ConsoleStructuredCloneCallbacksError(JSContext* /* aCx */,
-                                     uint32_t /* aErrorId */)
-{
-  NS_WARNING("Failed to clone data for the Console API in workers.");
-}
-
-static const JSStructuredCloneCallbacks gConsoleCallbacks = {
-  ConsoleStructuredCloneCallbacksRead,
-  ConsoleStructuredCloneCallbacksWrite,
-  ConsoleStructuredCloneCallbacksError
-};
 
 class ConsoleCallData final
 {
@@ -274,6 +194,7 @@ private:
 
 class ConsoleRunnable : public nsRunnable
                       , public WorkerFeature
+                      , public StructuredCloneHelperInternal
 {
 public:
   explicit ConsoleRunnable(Console* aConsole)
@@ -403,13 +324,7 @@ private:
 
     AutoSafeJSContext cx;
 
-    nsCOMPtr<nsIXPConnectJSObjectHolder> sandbox =
-      mConsole->GetOrCreateSandbox(cx, wp->GetPrincipal());
-    if (NS_WARN_IF(!sandbox)) {
-       return;
-    }
-
-    JS::Rooted<JSObject*> global(cx, sandbox->GetJSObject());
+    JS::Rooted<JSObject*> global(cx, mConsole->GetOrCreateSandbox(cx, wp->GetPrincipal()));
     if (NS_WARN_IF(!global)) {
       return;
     }
@@ -431,10 +346,67 @@ protected:
   RunConsole(JSContext* aCx, nsPIDOMWindow* aOuterWindow,
              nsPIDOMWindow* aInnerWindow) = 0;
 
+  virtual JSObject* ReadCallback(JSContext* aCx,
+                                 JSStructuredCloneReader* aReader,
+                                 uint32_t aTag,
+                                 uint32_t aIndex) override
+  {
+    AssertIsOnMainThread();
+
+    if (aTag == CONSOLE_TAG_BLOB) {
+      MOZ_ASSERT(mClonedData.mBlobs.Length() > aIndex);
+
+      JS::Rooted<JS::Value> val(aCx);
+      {
+        nsRefPtr<Blob> blob =
+          Blob::Create(mClonedData.mParent, mClonedData.mBlobs.ElementAt(aIndex));
+        if (!ToJSValue(aCx, blob, &val)) {
+          return nullptr;
+        }
+      }
+
+      return &val.toObject();
+    }
+
+    MOZ_CRASH("No other tags are supported.");
+    return nullptr;
+  }
+
+  virtual bool WriteCallback(JSContext* aCx,
+                             JSStructuredCloneWriter* aWriter,
+                             JS::Handle<JSObject*> aObj) override
+  {
+    nsRefPtr<Blob> blob;
+    if (NS_SUCCEEDED(UNWRAP_OBJECT(Blob, aObj, blob)) &&
+        blob->Impl()->MayBeClonedToOtherThreads()) {
+      if (!JS_WriteUint32Pair(aWriter, CONSOLE_TAG_BLOB,
+                              mClonedData.mBlobs.Length())) {
+        return false;
+      }
+
+      mClonedData.mBlobs.AppendElement(blob->Impl());
+      return true;
+    }
+
+    JS::Rooted<JS::Value> value(aCx, JS::ObjectOrNullValue(aObj));
+    JS::Rooted<JSString*> jsString(aCx, JS::ToString(aCx, value));
+    if (!jsString) {
+      return false;
+    }
+
+    if (!JS_WriteString(aWriter, jsString)) {
+      return false;
+    }
+
+    return true;
+  }
+
   WorkerPrivate* mWorkerPrivate;
 
   // This must be released on the worker thread.
   nsRefPtr<Console> mConsole;
+
+  ConsoleStructuredCloneData mClonedData;
 };
 
 // This runnable appends a CallData object into the Console queue running on
@@ -499,7 +471,7 @@ private:
 
     JS::Rooted<JS::Value> value(aCx, JS::ObjectValue(*arguments));
 
-    if (!mArguments.write(aCx, value, &gConsoleCallbacks, &mData)) {
+    if (!Write(aCx, value)) {
       return false;
     }
 
@@ -537,12 +509,12 @@ private:
     }
 
     // Now we could have the correct window (if we are not window-less).
-    mData.mParent = aInnerWindow;
+    mClonedData.mParent = aInnerWindow;
 
     ProcessCallData(aCx);
     mCallData->CleanupJSObjects();
 
-    mData.mParent = nullptr;
+    mClonedData.mParent = nullptr;
   }
 
 private:
@@ -552,7 +524,7 @@ private:
     ClearException ce(aCx);
 
     JS::Rooted<JS::Value> argumentsValue(aCx);
-    if (!mArguments.read(aCx, &argumentsValue, &gConsoleCallbacks, &mData)) {
+    if (!Read(aCx, &argumentsValue)) {
       return;
     }
 
@@ -582,9 +554,6 @@ private:
   }
 
   nsRefPtr<ConsoleCallData> mCallData;
-
-  JSAutoStructuredCloneBuffer mArguments;
-  ConsoleStructuredCloneData mData;
 };
 
 // This runnable calls ProfileMethod() on the console on the main-thread.
@@ -629,7 +598,7 @@ private:
 
     JS::Rooted<JS::Value> value(aCx, JS::ObjectValue(*arguments));
 
-    if (!mBuffer.write(aCx, value, &gConsoleCallbacks, &mData)) {
+    if (!Write(aCx, value)) {
       return false;
     }
 
@@ -644,11 +613,11 @@ private:
     ClearException ce(aCx);
 
     // Now we could have the correct window (if we are not window-less).
-    mData.mParent = aInnerWindow;
+    mClonedData.mParent = aInnerWindow;
 
     JS::Rooted<JS::Value> argumentsValue(aCx);
-    bool ok = mBuffer.read(aCx, &argumentsValue, &gConsoleCallbacks, &mData);
-    mData.mParent = nullptr;
+    bool ok = Read(aCx, &argumentsValue);
+    mClonedData.mParent = nullptr;
 
     if (!ok) {
       return;
@@ -682,14 +651,11 @@ private:
 
   nsString mAction;
   Sequence<JS::Value> mArguments;
-
-  JSAutoStructuredCloneBuffer mBuffer;
-  ConsoleStructuredCloneData mData;
 };
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(Console)
 
-// We don't need to traverse/unlink mStorage and mSanbox because they are not
+// We don't need to traverse/unlink mStorage and mSandbox because they are not
 // CCed objects and they are only used on the main thread, even when this
 // Console object is used on workers.
 
@@ -743,19 +709,12 @@ Console::Console(nsPIDOMWindow* aWindow)
 Console::~Console()
 {
   if (!NS_IsMainThread()) {
-    nsCOMPtr<nsIThread> mainThread;
-    NS_GetMainThread(getter_AddRefs(mainThread));
-
     if (mStorage) {
-      nsIConsoleAPIStorage* storage;
-      mStorage.forget(&storage);
-      NS_ProxyRelease(mainThread, storage, false);
+      NS_ReleaseOnMainThread(mStorage);
     }
 
     if (mSandbox) {
-      nsIXPConnectJSObjectHolder* sandbox;
-      mSandbox.forget(&sandbox);
-      NS_ProxyRelease(mainThread, sandbox, false);
+      NS_ReleaseOnMainThread(mSandbox);
     }
   }
 
@@ -1469,7 +1428,7 @@ FlushOutput(JSContext* aCx, Sequence<JS::Value>& aSequence, nsString &aOutput)
   return true;
 }
 
-} // anonymous namespace
+} // namespace
 
 bool
 Console::ProcessArguments(JSContext* aCx,
@@ -1904,7 +1863,7 @@ Console::ShouldIncludeStackTrace(MethodName aMethodName)
   }
 }
 
-nsIXPConnectJSObjectHolder*
+JSObject*
 Console::GetOrCreateSandbox(JSContext* aCx, nsIPrincipal* aPrincipal)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -1913,14 +1872,16 @@ Console::GetOrCreateSandbox(JSContext* aCx, nsIPrincipal* aPrincipal)
     nsIXPConnect* xpc = nsContentUtils::XPConnect();
     MOZ_ASSERT(xpc, "This should never be null!");
 
-    nsresult rv = xpc->CreateSandbox(aCx, aPrincipal,
-                                     getter_AddRefs(mSandbox));
+    JS::Rooted<JSObject*> sandbox(aCx);
+    nsresult rv = xpc->CreateSandbox(aCx, aPrincipal, sandbox.address());
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return nullptr;
     }
+
+    mSandbox = new JSObjectHolder(aCx, sandbox);
   }
 
-  return mSandbox;
+  return mSandbox->GetJSObject();
 }
 
 } // namespace dom

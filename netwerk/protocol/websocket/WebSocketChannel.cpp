@@ -49,6 +49,7 @@
 #include "nsAlgorithm.h"
 #include "nsProxyRelease.h"
 #include "nsNetUtil.h"
+#include "nsINode.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
@@ -2188,7 +2189,7 @@ public:
   }
 };
 
-} // anonymous namespace
+} // namespace
 
 void
 WebSocketChannel::CleanupConnection()
@@ -3744,7 +3745,7 @@ WebSocketChannel::SaveNetworkStats(bool enforce)
 #endif
 }
 
-} // namespace mozilla::net
+} // namespace net
 } // namespace mozilla
 
 #undef CLOSE_GOING_AWAY

@@ -87,6 +87,7 @@ ClientPaintedLayer::PaintThebes()
     ClientManager()->GetPaintedLayerCallback()(this,
                                               ctx,
                                               iter.mDrawRegion,
+                                              state.mRegionToDraw,
                                               state.mClip,
                                               state.mRegionToInvalidate,
                                               ClientManager()->GetPaintedLayerCallbackData());
@@ -117,9 +118,7 @@ ClientPaintedLayer::PaintThebes()
 void
 ClientPaintedLayer::RenderLayerWithReadback(ReadbackProcessor *aReadback)
 {
-  if (GetMaskLayer()) {
-    ToClientLayer(GetMaskLayer())->RenderLayer();
-  }
+  RenderMaskLayers(this);
   
   if (!mContentClient) {
     mContentClient = ContentClient::CreateContentClient(ClientManager()->AsShadowForwarder());
@@ -202,5 +201,5 @@ ClientPaintedLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   }
 }
 
-}
-}
+} // namespace layers
+} // namespace mozilla

@@ -105,6 +105,17 @@ let handleContentContextMenu = function (event) {
                                           .getInterface(Ci.nsIDOMWindowUtils)
                                           .outerWindowID;
 
+  // get referrer attribute from clicked link and parse it
+  // if per element referrer is enabled, the element referrer overrules
+  // the document wide referrer
+  if (Services.prefs.getBoolPref("network.http.enablePerElementReferrer")) {
+    let referrerAttrValue = Services.netUtils.parseAttributePolicyString(event.target.
+                            getAttribute("referrer"));
+    if (referrerAttrValue !== Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT) {
+      referrerPolicy = referrerAttrValue;
+    }
+  }
+
   let disableSetDesktopBg = null;
   // Media related cache info parent needs for saving
   let contentType = null;
@@ -150,12 +161,12 @@ let handleContentContextMenu = function (event) {
 
     let customMenuItems = PageMenuChild.build(event.target);
     let principal = doc.nodePrincipal;
-    sendSyncMessage("contextmenu",
-                    { editFlags, spellInfo, customMenuItems, addonInfo,
-                      principal, docLocation, charSet, baseURI, referrer,
-                      referrerPolicy, contentType, contentDisposition,
-                      frameOuterWindowID, selectionInfo, disableSetDesktopBg },
-                    { event, popupNode: event.target });
+    sendRpcMessage("contextmenu",
+                   { editFlags, spellInfo, customMenuItems, addonInfo,
+                     principal, docLocation, charSet, baseURI, referrer,
+                     referrerPolicy, contentType, contentDisposition,
+                     frameOuterWindowID, selectionInfo, disableSetDesktopBg },
+                   { event, popupNode: event.target });
   }
   else {
     // Break out to the parent window and pass the add-on info along
@@ -318,50 +329,6 @@ let AboutNetErrorListener = {
 
 AboutNetErrorListener.init(this);
 
-// An event listener for custom "WebChannelMessageToChrome" events on pages
-addEventListener("WebChannelMessageToChrome", function (e) {
-  // if target is window then we want the document principal, otherwise fallback to target itself.
-  let principal = e.target.nodePrincipal ? e.target.nodePrincipal : e.target.document.nodePrincipal;
-
-  if (e.detail) {
-    sendAsyncMessage("WebChannelMessageToChrome", e.detail, { eventTarget: e.target }, principal);
-  } else  {
-    Cu.reportError("WebChannel message failed. No message detail.");
-  }
-}, true, true);
-
-// Add message listener for "WebChannelMessageToContent" messages from chrome scripts
-addMessageListener("WebChannelMessageToContent", function (e) {
-  if (e.data) {
-    // e.objects.eventTarget will be defined if sending a response to
-    // a WebChannelMessageToChrome event. An unsolicited send
-    // may not have an eventTarget defined, in this case send to the
-    // main content window.
-    let eventTarget = e.objects.eventTarget || content;
-
-    // if eventTarget is window then we want the document principal,
-    // otherwise use target itself.
-    let targetPrincipal = eventTarget instanceof Ci.nsIDOMWindow ? eventTarget.document.nodePrincipal : eventTarget.nodePrincipal;
-
-    if (e.principal.subsumes(targetPrincipal)) {
-      // if eventTarget is a window, use it as the targetWindow, otherwise
-      // find the window that owns the eventTarget.
-      let targetWindow = eventTarget instanceof Ci.nsIDOMWindow ? eventTarget : eventTarget.ownerDocument.defaultView;
-
-      eventTarget.dispatchEvent(new targetWindow.CustomEvent("WebChannelMessageToContent", {
-        detail: Cu.cloneInto({
-          id: e.data.id,
-          message: e.data.message,
-        }, targetWindow),
-      }));
-    } else {
-      Cu.reportError("WebChannel message failed. Principal mismatch.");
-    }
-  } else {
-    Cu.reportError("WebChannel message failed. No message data.");
-  }
-});
-
 
 let ClickEventHandler = {
   init: function init() {
@@ -395,10 +362,23 @@ let ClickEventHandler = {
 
     let [href, node] = this._hrefAndLinkNodeForClickEvent(event);
 
+    // get referrer attribute from clicked link and parse it
+    // if per element referrer is enabled, the element referrer overrules
+    // the document wide referrer
+    let referrerPolicy = ownerDoc.referrerPolicy;
+    if (Services.prefs.getBoolPref("network.http.enablePerElementReferrer") &&
+        node) {
+      let referrerAttrValue = Services.netUtils.parseAttributePolicyString(node.
+                              getAttribute("referrer"));
+      if (referrerAttrValue !== Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT) {
+        referrerPolicy = referrerAttrValue;
+      }
+    }
+
     let json = { button: event.button, shiftKey: event.shiftKey,
                  ctrlKey: event.ctrlKey, metaKey: event.metaKey,
                  altKey: event.altKey, href: null, title: null,
-                 bookmark: false, referrerPolicy: ownerDoc.referrerPolicy };
+                 bookmark: false, referrerPolicy: referrerPolicy };
 
     if (href) {
       try {
@@ -760,6 +740,57 @@ addMessageListener("ContextMenu:SearchFieldBookmarkData", (message) => {
   sendAsyncMessage("ContextMenu:SearchFieldBookmarkData:Result",
                    { spec, title, description, postData, charset });
 });
+
+let LightWeightThemeWebInstallListener = {
+  _previewWindow: null,
+
+  init: function() {
+    addEventListener("InstallBrowserTheme", this, false, true);
+    addEventListener("PreviewBrowserTheme", this, false, true);
+    addEventListener("ResetBrowserThemePreview", this, false, true);
+  },
+
+  handleEvent: function (event) {
+    switch (event.type) {
+      case "InstallBrowserTheme": {
+        sendAsyncMessage("LightWeightThemeWebInstaller:Install", {
+          baseURI: event.target.baseURI,
+          themeData: event.target.getAttribute("data-browsertheme"),
+        });
+        break;
+      }
+      case "PreviewBrowserTheme": {
+        sendAsyncMessage("LightWeightThemeWebInstaller:Preview", {
+          baseURI: event.target.baseURI,
+          themeData: event.target.getAttribute("data-browsertheme"),
+        });
+        this._previewWindow = event.target.ownerDocument.defaultView;
+        this._previewWindow.addEventListener("pagehide", this, true);
+        break;
+      }
+      case "pagehide": {
+        sendAsyncMessage("LightWeightThemeWebInstaller:ResetPreview");
+        this._resetPreviewWindow();
+        break;
+      }
+      case "ResetBrowserThemePreview": {
+        if (this._previewWindow) {
+          sendAsyncMessage("LightWeightThemeWebInstaller:ResetPreview",
+                           {baseURI: event.target.baseURI});
+          this._resetPreviewWindow();
+        }
+        break;
+      }
+    }
+  },
+
+  _resetPreviewWindow: function () {
+    this._previewWindow.removeEventListener("pagehide", this, true);
+    this._previewWindow = null;
+  }
+};
+
+LightWeightThemeWebInstallListener.init();
 
 function disableSetDesktopBackground(aTarget) {
   // Disable the Set as Desktop Background menu item if we're still trying

@@ -37,7 +37,7 @@ export USE_ELF_HACK ELF_HACK_FLAGS
 # Override the value of OMNIJAR_NAME from config.status with the value
 # set earlier in this file.
 
-stage-package: $(MOZ_PKG_MANIFEST)
+stage-package: $(MOZ_PKG_MANIFEST) $(MOZ_PKG_MANIFEST_DEPS)
 	OMNIJAR_NAME=$(OMNIJAR_NAME) \
 	NO_PKG_FILES="$(NO_PKG_FILES)" \
 	$(PYTHON) $(MOZILLA_DIR)/toolkit/mozapps/installer/packager.py $(DEFINES) \
@@ -204,7 +204,7 @@ upload: checksum
 source-package:
 	@echo 'Packaging source tarball...'
 	$(MKDIR) -p $(DIST)/$(PKG_SRCPACK_PATH)
-	(cd $(MOZ_PKG_SRCDIR) && $(CREATE_SOURCE_TAR) - $(DIR_TO_BE_PACKAGED)) | xz -9e > $(SOURCE_TAR)
+	(cd $(MOZ_PKG_SRCDIR) && $(CREATE_SOURCE_TAR) - ./ ) | xz -9e > $(SOURCE_TAR)
 
 hg-bundle:
 	$(MKDIR) -p $(DIST)/$(PKG_SRCPACK_PATH)

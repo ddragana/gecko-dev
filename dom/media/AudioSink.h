@@ -6,36 +6,46 @@
 #if !defined(AudioSink_h__)
 #define AudioSink_h__
 
+#include "MediaInfo.h"
+#include "nsRefPtr.h"
 #include "nsISupportsImpl.h"
-#include "MediaDecoderReader.h"
+
 #include "mozilla/dom/AudioChannelBinding.h"
+#include "mozilla/Atomics.h"
+#include "mozilla/MozPromise.h"
+#include "mozilla/ReentrantMonitor.h"
 
 namespace mozilla {
 
+class AudioData;
 class AudioStream;
-class MediaDecoderStateMachine;
+template <class T> class MediaQueue;
 
 class AudioSink {
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AudioSink)
 
-  AudioSink(MediaDecoderStateMachine* aStateMachine,
-            int64_t aStartTime, AudioInfo aInfo, dom::AudioChannel aChannel);
+  AudioSink(MediaQueue<AudioData>& aAudioQueue,
+            ReentrantMonitor& aMonitor,
+            int64_t aStartTime,
+            const AudioInfo& aInfo,
+            dom::AudioChannel aChannel);
 
-  nsresult Init();
+  // Return a promise which will be resolved when AudioSink finishes playing,
+  // or rejected if any error.
+  nsRefPtr<GenericPromise> Init();
 
   int64_t GetPosition();
+
+  // Thread-safe. Can be called on any thread.
+  int64_t GetEndTime() const;
 
   // Check whether we've pushed more frames to the audio hardware than it has
   // played.
   bool HasUnplayedFrames();
 
-  // Tell the AudioSink to stop processing and initiate shutdown.  Must be
-  // called with the decoder monitor held.
-  void PrepareToShutdown();
-
-  // Shut down the AudioSink's resources.  The decoder monitor must not be
-  // held during this call, as it may block processing thread event queues.
+  // Shut down the AudioSink's resources.
+  // Must be called with the decoder monitor held.
   void Shutdown();
 
   void SetVolume(double aVolume);
@@ -89,15 +99,22 @@ private:
   void StartAudioStreamPlaybackIfNeeded();
   void WriteSilence(uint32_t aFrames);
 
-  int64_t GetEndTime();
+  MediaQueue<AudioData>& AudioQueue() const {
+    return mAudioQueue;
+  }
 
-  MediaQueue<AudioData>& AudioQueue();
+  ReentrantMonitor& GetReentrantMonitor() const {
+    return mDecoderMonitor;
+  }
 
-  ReentrantMonitor& GetReentrantMonitor();
-  void AssertCurrentThreadInMonitor();
+  void AssertCurrentThreadInMonitor() const {
+    GetReentrantMonitor().AssertCurrentThreadIn();
+  }
+
   void AssertOnAudioThread();
 
-  nsRefPtr<MediaDecoderStateMachine> mStateMachine;
+  MediaQueue<AudioData>& mAudioQueue;
+  ReentrantMonitor& mDecoderMonitor;
 
   // Thread for pushing audio onto the audio hardware.
   // The "audio push thread".
@@ -113,17 +130,17 @@ private:
   // microseconds. We can add this to the audio stream position to determine
   // the current audio time. Accessed on audio and state machine thread.
   // Synchronized by decoder monitor.
-  int64_t mStartTime;
+  const int64_t mStartTime;
 
   // PCM frames written to the stream so far.
-  int64_t mWritten;
+  Atomic<int64_t> mWritten;
 
   // Keep the last good position returned from the audio stream. Used to ensure
   // position returned by GetPosition() is mono-increasing in spite of audio
   // stream error.
   int64_t mLastGoodPosition;
 
-  AudioInfo mInfo;
+  const AudioInfo mInfo;
 
   dom::AudioChannel mChannel;
 
@@ -139,22 +156,7 @@ private:
 
   bool mPlaying;
 
-  class OnAudioEndTimeUpdateTask : public nsRunnable {
-  public:
-    explicit OnAudioEndTimeUpdateTask(MediaDecoderStateMachine* aStateMachine);
-
-    NS_IMETHOD Run() override;
-
-    void Dispatch(int64_t aEndTime);
-    void Cancel();
-
-  private:
-    Mutex mMutex;
-    int64_t mEndTime;
-    nsRefPtr<MediaDecoderStateMachine> mStateMachine;
-  };
-
-  nsRefPtr<OnAudioEndTimeUpdateTask> mOnAudioEndTimeUpdateTask;
+  MozPromiseHolder<GenericPromise> mEndPromise;
 };
 
 } // namespace mozilla

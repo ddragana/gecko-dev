@@ -26,10 +26,10 @@ namespace dom {
 
 using namespace workers;
 
-BroadcastChannelChild::BroadcastChannelChild(const nsAString& aOrigin)
-  : mOrigin(aOrigin)
-  , mActorDestroyed(false)
+BroadcastChannelChild::BroadcastChannelChild(const nsACString& aOrigin)
+  : mActorDestroyed(false)
 {
+  CopyUTF8toUTF16(aOrigin, mOrigin);
 }
 
 BroadcastChannelChild::~BroadcastChannelChild()
@@ -127,5 +127,5 @@ BroadcastChannelChild::ActorDestroy(ActorDestroyReason aWhy)
   mActorDestroyed = true;
 }
 
-} // dom namespace
-} // mozilla namespace
+} // namespace dom
+} // namespace mozilla

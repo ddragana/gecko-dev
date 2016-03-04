@@ -360,7 +360,10 @@ nsWebBrowser::SetParentURIContentListener(
 NS_IMETHODIMP
 nsWebBrowser::GetContentDOMWindow(nsIDOMWindow** aResult)
 {
-  NS_ENSURE_STATE(mDocShell);
+  if (!mDocShell) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
   nsCOMPtr<nsIDOMWindow> retval = mDocShell->GetWindow();
   retval.forget(aResult);
   return *aResult ? NS_OK : NS_ERROR_FAILURE;
@@ -1238,7 +1241,7 @@ nsWebBrowser::Create()
   }
   mDocShellAsNav->SetSessionHistory(mInitInfo->sessionHistory);
 
-  if (XRE_GetProcessType() == GeckoProcessType_Default) {
+  if (XRE_IsParentProcess()) {
     // Hook up global history. Do not fail if we can't - just warn.
     rv = EnableGlobalHistory(mShouldEnableHistory);
     NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "EnableGlobalHistory() failed");
@@ -1683,6 +1686,7 @@ static void
 DrawPaintedLayer(PaintedLayer* aLayer,
                  gfxContext* aContext,
                  const nsIntRegion& aRegionToDraw,
+                 const nsIntRegion& aDirtyRegion,
                  DrawRegionClip aClip,
                  const nsIntRegion& aRegionToInvalidate,
                  void* aCallbackData)

@@ -6,6 +6,7 @@
 package org.mozilla.gecko;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import org.json.JSONException;
@@ -63,7 +64,7 @@ public class RestrictedProfiles {
      * Others are specific to us.
      * These constants should be in sync with the ones from toolkit/components/parentalcontrols/nsIParentalControlServices.idl
      */
-    public static enum Restriction {
+    public enum Restriction {
         DISALLOW_DOWNLOADS(1, "no_download_files"),
         DISALLOW_INSTALL_EXTENSION(2, "no_install_extensions"),
         DISALLOW_INSTALL_APPS(3, "no_install_apps"), // UserManager.DISALLOW_INSTALL_APPS
@@ -74,16 +75,39 @@ public class RestrictedProfiles {
         DISALLOW_SET_IMAGE(8, "no_set_image"),
         DISALLOW_MODIFY_ACCOUNTS(9, "no_modify_accounts"), // UserManager.DISALLOW_MODIFY_ACCOUNTS
         DISALLOW_REMOTE_DEBUGGING(10, "no_remote_debugging"),
-        DISALLOW_IMPORT_SETTINGS(11, "no_import_settings");
+        DISALLOW_IMPORT_SETTINGS(11, "no_import_settings"),
+        DISALLOW_TOOLS_MENU(12, "no_tools_menu"),
+        DISALLOW_REPORT_SITE_ISSUE(13, "no_report_site_issue");
 
         public final int id;
         public final String name;
 
-        private Restriction(final int id, final String name) {
+        Restriction(final int id, final String name) {
             this.id = id;
             this.name = name;
         }
     }
+
+    private static List<Restriction> restrictionsOfGuestProfile = Arrays.asList(
+        Restriction.DISALLOW_DOWNLOADS,
+        Restriction.DISALLOW_INSTALL_EXTENSION,
+        Restriction.DISALLOW_INSTALL_APPS,
+        Restriction.DISALLOW_BROWSE_FILES,
+        Restriction.DISALLOW_SHARE,
+        Restriction.DISALLOW_BOOKMARK,
+        Restriction.DISALLOW_ADD_CONTACTS,
+        Restriction.DISALLOW_SET_IMAGE,
+        Restriction.DISALLOW_MODIFY_ACCOUNTS,
+        Restriction.DISALLOW_REMOTE_DEBUGGING,
+        Restriction.DISALLOW_IMPORT_SETTINGS
+    );
+
+    // Restricted profiles will automatically have these restrictions by default
+    private static List<Restriction> defaultRestrictionsOfRestrictedProfiles = Arrays.asList(
+        Restriction.DISALLOW_TOOLS_MENU,
+        Restriction.DISALLOW_REPORT_SITE_ISSUE,
+        Restriction.DISALLOW_IMPORT_SETTINGS
+    );
 
     private static Restriction geckoActionToRestriction(int action) {
         for (Restriction rest : Restriction.values()) {
@@ -95,7 +119,7 @@ public class RestrictedProfiles {
         throw new IllegalArgumentException("Unknown action " + action);
     }
 
-    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR1)
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR2)
     private static Bundle getRestrictions(final Context context) {
         final UserManager mgr = (UserManager) context.getSystemService(Context.USER_SERVICE);
         return mgr.getUserRestrictions();
@@ -157,7 +181,7 @@ public class RestrictedProfiles {
         return isUserRestricted(GeckoAppShell.getContext());
     }
 
-    private static boolean isUserRestricted(final Context context) {
+    public static boolean isUserRestricted(final Context context) {
         // Guest mode is supported in all Android versions.
         if (getInGuest()) {
             return true;
@@ -167,11 +191,19 @@ public class RestrictedProfiles {
             return false;
         }
 
-        return !getRestrictions(context).isEmpty();
+        Bundle restrictions = getRestrictions(context);
+        for (String key : restrictions.keySet()) {
+            if (restrictions.getBoolean(key)) {
+                // At least one restriction is enabled -> We are a restricted profile
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static boolean isAllowed(final Context context, final Restriction action) {
-        return isAllowed(context, action.id, null);
+        return isAllowed(context, action, null);
     }
 
     @WrapElementForJNI
@@ -190,12 +222,20 @@ public class RestrictedProfiles {
             return false;
         }
 
+        return isAllowed(context, restriction, url);
+    }
+
+    private static boolean isAllowed(final Context context, final Restriction restriction, String url) {
         if (getInGuest()) {
             if (Restriction.DISALLOW_BROWSE_FILES == restriction) {
                 return canLoadUrl(context, url);
             }
 
-            // Guest users can't do anything.
+            return !restrictionsOfGuestProfile.contains(restriction);
+        }
+
+        // Hardcoded restrictions. Make restrictions configurable and read from UserManager (Bug 1180653)
+        if (isUserRestricted(context) && defaultRestrictionsOfRestrictedProfiles.contains(restriction)) {
             return false;
         }
 

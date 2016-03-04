@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim: set ts=4 et sw=4 tw=80: */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -336,8 +336,42 @@ nsScriptSecurityManager::GetChannelResultPrincipal(nsIChannel* aChannel,
             NS_ADDREF(*aPrincipal = loadInfo->TriggeringPrincipal());
             return NS_OK;
         }
+
+        nsSecurityFlags securityFlags = loadInfo->GetSecurityMode();
+        if (securityFlags == nsILoadInfo::SEC_REQUIRE_SAME_ORIGIN_DATA_INHERITS ||
+            securityFlags == nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS ||
+            securityFlags == nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS) {
+
+            nsCOMPtr<nsIURI> uri;
+            nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
+            NS_ENSURE_SUCCESS(rv, rv);
+            nsCOMPtr<nsIPrincipal> triggeringPrincipal = loadInfo->TriggeringPrincipal();
+            bool inheritForAboutBlank = loadInfo->GetAboutBlankInherits();
+
+            if (nsContentUtils::ChannelShouldInheritPrincipal(triggeringPrincipal,
+                                                               uri,
+                                                               inheritForAboutBlank,
+                                                               false)) {
+                triggeringPrincipal.forget(aPrincipal);
+                return NS_OK;
+            }
+        }
     }
     return GetChannelURIPrincipal(aChannel, aPrincipal);
+}
+
+nsresult
+nsScriptSecurityManager::MaybeSetAddonIdFromURI(OriginAttributes& aAttrs, nsIURI* aURI)
+{
+  nsAutoCString scheme;
+  nsresult rv = aURI->GetScheme(scheme);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (scheme.EqualsLiteral("moz-extension") && GetAddonPolicyService()) {
+    rv = GetAddonPolicyService()->ExtensionURIToAddonId(aURI, aAttrs.mAddonId);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  return NS_OK;
 }
 
 /* The principal of the URI that this channel is loading. This is never
@@ -371,6 +405,8 @@ nsScriptSecurityManager::GetChannelURIPrincipal(nsIChannel* aChannel,
     }
 
     OriginAttributes attrs(UNKNOWN_APP_ID, false);
+    rv = MaybeSetAddonIdFromURI(attrs, uri);
+    NS_ENSURE_SUCCESS(rv, rv);
     nsCOMPtr<nsIPrincipal> prin = BasePrincipal::CreateCodebasePrincipal(uri, attrs);
     prin.forget(aPrincipal);
     return *aPrincipal ? NS_OK : NS_ERROR_FAILURE;
@@ -725,6 +761,16 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
     // the methods that work on chains of nested URIs and they will only look
     // at the flags for our one URI.
 
+    // Special case: moz-extension has a whitelist of URIs that are loadable by
+    // anyone.
+    if (targetScheme.EqualsLiteral("moz-extension") && GetAddonPolicyService()) {
+      bool loadable = false;
+      rv = GetAddonPolicyService()->ExtensionURILoadableByAnyone(targetBaseURI, &loadable);
+      if (NS_SUCCEEDED(rv) && loadable) {
+        return NS_OK;
+      }
+    }
+
     // Check for system target URI
     rv = DenyAccessIfURIHasFlags(targetBaseURI,
                                  nsIProtocolHandler::URI_DANGEROUS_TO_LOAD);
@@ -1028,6 +1074,21 @@ nsScriptSecurityManager::CreateNullPrincipal(JS::Handle<JS::Value> aOriginAttrib
 }
 
 NS_IMETHODIMP
+nsScriptSecurityManager::CreateExpandedPrincipal(nsIPrincipal** aPrincipalArray, uint32_t aLength,
+                                                 nsIPrincipal** aResult)
+{
+  nsTArray<nsCOMPtr<nsIPrincipal>> principals;
+  principals.SetCapacity(aLength);
+  for (uint32_t i = 0; i < aLength; ++i) {
+    principals.AppendElement(aPrincipalArray[i]);
+  }
+
+  nsCOMPtr<nsIPrincipal> p = new nsExpandedPrincipal(principals);
+  p.forget(aResult);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsScriptSecurityManager::GetAppCodebasePrincipal(nsIURI* aURI,
                                                  uint32_t aAppId,
                                                  bool aInMozBrowser,
@@ -1052,6 +1113,8 @@ nsScriptSecurityManager::
   OriginAttributes attrs;
   aLoadContext->GetAppId(&attrs.mAppId);
   aLoadContext->GetIsInBrowserElement(&attrs.mInBrowser);
+  nsresult rv = MaybeSetAddonIdFromURI(attrs, aURI);
+  NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIPrincipal> prin = BasePrincipal::CreateCodebasePrincipal(aURI, attrs);
   prin.forget(aPrincipal);
   return *aPrincipal ? NS_OK : NS_ERROR_FAILURE;
@@ -1064,6 +1127,8 @@ nsScriptSecurityManager::GetDocShellCodebasePrincipal(nsIURI* aURI,
 {
   // XXXbholley - Make this more general in bug 1165466.
   OriginAttributes attrs(aDocShell->GetAppId(), aDocShell->GetIsInBrowserElement());
+  nsresult rv = MaybeSetAddonIdFromURI(attrs, aURI);
+  NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIPrincipal> prin = BasePrincipal::CreateCodebasePrincipal(aURI, attrs);
   prin.forget(aPrincipal);
   return *aPrincipal ? NS_OK : NS_ERROR_FAILURE;
@@ -1283,7 +1348,7 @@ nsScriptSecurityManager::~nsScriptSecurityManager(void)
     // ContentChild might hold a reference to the domain policy,
     // and it might release it only after the security manager is
     // gone. But we can still assert this for the main process.
-    MOZ_ASSERT_IF(XRE_GetProcessType() == GeckoProcessType_Default,
+    MOZ_ASSERT_IF(XRE_IsParentProcess(),
                   !mDomainPolicy);
 }
 
@@ -1500,7 +1565,7 @@ nsScriptSecurityManager::GetDomainPolicyActive(bool *aRv)
 NS_IMETHODIMP
 nsScriptSecurityManager::ActivateDomainPolicy(nsIDomainPolicy** aRv)
 {
-    if (XRE_GetProcessType() != GeckoProcessType_Default) {
+    if (!XRE_IsParentProcess()) {
         return NS_ERROR_SERVICE_NOT_AVAILABLE;
     }
 

@@ -128,6 +128,7 @@
 #ifndef MOZ_FOLD_LIBS
 @BINPATH@/@DLL_PREFIX@mozsqlite3@DLL_SUFFIX@
 #endif
+@BINPATH@/@DLL_PREFIX@lgpllibs@DLL_SUFFIX@
 @RESPATH@/blocklist.xml
 @RESPATH@/ua-update.json
 #ifdef XP_UNIX
@@ -317,9 +318,7 @@
 @RESPATH@/components/services-crypto.xpt
 #endif
 @RESPATH@/components/services-crypto-component.xpt
-#ifdef MOZ_CAPTIVEDETECT
 @RESPATH@/components/captivedetect.xpt
-#endif
 @RESPATH@/components/shellservice.xpt
 @RESPATH@/components/shistory.xpt
 @RESPATH@/components/spellchecker.xpt
@@ -633,10 +632,8 @@
 @RESPATH@/components/HealthReportComponents.manifest
 @RESPATH@/components/HealthReportService.js
 #endif
-#ifdef MOZ_CAPTIVEDETECT
 @RESPATH@/components/CaptivePortalDetectComponents.manifest
 @RESPATH@/components/captivedetect.js
-#endif
 @RESPATH@/components/TelemetryStartup.js
 @RESPATH@/components/TelemetryStartup.manifest
 @RESPATH@/components/XULStore.js
@@ -692,6 +689,9 @@
 @RESPATH@/components/EngineeringMode.manifest
 @RESPATH@/components/EngineeringModeAPI.js
 @RESPATH@/components/EngineeringModeService.js
+
+@RESPATH@/components/SystemUpdate.manifest
+@RESPATH@/components/SystemUpdateManager.js
 
 #ifdef MOZ_DEBUG
 @RESPATH@/components/TestInterfaceJS.js
@@ -979,4 +979,8 @@ bin/libfreebl_32int64_3.so
 #ifdef MOZ_EME
 @RESPATH@/gmp-clearkey/0.1/@DLL_PREFIX@clearkey@DLL_SUFFIX@
 @RESPATH@/gmp-clearkey/0.1/clearkey.info
+#endif
+
+#ifdef PKG_LOCALE_MANIFEST
+#include @PKG_LOCALE_MANIFEST@
 #endif

@@ -132,7 +132,7 @@ enum AppId {
  * Quota manager class declarations
  ******************************************************************************/
 
-} // anonymous namespace
+} // namespace
 
 class DirectoryLockImpl final
   : public DirectoryLock
@@ -275,7 +275,7 @@ namespace {
  * Local class declarations
  ******************************************************************************/
 
-} // anonymous namespace
+} // namespace
 
 class OriginInfo final
 {
@@ -838,7 +838,7 @@ AssertNoUnderflow(T aDest, U aArg)
   MOZ_ASSERT(uint64_t(aDest) >= uint64_t(aArg));
 }
 
-} // anonymous namespace
+} // namespace
 
 bool
 IsOnIOThread()
@@ -1074,12 +1074,6 @@ public:
     Append(aOrigin);
   }
 };
-
-bool
-IsMainProcess()
-{
-  return XRE_GetProcessType() == GeckoProcessType_Default;
-}
 
 void
 SanitizeOriginString(nsCString& aOrigin)
@@ -1608,7 +1602,7 @@ GetTemporaryStorageLimit(nsIFile* aDirectory, uint64_t aCurrentUsage,
   return NS_OK;
 }
 
-} // anonymous namespace
+} // namespace
 
 /*******************************************************************************
  * Directory lock
@@ -2393,7 +2387,7 @@ nsresult
 QuotaManager::Init()
 {
   nsresult rv;
-  if (IsMainProcess()) {
+  if (XRE_IsParentProcess()) {
     nsCOMPtr<nsIFile> baseDir;
     rv = NS_GetSpecialDirectory(NS_APP_INDEXEDDB_PARENT_DIR,
                                 getter_AddRefs(baseDir));
@@ -2849,7 +2843,7 @@ MaybeRemoveCorruptDirectory(const nsAString& aLeafName, nsIFile* aDir)
 #endif // NIGHTLY_BUILD
 }
 
-} // anonymous namespace
+} // namespace
 
 nsresult
 QuotaManager::InitializeOrigin(PersistenceType aPersistenceType,
@@ -3174,21 +3168,6 @@ QuotaManager::OpenDirectoryInternal(Nullable<PersistenceType> aPersistenceType,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  class MOZ_STACK_CLASS Helper final
-  {
-  public:
-    static PLDHashOperator
-    Enumerate(nsCStringHashKey* aKey, void* aClosure)
-    {
-      auto* client = static_cast<Client*>(aClosure);
-      MOZ_ASSERT(client);
-
-      client->AbortOperations(aKey->GetKey());
-
-      return PL_DHASH_NEXT;
-    }
-  };
-
   nsRefPtr<DirectoryLockImpl> lock =
     CreateDirectoryLock(aPersistenceType,
                         EmptyCString(),
@@ -3235,7 +3214,11 @@ QuotaManager::OpenDirectoryInternal(Nullable<PersistenceType> aPersistenceType,
 
   for (uint32_t index : MakeRange(uint32_t(Client::TYPE_MAX))) {
     if (origins[index]) {
-      origins[index]->EnumerateEntries(Helper::Enumerate, mClients[index]);
+      for (auto iter = origins[index]->Iter(); !iter.Done(); iter.Next()) {
+        MOZ_ASSERT(mClients[index]);
+
+        mClients[index]->AbortOperations(iter.Get()->GetKey());
+      }
     }
   }
 }
@@ -3739,7 +3722,7 @@ QuotaManager::GetUsageForURI(nsIURI* aURI,
   NS_ENSURE_ARG_POINTER(aCallback);
 
   // This only works from the main process.
-  NS_ENSURE_TRUE(IsMainProcess(), NS_ERROR_NOT_AVAILABLE);
+  NS_ENSURE_TRUE(XRE_IsParentProcess(), NS_ERROR_NOT_AVAILABLE);
 
   if (!aOptionalArgCount) {
     aAppId = nsIScriptSecurityManager::NO_APP_ID;
@@ -3799,7 +3782,7 @@ QuotaManager::ClearStoragesForURI(nsIURI* aURI,
   }
 
   // This only works from the main process.
-  NS_ENSURE_TRUE(IsMainProcess(), NS_ERROR_NOT_AVAILABLE);
+  NS_ENSURE_TRUE(XRE_IsParentProcess(), NS_ERROR_NOT_AVAILABLE);
 
   if (!aOptionalArgCount) {
     aAppId = nsIScriptSecurityManager::NO_APP_ID;
@@ -3853,7 +3836,7 @@ QuotaManager::Observe(nsISupports* aSubject,
       NS_ERROR("Shutdown more than once?!");
     }
 
-    if (IsMainProcess()) {
+    if (XRE_IsParentProcess()) {
       // Kick off the shutdown timer.
       if (NS_FAILED(mShutdownTimer->Init(this, DEFAULT_SHUTDOWN_TIMER_MS,
                                          nsITimer::TYPE_ONE_SHOT))) {
@@ -3896,7 +3879,7 @@ QuotaManager::Observe(nsISupports* aSubject,
   }
 
   if (!strcmp(aTopic, NS_TIMER_CALLBACK_TOPIC)) {
-    NS_ASSERTION(IsMainProcess(), "Should only happen in the main process!");
+    NS_ASSERTION(XRE_IsParentProcess(), "Should only happen in the main process!");
 
     NS_WARNING("Some storage operations are taking longer than expected "
                "during shutdown and will be aborted!");
@@ -3998,7 +3981,7 @@ QuotaManager::ClearStoragesForApp(uint32_t aAppId, bool aBrowserOnly)
   NS_ASSERTION(aAppId != kUnknownAppId, "Bad appId!");
 
   // This only works from the main process.
-  NS_ENSURE_TRUE(IsMainProcess(), NS_ERROR_NOT_AVAILABLE);
+  NS_ENSURE_TRUE(XRE_IsParentProcess(), NS_ERROR_NOT_AVAILABLE);
 
   nsAutoCString pattern;
   GetOriginPatternStringMaybeIgnoreBrowser(aAppId, aBrowserOnly, pattern);

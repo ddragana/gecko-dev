@@ -451,6 +451,15 @@ js::TraceRoot(JSTracer* trc, T* thingp, const char* name)
 
 template <typename T>
 void
+js::TraceNullableRoot(JSTracer* trc, T* thingp, const char* name)
+{
+    AssertRootMarkingPhase(trc);
+    if (InternalGCMethods<T>::isMarkableTaggedPointer(*thingp))
+        DispatchToTracer(trc, ConvertToBase(thingp), name);
+}
+
+template <typename T>
+void
 js::TraceRange(JSTracer* trc, size_t len, BarrieredBase<T>* vec, const char* name)
 {
     JS::AutoTracingIndex index(trc);
@@ -479,6 +488,7 @@ js::TraceRootRange(JSTracer* trc, size_t len, T* vec, const char* name)
     template void js::TraceEdge<type>(JSTracer*, BarrieredBase<type>*, const char*); \
     template void js::TraceManuallyBarrieredEdge<type>(JSTracer*, type*, const char*); \
     template void js::TraceRoot<type>(JSTracer*, type*, const char*); \
+    template void js::TraceNullableRoot<type>(JSTracer*, type*, const char*); \
     template void js::TraceRange<type>(JSTracer*, size_t, BarrieredBase<type>*, const char*); \
     template void js::TraceRootRange<type>(JSTracer*, size_t, type*, const char*);
 FOR_EACH_GC_POINTER_TYPE(INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS)
@@ -1181,6 +1191,41 @@ GCMarker::drainMarkStack(SliceBudget& budget)
     return true;
 }
 
+inline static bool
+ObjectDenseElementsMayBeMarkable(NativeObject* nobj)
+{
+    /*
+     * For arrays that are large enough it's worth checking the type information
+     * to see if the object's elements contain any GC pointers.  If not, we
+     * don't need to trace them.
+     */
+    const unsigned MinElementsLength = 32;
+    if (nobj->getDenseInitializedLength() < MinElementsLength || nobj->isSingleton())
+        return true;
+
+    ObjectGroup* group = nobj->group();
+    if (group->needsSweep() || group->unknownProperties())
+        return true;
+
+    HeapTypeSet* typeSet = group->maybeGetProperty(JSID_VOID);
+    if (!typeSet)
+        return true;
+
+    static const uint32_t flagMask =
+        TYPE_FLAG_STRING | TYPE_FLAG_SYMBOL | TYPE_FLAG_LAZYARGS | TYPE_FLAG_ANYOBJECT;
+    bool mayBeMarkable = typeSet->hasAnyFlag(flagMask) || typeSet->getObjectCount() != 0;
+
+#ifdef DEBUG
+    if (!mayBeMarkable) {
+        const Value* elements = nobj->getDenseElementsAllowCopyOnWrite();
+        for (unsigned i = 0; i < nobj->getDenseInitializedLength(); i++)
+            MOZ_ASSERT(!elements[i].isMarkable());
+    }
+#endif
+
+    return mayBeMarkable;
+}
+
 inline void
 GCMarker::processMarkStackTop(SliceBudget& budget)
 {
@@ -1305,8 +1350,12 @@ GCMarker::processMarkStackTop(SliceBudget& budget)
                 }
             }
 
+            if (!ObjectDenseElementsMayBeMarkable(nobj))
+                break;
+
             vp = nobj->getDenseElementsAllowCopyOnWrite();
             end = vp + nobj->getDenseInitializedLength();
+
             if (!nslots)
                 goto scan_value_array;
             pushValueArray(nobj, vp, end);
@@ -1764,8 +1813,8 @@ template void
 StoreBuffer::MonoTypeBuffer<StoreBuffer::SlotsEdge>::trace(StoreBuffer*, TenuringTracer&);
 template void
 StoreBuffer::MonoTypeBuffer<StoreBuffer::CellPtrEdge>::trace(StoreBuffer*, TenuringTracer&);
-} // namespace js
 } // namespace gc
+} // namespace js
 
 void
 js::gc::StoreBuffer::SlotsEdge::trace(TenuringTracer& mover) const
@@ -1855,6 +1904,7 @@ js::TenuringTracer::moveToTenured(JSObject* src)
 
     AllocKind dstKind = src->allocKindForTenure(nursery());
     Zone* zone = src->zone();
+
     TenuredCell* t = zone->arenas.allocateFromFreeList(dstKind, Arena::thingSize(dstKind));
     if (!t) {
         zone->arenas.checkEmptyFreeList(dstKind);
@@ -1870,6 +1920,10 @@ js::TenuringTracer::moveToTenured(JSObject* src)
     RelocationOverlay* overlay = RelocationOverlay::fromCell(src);
     overlay->forwardTo(dst);
     insertIntoFixupList(overlay);
+
+    if (MOZ_UNLIKELY(zone->hasDebuggers())) {
+        zone->enqueueForPromotionToTenuredLogging(*dst);
+    }
 
     TracePromoteToTenured(src, dst);
     return dst;
@@ -1911,7 +1965,10 @@ js::TenuringTracer::traceObject(JSObject* obj)
 
     // Note: the contents of copy on write elements pointers are filled in
     // during parsing and cannot contain nursery pointers.
-    if (!nobj->hasEmptyElements() && !nobj->denseElementsAreCopyOnWrite()) {
+    if (!nobj->hasEmptyElements() &&
+        !nobj->denseElementsAreCopyOnWrite() &&
+        ObjectDenseElementsMayBeMarkable(nobj))
+    {
         Value* elems = static_cast<HeapSlot*>(nobj->getDenseElements())->unsafeGet();
         traceSlots(elems, elems + nobj->getDenseInitializedLength());
     }

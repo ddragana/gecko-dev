@@ -90,6 +90,7 @@ user_pref("browser.safebrowsing.updateURL", "http://%(server)s/safebrowsing-dumm
 user_pref("browser.safebrowsing.appRepURL", "http://%(server)s/safebrowsing-dummy/update");
 user_pref("browser.trackingprotection.gethashURL", "http://%(server)s/safebrowsing-dummy/gethash");
 user_pref("browser.trackingprotection.updateURL", "http://%(server)s/safebrowsing-dummy/update");
+user_pref("privacy.trackingprotection.introURL", "http://%(server)s/trackingprotection/tour");
 // Point update checks to the local testing server for fast failures
 user_pref("extensions.update.url", "http://%(server)s/extensions-dummy/updateURL");
 user_pref("extensions.update.background.url", "http://%(server)s/extensions-dummy/updateBackgroundURL");
@@ -164,7 +165,7 @@ user_pref("layout.spammy_warnings.enabled", false);
 
 // Enable Media Source Extensions for testing
 user_pref("media.mediasource.mp4.enabled", true);
-user_pref("media.mediasource.webm.enabled", true);
+user_pref("media.mediasource.webm.enabled", false);
 
 // Enable mozContacts
 user_pref("dom.mozContacts.enabled", true);
@@ -194,7 +195,6 @@ user_pref("browser.download.panel.shown", true);
 // Assume the about:newtab page's intro panels have been shown to not depend on
 // which test runs first and happens to open about:newtab
 user_pref("browser.newtabpage.introShown", true);
-user_pref("browser.newtabpage.updateIntroShown", true);
 
 // Tell the PBackground infrastructure to run a test at startup.
 user_pref("pbackground.testing", true);
@@ -230,6 +230,9 @@ user_pref('browser.tiles.reportURL', 'http://%(server)s/tests/robocop/robocop_ti
 
 // We want to collect telemetry, but we don't want to send in the results.
 user_pref('toolkit.telemetry.server', 'https://%(server)s/telemetry-dummy/');
+// Our current tests expect the unified Telemetry feature to be opt-out,
+// which is not true while we hold back shipping it.
+user_pref('toolkit.telemetry.unifiedIsOptIn', false);
 
 // A couple of preferences with default values to test that telemetry preference
 // watching is working.
@@ -290,6 +293,8 @@ user_pref("browser.uitour.url", "http://%(server)s/uitour-dummy/tour");
 // side-effect of preventing our geoip lookup.
 user_pref("browser.search.isUS", true);
 user_pref("browser.search.countryCode", "US");
+// This will prevent HTTP requests for region defaults.
+user_pref("browser.search.geoSpecificDefaults", false);
 
 // Make sure the self support tab doesn't hit the network.
 user_pref("browser.selfsupport.url", "https://%(server)s/selfsupport-dummy/");
@@ -319,7 +324,6 @@ user_pref("network.proxy.pac_generator", false);
 // Make tests run consistently on DevEdition (which has a lightweight theme
 // selected by default).
 user_pref("lightweightThemes.selectedThemeID", "");
-user_pref("browser.devedition.theme.enabled", false);
 
 // Disable periodic updates of service workers.
 user_pref("dom.serviceWorkers.periodic-updates.enabled", false);
@@ -330,3 +334,5 @@ user_pref("media.webspeech.synth.test", true);
 // Turn off search suggestions in the location bar so as not to trigger network
 // connections.
 user_pref("browser.urlbar.suggest.searches", false);
+
+user_pref("dom.audiochannel.mutedByDefault", false);

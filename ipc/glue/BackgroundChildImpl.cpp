@@ -46,7 +46,7 @@ public:
   Recv__delete__(const nsCString& aTestArg) override;
 };
 
-} // anonymous namespace
+} // namespace
 
 namespace mozilla {
 namespace ipc {
@@ -242,7 +242,7 @@ BackgroundChildImpl::DeallocPUDPSocketChild(PUDPSocketChild* child)
 
 dom::PBroadcastChannelChild*
 BackgroundChildImpl::AllocPBroadcastChannelChild(const PrincipalInfo& aPrincipalInfo,
-                                                 const nsString& aOrigin,
+                                                 const nsCString& aOrigin,
                                                  const nsString& aChannel,
                                                  const bool& aPrivateBrowsing)
 {

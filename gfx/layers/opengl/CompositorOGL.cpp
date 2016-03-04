@@ -41,7 +41,6 @@
 #include "ScopedGLHelpers.h"
 #include "GLReadTexImageHelper.h"
 #include "GLBlitTextureImageHelper.h"
-#include "TiledLayerBuffer.h"           // for TiledLayerComposer
 #include "HeapCopyOfStackArray.h"
 
 #if MOZ_WIDGET_ANDROID
@@ -173,18 +172,20 @@ CompositorOGL::CleanupResources()
     ctx = mGLContext;
   }
 
+  if (!ctx->MakeCurrent()) {
+    // Leak resources!
+    mQuadVBO = 0;
+    mGLContext = nullptr;
+    mPrograms.clear();
+    return;
+  }
+
   for (std::map<ShaderConfigOGL, ShaderProgramOGL *>::iterator iter = mPrograms.begin();
        iter != mPrograms.end();
        iter++) {
     delete iter->second;
   }
   mPrograms.clear();
-
-  if (!ctx->MakeCurrent()) {
-    mQuadVBO = 0;
-    mGLContext = nullptr;
-    return;
-  }
 
   ctx->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, 0);
 
@@ -1746,5 +1747,5 @@ PerFrameTexturePoolOGL::EndFrame()
   mCreatedTextures.Clear();
 }
 
-} /* layers */
-} /* mozilla */
+} // namespace layers
+} // namespace mozilla

@@ -122,6 +122,7 @@ EXPORTS.js += [
     '../public/RootingAPI.h',
     '../public/SliceBudget.h',
     '../public/StructuredClone.h',
+    '../public/TraceableHashTable.h',
     '../public/TraceKind.h',
     '../public/TracingAPI.h',
     '../public/TrackedOptimizationInfo.h',
@@ -146,6 +147,8 @@ UNIFIED_SOURCES += [
     'builtin/MapObject.cpp',
     'builtin/Object.cpp',
     'builtin/Profilers.cpp',
+    'builtin/Reflect.cpp',
+    'builtin/ReflectParse.cpp',
     'builtin/SIMD.cpp',
     'builtin/SymbolObject.cpp',
     'builtin/TestingFunctions.cpp',
@@ -259,7 +262,6 @@ UNIFIED_SOURCES += [
     'jsopcode.cpp',
     'jsprf.cpp',
     'jspropertytree.cpp',
-    'jsreflect.cpp',
     'jsscript.cpp',
     'jsstr.cpp',
     'jswatchpoint.cpp',
@@ -374,10 +376,12 @@ elif CONFIG['JS_CODEGEN_X86'] or CONFIG['JS_CODEGEN_X64']:
         'jit/x86-shared/BaselineCompiler-x86-shared.cpp',
         'jit/x86-shared/BaselineIC-x86-shared.cpp',
         'jit/x86-shared/CodeGenerator-x86-shared.cpp',
-        'jit/x86-shared/Disassembler-x86-shared.cpp',
         'jit/x86-shared/Lowering-x86-shared.cpp',
         'jit/x86-shared/MacroAssembler-x86-shared.cpp',
         'jit/x86-shared/MoveEmitter-x86-shared.cpp',
+    ]
+    SOURCES += [
+        'jit/x86-shared/Disassembler-x86-shared.cpp',  # using namespace js::jit::X86Encoding;
     ]
     if CONFIG['JS_CODEGEN_X64']:
         UNIFIED_SOURCES += [
@@ -599,6 +603,9 @@ if CONFIG['OS_ARCH'] == 'SunOS':
         'nsl',
         'socket',
     ]
+
+CFLAGS += CONFIG['MOZ_ICU_CFLAGS']
+CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']
 
 if CONFIG['GNU_CXX']:
     FAIL_ON_WARNINGS = True

@@ -26,6 +26,8 @@
 #if !defined(MOZILLA_XPCOMRT_API)
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
+#include "nsIURI.h"
+#include "nsIScriptSecurityManager.h"
 #include "nsICancelable.h"
 #include "nsIDocument.h"
 #include "nsILoadInfo.h"
@@ -219,7 +221,6 @@ PeerConnectionMedia::PeerConnectionMedia(PeerConnectionImpl *parent)
     : mParent(parent),
       mParentHandle(parent->GetHandle()),
       mParentName(parent->GetName()),
-      mAllowIceLoopback(false),
       mIceCtx(nullptr),
       mDNSResolver(new NrIceResolver()),
       mUuidGen(MakeUnique<PCUuidGenerator>()),
@@ -311,8 +312,9 @@ nsresult PeerConnectionMedia::Init(const std::vector<NrIceStunServer>& stun_serv
   mIceCtx = NrIceCtx::Create("PC:" + mParentName,
                              true, // Offerer
                              true, // Explicitly set priorities
-                             mAllowIceLoopback,
-                             ice_tcp);
+                             mParent->GetAllowIceLoopback(),
+                             ice_tcp,
+                             mParent->GetAllowIceLinkLocal());
   if(!mIceCtx) {
     CSFLogError(logTag, "%s: Failed to create Ice Context", __FUNCTION__);
     return NS_ERROR_FAILURE;
@@ -1337,4 +1339,4 @@ LocalSourceStreamInfo::ForgetPipelineByTrackId_m(const std::string& trackId)
   return nullptr;
 }
 
-}  // namespace mozilla
+} // namespace mozilla

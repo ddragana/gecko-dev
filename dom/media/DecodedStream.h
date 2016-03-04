@@ -9,11 +9,20 @@
 
 #include "nsRefPtr.h"
 #include "nsTArray.h"
+#include "MediaInfo.h"
+
 #include "mozilla/UniquePtr.h"
 #include "mozilla/gfx/Point.h"
+#include "mozilla/CheckedInt.h"
+#include "mozilla/ReentrantMonitor.h"
+#include "mozilla/Maybe.h"
 
 namespace mozilla {
 
+class AudioData;
+class VideoData;
+class AudioSegment;
+class MediaStream;
 class MediaInputPort;
 class SourceMediaStream;
 class ProcessedMediaStream;
@@ -23,9 +32,11 @@ class OutputStreamListener;
 class ReentrantMonitor;
 class MediaStreamGraph;
 
+template <class T> class MediaQueue;
+
 namespace layers {
 class Image;
-}
+} // namespace layers
 
 /*
  * All MediaStream-related data is protected by the decoder's monitor.
@@ -37,7 +48,7 @@ class Image;
  */
 class DecodedStreamData {
 public:
-  explicit DecodedStreamData(SourceMediaStream* aStream);
+  DecodedStreamData(SourceMediaStream* aStream, bool aPlaying);
   ~DecodedStreamData();
   bool IsFinished() const;
   int64_t GetPosition() const;
@@ -84,23 +95,61 @@ public:
 };
 
 class DecodedStream {
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DecodedStream);
 public:
-  explicit DecodedStream(ReentrantMonitor& aMonitor);
-  DecodedStreamData* GetData() const;
+  DecodedStream(MediaQueue<AudioData>& aAudioQueue,
+                MediaQueue<VideoData>& aVideoQueue);
+
+  // Mimic MDSM::StartAudioThread.
+  // Must be called before any calls to SendData().
+  void StartPlayback(int64_t aStartTime, const MediaInfo& aInfo);
+  // Mimic MDSM::StopAudioThread.
+  void StopPlayback();
+
   void DestroyData();
-  void RecreateData(MediaStreamGraph* aGraph);
-  nsTArray<OutputStreamData>& OutputStreams();
-  ReentrantMonitor& GetReentrantMonitor() const;
+  void RecreateData();
   void Connect(ProcessedMediaStream* aStream, bool aFinishWhenEnded);
+  void Remove(MediaStream* aStream);
   void SetPlaying(bool aPlaying);
+  int64_t AudioEndTime() const;
+  int64_t GetPosition() const;
+  bool IsFinished() const;
+
+  // Return true if stream is finished.
+  bool SendData(double aVolume, bool aIsSameOrigin);
+
+protected:
+  virtual ~DecodedStream() {}
 
 private:
+  ReentrantMonitor& GetReentrantMonitor() const;
+  void RecreateData(MediaStreamGraph* aGraph);
   void Connect(OutputStreamData* aStream);
+  nsTArray<OutputStreamData>& OutputStreams();
+  void InitTracks();
+  void AdvanceTracks();
+  void SendAudio(double aVolume, bool aIsSameOrigin);
+  void SendVideo(bool aIsSameOrigin);
 
   UniquePtr<DecodedStreamData> mData;
   // Data about MediaStreams that are being fed by the decoder.
   nsTArray<OutputStreamData> mOutputStreams;
-  ReentrantMonitor& mMonitor;
+
+  // TODO: This is a temp solution to get rid of decoder monitor on the main
+  // thread in MDSM::AddOutputStream and MDSM::RecreateDecodedStream as
+  // required by bug 1146482. DecodedStream needs to release monitor before
+  // calling back into MDSM functions in order to prevent deadlocks.
+  //
+  // Please move all capture-stream related code from MDSM into DecodedStream
+  // and apply "dispatch + mirroring" to get rid of this monitor in the future.
+  mutable ReentrantMonitor mMonitor;
+
+  bool mPlaying;
+  Maybe<int64_t> mStartTime;
+  MediaInfo mInfo;
+
+  MediaQueue<AudioData>& mAudioQueue;
+  MediaQueue<VideoData>& mVideoQueue;
 };
 
 } // namespace mozilla

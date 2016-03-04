@@ -6,6 +6,7 @@
 
 /* API for getting a stack trace of the C/C++ stack on the current thread */
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/StackWalk.h"
@@ -800,11 +801,13 @@ MozDescribeCodeAddress(void* aPC, MozCodeAddressDetails* aDetails)
   if (modInfoRes) {
     strncpy(aDetails->library, modInfo.ModuleName,
                 sizeof(aDetails->library));
+    aDetails->library[mozilla::ArrayLength(aDetails->library) - 1] = '\0';
     aDetails->loffset = (char*)aPC - (char*)modInfo.BaseOfImage;
 
     if (lineInfo.FileName) {
       strncpy(aDetails->filename, lineInfo.FileName,
                   sizeof(aDetails->filename));
+      aDetails->filename[mozilla::ArrayLength(aDetails->filename) - 1] = '\0';
       aDetails->lineno = lineInfo.LineNumber;
     }
   }
@@ -821,6 +824,7 @@ MozDescribeCodeAddress(void* aPC, MozCodeAddressDetails* aDetails)
   if (ok) {
     strncpy(aDetails->function, pSymbol->Name,
                 sizeof(aDetails->function));
+    aDetails->function[mozilla::ArrayLength(aDetails->function) - 1] = '\0';
     aDetails->foffset = static_cast<ptrdiff_t>(displacement);
   }
 
@@ -861,6 +865,7 @@ void DemangleSymbol(const char* aSymbol,
 
   if (demangled) {
     strncpy(aBuffer, demangled, aBufLen);
+    aBuffer[aBufLen - 1] = '\0';
     free(demangled);
   }
 #endif // MOZ_DEMANGLE_SYMBOLS
@@ -885,7 +890,7 @@ FramePointerStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
 
   int32_t skip = aSkipFrames;
   uint32_t numFrames = 0;
-  while (1) {
+  while (bp) {
     void** next = (void**)*bp;
     // bp may not be a frame pointer on i386 if code was compiled with
     // -fomit-frame-pointer, so do some sanity checks.
@@ -925,7 +930,7 @@ FramePointerStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
   return numFrames != 0;
 }
 
-}
+} // namespace mozilla
 
 #define X86_OR_PPC (defined(__i386) || defined(PPC) || defined(__ppc__))
 #if X86_OR_PPC && (MOZ_STACKWALK_SUPPORTS_MACOSX || MOZ_STACKWALK_SUPPORTS_LINUX) // i386 or PPC Linux or Mac stackwalking code
@@ -1050,6 +1055,7 @@ MozDescribeCodeAddress(void* aPC, MozCodeAddressDetails* aDetails)
   }
 
   strncpy(aDetails->library, info.dli_fname, sizeof(aDetails->library));
+  aDetails->library[mozilla::ArrayLength(aDetails->library) - 1] = '\0';
   aDetails->loffset = (char*)aPC - (char*)info.dli_fbase;
 
   const char* symbol = info.dli_sname;
@@ -1062,6 +1068,7 @@ MozDescribeCodeAddress(void* aPC, MozCodeAddressDetails* aDetails)
   if (aDetails->function[0] == '\0') {
     // Just use the mangled symbol if demangling failed.
     strncpy(aDetails->function, symbol, sizeof(aDetails->function));
+    aDetails->function[mozilla::ArrayLength(aDetails->function) - 1] = '\0';
   }
 
   aDetails->foffset = (char*)aPC - (char*)info.dli_saddr;

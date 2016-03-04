@@ -221,14 +221,18 @@ description > html|a {
   border-radius: 50%;
   border-width: 5px;
   border-color: red;
-  background-image: url(chrome://browser/skin/preferences/in-content/default-profile-image.svg);
+  background-image: url(chrome://browser/skin/fxa/default-profile-image.svg);
   background-size: contain;
   cursor: pointer;
   -moz-margin-end: 15px;
 }
 
 #fxaProfileImage:hover {
-  border-color: blue;
+  box-shadow: 0px 0px 0px 1px #0095DD;
+}
+
+#fxaProfileImage:active {
+  box-shadow: 0px 0px 0px 1px #ff9500;
 }
 
 #noFxaAccount {
@@ -267,16 +271,8 @@ description > html|a {
   -moz-margin-start: 33px;
 }
 
-#trackingProtectionImage {
-  width: 16px;
-  height: 16px;
-  list-style-image: url(chrome://browser/skin/bad-content-blocked-16.png);
-}
-
-@media (min-resolution: 2dppx) {
-  #trackingProtectionImage {
-    list-style-image: url(chrome://browser/skin/bad-content-blocked-16@2x.png);
-  }
+.text-link {
+  margin-bottom: 0;
 }
 
 #showUpdateHistory {
@@ -392,11 +388,20 @@ description > html|a {
  * Sync
  */
 
-#fxaDeviceName {
-  margin: 14px 0px;
+#fxaSyncEngines > vbox:first-child {
+  margin-right: 80px;
 }
 
-#fxaSyncComputerName.plain {
-  background-color: transparent;
-  opacity: 1;
+#fxaSyncComputerName {
+  margin-left: 0px;
+}
+
+#tosPP-small-ToS {
+  margin-bottom: 1em;
+}
+
+#fxaLoginRejectedWarning {
+  list-style-image: url(chrome://browser/skin/warning.svg);
+  filter: drop-shadow(0 1px 0 hsla(206, 50%, 10%, .15));
+  margin: 4px 8px 0px 0px;
 }

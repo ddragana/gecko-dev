@@ -70,7 +70,7 @@ bool nsPSMInitPanic::isPanic = false;
 bool EnsureNSSInitializedChromeOrContent()
 {
   nsresult rv;
-  if (XRE_GetProcessType() == GeckoProcessType_Default) {
+  if (XRE_IsParentProcess()) {
     nsCOMPtr<nsISupports> nss = do_GetService(PSM_COMPONENT_CONTRACTID, &rv);
     if (NS_FAILED(rv)) {
       return false;
@@ -853,7 +853,7 @@ CipherSuiteChangeObserver::Observe(nsISupports* aSubject,
   return NS_OK;
 }
 
-} // anonymous namespace
+} // namespace
 
 // Caller must hold a lock on nsNSSComponent::mutex when calling this function
 void nsNSSComponent::setValidationOptions(bool isInitialSetting,

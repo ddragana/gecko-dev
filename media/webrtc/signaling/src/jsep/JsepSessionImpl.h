@@ -15,6 +15,7 @@
 #include "signaling/src/jsep/JsepTrack.h"
 #include "signaling/src/jsep/JsepTrackImpl.h"
 #include "signaling/src/sdp/SipccSdpParser.h"
+#include "signaling/src/sdp/SdpHelper.h"
 #include "signaling/src/common/PtrVector.h"
 
 namespace mozilla {
@@ -35,9 +36,11 @@ public:
         mWasOffererLastTime(false),
         mIceControlling(false),
         mRemoteIsIceLite(false),
+        mBundlePolicy(kBundleBalanced),
         mSessionId(0),
         mSessionVersion(0),
-        mUuidGen(Move(uuidgen))
+        mUuidGen(Move(uuidgen)),
+        mSdpHelper(&mLastError)
   {
   }
 
@@ -51,6 +54,7 @@ public:
 
   virtual nsresult SetIceCredentials(const std::string& ufrag,
                                      const std::string& pwd) override;
+  nsresult SetBundlePolicy(JsepBundlePolicy policy) override;
 
   virtual bool
   RemoteIsIceLite() const override
@@ -178,8 +182,6 @@ private:
   void AddCodecs(SdpMediaSection* msection) const;
   void AddExtmap(SdpMediaSection* msection) const;
   void AddMid(const std::string& mid, SdpMediaSection* msection) const;
-  void SetSsrcs(const std::vector<uint32_t>& ssrcs,
-                SdpMediaSection* msection) const;
   void AddLocalIds(const JsepTrack& track, SdpMediaSection* msection) const;
   JsepCodecDescription* FindMatchingCodec(
       const std::string& pt,
@@ -215,10 +217,9 @@ private:
                                    const UniquePtr<Sdp>& remote);
   nsresult AddTransportAttributes(SdpMediaSection* msection,
                                   SdpSetupAttribute::Role dtlsRole);
-  nsresult CopyTransportParams(const SdpMediaSection& source,
-                               SdpMediaSection* dest);
-  nsresult CopyStickyParams(const SdpMediaSection& source,
-                            SdpMediaSection* dest);
+  nsresult SetupTransportParams(const Sdp& oldAnswer,
+                                const Sdp& newOffer,
+                                Sdp* newLocal);
   nsresult AddOfferMSections(const JsepOfferOptions& options, Sdp* sdp);
   // Non-const so it can assign m-line index to tracks
   nsresult AddOfferMSectionsByType(SdpMediaSection::MediaType type,
@@ -241,21 +242,10 @@ private:
                          const Sdp& oldAnswer,
                          Sdp* newSdp);
   void SetupBundle(Sdp* sdp) const;
-  nsresult SetupTransportAttributes(const Sdp& newOffer, Sdp* local);
-  void SetupMsidSemantic(const std::vector<std::string>& msids, Sdp* sdp) const;
-  nsresult GetIdsFromMsid(const Sdp& sdp,
-                          const SdpMediaSection& msection,
-                          std::string* streamId,
-                          std::string* trackId);
   nsresult GetRemoteIds(const Sdp& sdp,
                         const SdpMediaSection& msection,
                         std::string* streamId,
                         std::string* trackId);
-  nsresult GetMsids(const SdpMediaSection& msection,
-                    std::vector<SdpMsidAttributeList::Msid>* msids);
-  nsresult ParseMsid(const std::string& msidAttribute,
-                     std::string* streamId,
-                     std::string* trackId);
   nsresult CreateOfferMSection(SdpMediaSection::MediaType type,
                                SdpDirectionAttribute::Direction direction,
                                Sdp* sdp);
@@ -287,32 +277,8 @@ private:
   nsresult FinalizeTransport(const SdpAttributeList& remote,
                              const SdpAttributeList& answer,
                              const RefPtr<JsepTransport>& transport);
-  bool AreOldTransportParamsValid(const Sdp& oldAnswer,
-                                  const Sdp& newOffer,
-                                  size_t level);
 
-  nsresult AddCandidateToSdp(Sdp* sdp,
-                             const std::string& candidate,
-                             const std::string& mid,
-                             uint16_t level);
-  nsresult GetComponent(const std::string& candidate, size_t* component);
-
-  SdpMediaSection* FindMsectionByMid(Sdp& sdp,
-                                     const std::string& mid) const;
-
-  const SdpMediaSection* FindMsectionByMid(const Sdp& sdp,
-                                           const std::string& mid) const;
-
-  const SdpGroupAttributeList::Group* FindBundleGroup(const Sdp& sdp) const;
-
-  nsresult GetNegotiatedBundleInfo(std::set<std::string>* bundleMids,
-                                   const SdpMediaSection** bundleMsection);
-
-  nsresult GetBundleInfo(const Sdp& sdp,
-                         std::set<std::string>* bundleMids,
-                         const SdpMediaSection** bundleMsection);
-
-  bool IsBundleSlave(const Sdp& localSdp, uint16_t level);
+  nsresult GetNegotiatedBundledMids(SdpHelper::BundledMids* bundledMids);
 
   void DisableMsection(Sdp* sdp, SdpMediaSection* msection) const;
   nsresult EnableOfferMsection(SdpMediaSection* msection);
@@ -320,8 +286,6 @@ private:
   nsresult SetUniquePayloadTypes();
   nsresult GetAllPayloadTypes(const JsepTrackNegotiatedDetails& trackDetails,
                               std::vector<uint8_t>* payloadTypesOut);
-  std::string GetCNAME(const SdpMediaSection& msection) const;
-  bool MsectionIsDisabled(const SdpMediaSection& msection) const;
   const Sdp* GetAnswer() const;
 
   std::vector<JsepSendingTrack> mLocalTracks;
@@ -341,6 +305,7 @@ private:
   std::string mIcePwd;
   bool mRemoteIsIceLite;
   std::vector<std::string> mIceOptions;
+  JsepBundlePolicy mBundlePolicy;
   std::vector<JsepDtlsFingerprint> mDtlsFingerprints;
   uint64_t mSessionId;
   uint64_t mSessionVersion;
@@ -364,6 +329,7 @@ private:
   PtrVector<JsepCodecDescription> mCodecs;
   std::string mLastError;
   SipccSdpParser mParser;
+  SdpHelper mSdpHelper;
 };
 
 } // namespace mozilla

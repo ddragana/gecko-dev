@@ -6,6 +6,8 @@ var loop = loop || {};
 loop.store = loop.store || {};
 
 (function() {
+  "use strict";
+
   var sharedActions = loop.shared.actions;
   var CALL_TYPES = loop.shared.utils.CALL_TYPES;
   var REST_ERRNOS = loop.shared.utils.REST_ERRNOS;
@@ -439,11 +441,14 @@ loop.store = loop.store || {};
         maxSize: loop.store.MAX_ROOM_CREATION_SIZE,
         expiresIn: loop.store.DEFAULT_EXPIRES_IN
       }, function(err, createdRoomData) {
+        var buckets = this.mozLoop.ROOM_CREATE;
         if (err) {
           this.trigger("error:emailLink");
+          this.mozLoop.telemetryAddValue("LOOP_ROOM_CREATE", buckets.CREATE_FAIL);
           return;
         }
         this.setStoreState({"emailLink": createdRoomData.roomUrl});
+        this.mozLoop.telemetryAddValue("LOOP_ROOM_CREATE", buckets.CREATE_SUCCESS);
       }.bind(this));
     },
 

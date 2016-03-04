@@ -50,7 +50,12 @@ DrawTargetD2D1::~DrawTargetD2D1()
     // mSnapshot will be cleared now.
   }
 
-  mDC->EndDraw();
+  if (mDC) {
+    // The only way mDC can be null is if Init failed, but it can happen and the
+    // destructor is the only place where we need to check for it since the
+    // DrawTarget will destroyed right after Init fails.
+    mDC->EndDraw();
+  }
 
   // Targets depending on us can break that dependency, since we're obviously not going to
   // be modified in the future.
@@ -333,30 +338,39 @@ DrawTargetD2D1::CopySurface(SourceSurface *aSurface,
     return;
   }
 
-  if (mFormat == SurfaceFormat::A8) {
-    RefPtr<ID2D1Bitmap> bitmap;
-    image->QueryInterface((ID2D1Bitmap**)byRef(bitmap));
+  RefPtr<ID2D1Bitmap> bitmap;
+  image->QueryInterface((ID2D1Bitmap**)byRef(bitmap));
 
-    mDC->PushAxisAlignedClip(D2D1::RectF(aDestination.x, aDestination.y,
-                                         aDestination.x + aSourceRect.width,
-                                         aDestination.y + aSourceRect.height),
-                             D2D1_ANTIALIAS_MODE_ALIASED);
-    mDC->Clear();
-    mDC->PopAxisAlignedClip();
-
+  if (bitmap && mFormat == SurfaceFormat::A8) {
     RefPtr<ID2D1SolidColorBrush> brush;
     mDC->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White),
                                D2D1::BrushProperties(), byRef(brush));
     mDC->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+    mDC->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_COPY);
     mDC->FillOpacityMask(bitmap, brush, D2D1_OPACITY_MASK_CONTENT_GRAPHICS);
     mDC->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    mDC->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
+    return;
+  }
+
+  Rect srcRect(Float(aSourceRect.x), Float(aSourceRect.y),
+               Float(aSourceRect.width), Float(aSourceRect.height));
+
+  Rect dstRect(Float(aDestination.x), Float(aDestination.y),
+               Float(aSourceRect.width), Float(aSourceRect.height));
+
+  if (bitmap) {
+    mDC->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_COPY);
+    mDC->DrawBitmap(bitmap, D2DRect(dstRect), 1.0f,
+                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    D2DRect(srcRect));
+    mDC->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
     return;
   }
 
   mDC->DrawImage(image, D2D1::Point2F(Float(aDestination.x), Float(aDestination.y)),
-                 D2D1::RectF(Float(aSourceRect.x), Float(aSourceRect.y), 
-                             Float(aSourceRect.XMost()), Float(aSourceRect.YMost())),
-                 D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPOSITE_MODE_BOUNDED_SOURCE_COPY);
+                 D2DRect(srcRect), D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                 D2D1_COMPOSITE_MODE_BOUNDED_SOURCE_COPY);
 }
 
 void
@@ -718,7 +732,7 @@ DrawTargetD2D1::CreateSourceSurfaceFromData(unsigned char *aData,
                                  byRef(bitmap));
 
   if (FAILED(hr) || !bitmap) {
-    gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(aSize))) << "[D2D1.1] 1CreateBitmap failure " << aSize << " Code: " << hexa(hr);
+    gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(aSize))) << "[D2D1.1] 1CreateBitmap failure " << aSize << " Code: " << hexa(hr) << " format " << (int)aFormat;
     return nullptr;
   }
 
@@ -812,7 +826,7 @@ DrawTargetD2D1::Init(ID3D11Texture2D* aTexture, SurfaceFormat aFormat)
   hr = device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_ENABLE_MULTITHREADED_OPTIMIZATIONS, byRef(mDC));
 
   if (FAILED(hr)) {
-    gfxCriticalError() <<"[D2D1.1] 1Failed to create a DeviceContext, code: " << hexa(hr);
+    gfxCriticalError() <<"[D2D1.1] 1Failed to create a DeviceContext, code: " << hexa(hr) << " format " << (int)aFormat;
     return false;
   }
 
@@ -833,7 +847,7 @@ DrawTargetD2D1::Init(ID3D11Texture2D* aTexture, SurfaceFormat aFormat)
   hr = mDC->CreateBitmapFromDxgiSurface(dxgiSurface, props, (ID2D1Bitmap1**)byRef(mBitmap));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << "[D2D1.1] CreateBitmapFromDxgiSurface failure Code: " << hexa(hr);
+    gfxCriticalError() << "[D2D1.1] CreateBitmapFromDxgiSurface failure Code: " << hexa(hr) << " format " << (int)aFormat;
     return false;
   }
 
@@ -884,7 +898,7 @@ DrawTargetD2D1::Init(const IntSize &aSize, SurfaceFormat aFormat)
   hr = device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_ENABLE_MULTITHREADED_OPTIMIZATIONS, byRef(mDC));
 
   if (FAILED(hr)) {
-    gfxCriticalError() <<"[D2D1.1] 2Failed to create a DeviceContext, code: " << hexa(hr);
+    gfxCriticalError() <<"[D2D1.1] 2Failed to create a DeviceContext, code: " << hexa(hr) << " format " << (int)aFormat;
     return false;
   }
 
@@ -904,7 +918,7 @@ DrawTargetD2D1::Init(const IntSize &aSize, SurfaceFormat aFormat)
   hr = mDC->CreateBitmap(D2DIntSize(aSize), nullptr, 0, props, (ID2D1Bitmap1**)byRef(mBitmap));
 
   if (FAILED(hr)) {
-    gfxCriticalError() << "[D2D1.1] 3CreateBitmap failure " << aSize << " Code: " << hexa(hr);
+    gfxCriticalError() << "[D2D1.1] 3CreateBitmap failure " << aSize << " Code: " << hexa(hr) << " format " << (int)aFormat;
     return false;
   }
 
@@ -1063,7 +1077,7 @@ DrawTargetD2D1::FinalizeDrawing(CompositionOp aOp, const Pattern &aPattern)
         if (!IsOperatorBoundByMask(aOp)) {
           HRESULT hr = mDC->CreateBitmap(D2DIntSize(mSize), D2D1::BitmapProperties(D2DPixelFormat(mFormat)), byRef(tmpBitmap));
           if (FAILED(hr)) {
-            gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(mSize))) << "[D2D1.1] 6CreateBitmap failure " << mSize << " Code: " << hexa(hr);
+            gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(mSize))) << "[D2D1.1] 6CreateBitmap failure " << mSize << " Code: " << hexa(hr) << " format " << (int)mFormat;
             // For now, crash in this scenario; this should happen because tmpBitmap is
             // null and CopyFromBitmap call below dereferences it.
             // return;
@@ -1101,7 +1115,7 @@ DrawTargetD2D1::FinalizeDrawing(CompositionOp aOp, const Pattern &aPattern)
     RefPtr<ID2D1Bitmap> tmpBitmap;
     HRESULT hr = mDC->CreateBitmap(D2DIntSize(mSize), D2D1::BitmapProperties(D2DPixelFormat(mFormat)), byRef(tmpBitmap));
     if (FAILED(hr)) {
-      gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(mSize))) << "[D2D1.1] 5CreateBitmap failure " << mSize << " Code: " << hexa(hr);
+      gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(mSize))) << "[D2D1.1] 5CreateBitmap failure " << mSize << " Code: " << hexa(hr) << " format " << (int)mFormat;
       // For now, crash in this scenario; this should happen because tmpBitmap is
       // null and CopyFromBitmap call below dereferences it.
       // return;
@@ -1565,7 +1579,7 @@ DrawTargetD2D1::OptimizeSourceSurface(SourceSurface* aSurface) const
                                    byRef(bitmap));
 
     if (FAILED(hr)) {
-      gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(data->GetSize()))) << "[D2D1.1] 4CreateBitmap failure " << data->GetSize() << " Code: " << hexa(hr);
+      gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(data->GetSize()))) << "[D2D1.1] 4CreateBitmap failure " << data->GetSize() << " Code: " << hexa(hr) << " format " << (int)data->GetFormat();
     }
   }
 

@@ -115,6 +115,11 @@ GonkGPSGeolocationProvider::LocationCallback(GpsLocation* location)
 
   MOZ_ASSERT(location);
 
+  const float kImpossibleAccuracy_m = 0.001;
+  if (location->accuracy < kImpossibleAccuracy_m) {
+    return;
+  }
+
   nsRefPtr<nsGeoPosition> somewhere = new nsGeoPosition(location->latitude,
                                                         location->longitude,
                                                         location->altitude,
@@ -534,7 +539,7 @@ ConvertToGpsRefLocationType(const nsAString& aConnectionType)
   }
   return AGPS_REF_LOCATION_TYPE_GSM_CELLID;
 }
-} // anonymous namespace
+} // namespace
 
 void
 GonkGPSGeolocationProvider::SetReferenceLocation()
@@ -1021,7 +1026,7 @@ ConvertToGpsNetworkType(int aNetworkInterfaceType)
       return -1;
   }
 }
-} // anonymous namespace
+} // namespace
 
 NS_IMETHODIMP
 GonkGPSGeolocationProvider::Observe(nsISupports* aSubject,

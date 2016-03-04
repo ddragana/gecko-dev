@@ -893,6 +893,12 @@ const KTableValue nsCSSProps::kBoxSizingKTable[] = {
 };
 
 const KTableValue nsCSSProps::kCaptionSideKTable[] = {
+  eCSSKeyword_block_start,          NS_STYLE_CAPTION_SIDE_BSTART,
+  eCSSKeyword_block_end,            NS_STYLE_CAPTION_SIDE_BEND,
+  eCSSKeyword_inline_start,         NS_STYLE_CAPTION_SIDE_ISTART,
+  eCSSKeyword_inline_end,           NS_STYLE_CAPTION_SIDE_IEND,
+  eCSSKeyword_block_start_outside,  NS_STYLE_CAPTION_SIDE_BSTART_OUTSIDE,
+  eCSSKeyword_block_end_outside,    NS_STYLE_CAPTION_SIDE_BEND_OUTSIDE,
   eCSSKeyword_top,                  NS_STYLE_CAPTION_SIDE_TOP,
   eCSSKeyword_right,                NS_STYLE_CAPTION_SIDE_RIGHT,
   eCSSKeyword_bottom,               NS_STYLE_CAPTION_SIDE_BOTTOM,
@@ -2372,12 +2378,12 @@ static const nsCSSProperty gBorderColorSubpropTable[] = {
   eCSSProperty_UNKNOWN
 };
 
-static const nsCSSProperty gBorderEndSubpropTable[] = {
+static const nsCSSProperty gBorderInlineEndSubpropTable[] = {
   // Declaration.cpp output the subproperties in this order.
   // It also depends on the color being third.
-  eCSSProperty_border_end_width,
-  eCSSProperty_border_end_style,
-  eCSSProperty_border_end_color,
+  eCSSProperty_border_inline_end_width,
+  eCSSProperty_border_inline_end_style,
+  eCSSProperty_border_inline_end_color,
   eCSSProperty_UNKNOWN
 };
 
@@ -2399,12 +2405,12 @@ static const nsCSSProperty gBorderRightSubpropTable[] = {
   eCSSProperty_UNKNOWN
 };
 
-static const nsCSSProperty gBorderStartSubpropTable[] = {
+static const nsCSSProperty gBorderInlineStartSubpropTable[] = {
   // Declaration.cpp outputs the subproperties in this order.
   // It also depends on the color being third.
-  eCSSProperty_border_start_width,
-  eCSSProperty_border_start_style,
-  eCSSProperty_border_start_color,
+  eCSSProperty_border_inline_start_width,
+  eCSSProperty_border_inline_start_style,
+  eCSSProperty_border_inline_start_color,
   eCSSProperty_UNKNOWN
 };
 

@@ -189,6 +189,20 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::border, aBorder, aError);
   }
+  void SetReferrer(const nsAString& aReferrer, ErrorResult& aError)
+  {
+    SetHTMLAttr(nsGkAtoms::referrer, aReferrer, aError);
+  }
+  void GetReferrer(nsAString& aReferrer)
+  {
+    GetHTMLAttr(nsGkAtoms::referrer, aReferrer);
+  }
+
+  net::ReferrerPolicy
+  GetImageReferrerPolicy() override
+  {
+    return GetReferrerPolicy();
+  }
 
   int32_t X();
   int32_t Y();

@@ -12,7 +12,7 @@ namespace mozilla {
 
 namespace layout {
 class VsyncParent;
-}
+} // namespace layout
 
 namespace ipc {
 
@@ -72,14 +72,14 @@ protected:
 
   virtual PBroadcastChannelParent*
   AllocPBroadcastChannelParent(const PrincipalInfo& aPrincipalInfo,
-                               const nsString& aOrigin,
+                               const nsCString& aOrigin,
                                const nsString& aChannel,
                                const bool& aPrivateBrowsing) override;
 
   virtual bool
   RecvPBroadcastChannelConstructor(PBroadcastChannelParent* actor,
                                    const PrincipalInfo& aPrincipalInfo,
-                                   const nsString& origin,
+                                   const nsCString& origin,
                                    const nsString& channel,
                                    const bool& aPrivateBrowsing) override;
 

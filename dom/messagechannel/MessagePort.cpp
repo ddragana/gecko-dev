@@ -294,7 +294,7 @@ private:
 
 NS_IMPL_ISUPPORTS(ForceCloseHelper, nsIIPCBackgroundChildCreateCallback)
 
-} // anonymous namespace
+} // namespace
 
 MessagePort::MessagePort(nsPIDOMWindow* aWindow)
   : MessagePortBase(aWindow)
@@ -668,7 +668,7 @@ MessagePort::MessagesReceived(nsTArray<MessagePortMessage>& aMessages)
   RemoveDocFromBFCache();
 
   FallibleTArray<nsRefPtr<SharedMessagePortMessage>> data;
-  if (!NS_WARN_IF(SharedMessagePortMessage::FromMessagesToSharedChild(aMessages,
+  if (NS_WARN_IF(!SharedMessagePortMessage::FromMessagesToSharedChild(aMessages,
                                                                       data))) {
     // OOM, We cannot continue.
     return;
@@ -900,7 +900,9 @@ MessagePort::RemoveDocFromBFCache()
   }
 
   nsPIDOMWindow* window = GetOwner();
-  MOZ_ASSERT(window);
+  if (!window) {
+    return;
+  }
 
   nsIDocument* doc = window->GetExtantDoc();
   if (!doc) {

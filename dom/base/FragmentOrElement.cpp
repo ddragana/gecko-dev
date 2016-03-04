@@ -13,7 +13,6 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/SegmentedVector.h"
 #include "mozilla/StaticPtr.h"
 
 #include "mozilla/dom/FragmentOrElement.h"
@@ -1227,12 +1226,24 @@ FragmentOrElement::FireNodeInserted(nsIDocument* aDoc,
 
 //----------------------------------------------------------------------
 
-class ContentUnbinder
-{
-  static const size_t kSegmentSize = sizeof(void*) * 512;
-  typedef SegmentedVector<nsCOMPtr<nsIContent>, kSegmentSize, InfallibleAllocPolicy> ContentArray;
+// nsISupports implementation
 
-  static void UnbindSubtree(nsIContent* aNode)
+#define SUBTREE_UNBINDINGS_PER_RUNNABLE 500
+
+class ContentUnbinder : public nsRunnable
+{
+public:
+  ContentUnbinder()
+  {
+    mLast = this;
+  }
+
+  ~ContentUnbinder()
+  {
+    Run();
+  }
+
+  void UnbindSubtree(nsIContent* aNode)
   {
     if (aNode->NodeType() != nsIDOMNode::ELEMENT_NODE &&
         aNode->NodeType() != nsIDOMNode::DOCUMENT_FRAGMENT_NODE) {
@@ -1258,55 +1269,72 @@ class ContentUnbinder
     }
   }
 
-  // These two methods are based on DeferredFinalizerImpl.
-
-  static void*
-  AppendContentUnbinderPointer(void* aData, void* aObject)
+  NS_IMETHOD Run()
   {
-    ContentArray* contentArray = static_cast<ContentArray*>(aData);
-    if (!contentArray) {
-      contentArray = new ContentArray();
-    }
-
-    contentArray->InfallibleAppend(dont_AddRef(static_cast<nsIContent*>(aObject)));
-    return contentArray;
-  }
-
-  static bool
-  DeferredFinalize(uint32_t aSliceBudget, void* aData)
-  {
-    MOZ_ASSERT(aSliceBudget > 0, "nonsensical/useless call with aSliceBudget == 0");
     nsAutoScriptBlocker scriptBlocker;
-    ContentArray* contentArray = static_cast<ContentArray*>(aData);
-
-    size_t numToRemove = contentArray->Length();
-    if (aSliceBudget < numToRemove) {
-      numToRemove = aSliceBudget;
+    uint32_t len = mSubtreeRoots.Length();
+    if (len) {
+      for (uint32_t i = 0; i < len; ++i) {
+        UnbindSubtree(mSubtreeRoots[i]);
+      }
+      mSubtreeRoots.Clear();
     }
-
-    for (size_t i = 0; i < numToRemove; ++i) {
-      nsCOMPtr<nsIContent> element = contentArray->GetLast().forget();
-      contentArray->PopLast();
-      UnbindSubtree(element);
-    }
-
     nsCycleCollector_dispatchDeferredDeletion();
-
-    if (contentArray->Length() == 0) {
-      delete contentArray;
-      return true;
+    if (this == sContentUnbinder) {
+      sContentUnbinder = nullptr;
+      if (mNext) {
+        nsRefPtr<ContentUnbinder> next;
+        next.swap(mNext);
+        sContentUnbinder = next;
+        next->mLast = mLast;
+        mLast = nullptr;
+        NS_DispatchToMainThread(next);
+      }
     }
-    return false;
+    return NS_OK;
   }
 
-public:
-  static void
-  Append(nsIContent* aSubtreeRoot)
+  static void UnbindAll()
   {
-    nsCOMPtr<nsIContent> root = aSubtreeRoot;
-    mozilla::DeferredFinalize(AppendContentUnbinderPointer, DeferredFinalize, root.forget().take());
+    nsRefPtr<ContentUnbinder> ub = sContentUnbinder;
+    sContentUnbinder = nullptr;
+    while (ub) {
+      ub->Run();
+      ub = ub->mNext;
+    }
   }
+
+  static void Append(nsIContent* aSubtreeRoot)
+  {
+    if (!sContentUnbinder) {
+      sContentUnbinder = new ContentUnbinder();
+      nsCOMPtr<nsIRunnable> e = sContentUnbinder;
+      NS_DispatchToMainThread(e);
+    }
+
+    if (sContentUnbinder->mLast->mSubtreeRoots.Length() >=
+        SUBTREE_UNBINDINGS_PER_RUNNABLE) {
+      sContentUnbinder->mLast->mNext = new ContentUnbinder();
+      sContentUnbinder->mLast = sContentUnbinder->mLast->mNext;
+    }
+    sContentUnbinder->mLast->mSubtreeRoots.AppendElement(aSubtreeRoot);
+  }
+
+private:
+  nsAutoTArray<nsCOMPtr<nsIContent>,
+               SUBTREE_UNBINDINGS_PER_RUNNABLE> mSubtreeRoots;
+  nsRefPtr<ContentUnbinder>                     mNext;
+  ContentUnbinder*                              mLast;
+  static ContentUnbinder*                       sContentUnbinder;
 };
+
+ContentUnbinder* ContentUnbinder::sContentUnbinder = nullptr;
+
+void
+FragmentOrElement::ClearContentUnbinder()
+{
+  ContentUnbinder::UnbindAll();
+}
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(FragmentOrElement)
 
@@ -1421,22 +1449,18 @@ FindOptimizableSubtreeRoot(nsINode* aNode)
 
 StaticAutoPtr<nsTHashtable<nsPtrHashKey<nsINode>>> gCCBlackMarkedNodes;
 
-static PLDHashOperator
-VisitBlackMarkedNode(nsPtrHashKey<nsINode>* aEntry, void*)
-{
-  nsINode* n = aEntry->GetKey();
-  n->SetCCMarkedRoot(false);
-  n->SetInCCBlackTree(false);
-  return PL_DHASH_NEXT;
-}
-
 static void
 ClearBlackMarkedNodes()
 {
   if (!gCCBlackMarkedNodes) {
     return;
   }
-  gCCBlackMarkedNodes->EnumerateEntries(VisitBlackMarkedNode, nullptr);
+  for (auto iter = gCCBlackMarkedNodes->ConstIter(); !iter.Done();
+       iter.Next()) {
+    nsINode* n = iter.Get()->GetKey();
+    n->SetCCMarkedRoot(false);
+    n->SetInCCBlackTree(false);
+  }
   gCCBlackMarkedNodes = nullptr;
 }
 
@@ -2307,7 +2331,7 @@ private:
   uint32_t                                mLength;
 };
 
-} // anonymous namespace
+} // namespace
 
 static void
 AppendEncodedCharacters(const nsTextFragment* aText, StringBuilder& aBuilder)

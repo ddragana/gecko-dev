@@ -36,22 +36,10 @@ function getIntPref(prefName, def) {
   }
 }
 
-function visibilityChangeHandler(e) {
-  // The visibilitychange event's target is the document.
-  let win = e.target.defaultView;
-
-  if (!win._browserElementParents) {
-    return;
-  }
-
-  let beps = Cu.nondeterministicGetWeakMapKeys(win._browserElementParents);
-  if (beps.length == 0) {
-    win.removeEventListener('visibilitychange', visibilityChangeHandler);
-    return;
-  }
-
-  for (let i = 0; i < beps.length; i++) {
-    beps[i]._ownerVisibilityChange();
+function handleWindowEvent(e) {
+  if (this._browserElementParents) {
+    let beps = Cu.nondeterministicGetWeakMapKeys(this._browserElementParents);
+    beps.forEach(bep => bep._handleOwnerEvent(e));
   }
 }
 
@@ -119,10 +107,14 @@ BrowserElementParent.prototype = {
     // BrowserElementParents.
     if (!this._window._browserElementParents) {
       this._window._browserElementParents = new WeakMap();
-      this._window.addEventListener('visibilitychange',
-                                    visibilityChangeHandler,
-                                    /* useCapture = */ false,
-                                    /* wantsUntrusted = */ false);
+      let handler = handleWindowEvent.bind(this._window);
+      let windowEvents = ['visibilitychange', 'mozfullscreenchange'];
+      let els = Cc["@mozilla.org/eventlistenerservice;1"]
+                  .getService(Ci.nsIEventListenerService);
+      for (let event of windowEvents) {
+        els.addSystemEventListener(this._window, event, handler,
+                                   /* useCapture = */ true);
+      }
     }
 
     this._window._browserElementParents.set(this, null);
@@ -131,11 +123,6 @@ BrowserElementParent.prototype = {
     BrowserElementPromptService.mapFrameToBrowserElementParent(this._frameElement, this);
     this._setupMessageListener();
     this._registerAppManifest();
-
-    let els = Cc["@mozilla.org/eventlistenerservice;1"]
-                .getService(Ci.nsIEventListenerService);
-    els.addSystemEventListener(this._window.document, "mozfullscreenchange",
-                               this._fullscreenChange.bind(this), true);
   },
 
   _runPendingAPICall: function() {
@@ -206,10 +193,17 @@ BrowserElementParent.prototype = {
       "selectionstatechanged": this._handleSelectionStateChanged,
       "scrollviewchange": this._handleScrollViewChange,
       "caretstatechanged": this._handleCaretStateChanged,
-      "findchange": this._handleFindChange
+      "findchange": this._handleFindChange,
+      "execute-script-done": this._gotDOMRequestResult,
+      "got-audio-channel-volume": this._gotDOMRequestResult,
+      "got-set-audio-channel-volume": this._gotDOMRequestResult,
+      "got-audio-channel-muted": this._gotDOMRequestResult,
+      "got-set-audio-channel-muted": this._gotDOMRequestResult,
+      "got-is-audio-channel-active": this._gotDOMRequestResult
     };
 
     let mmSecuritySensitiveCalls = {
+      "mediaplaybackchange": this._fireEventFromMsg,
       "showmodalprompt": this._handleShowModalPrompt,
       "contextmenu": this._fireCtxMenuEvent,
       "securitychange": this._fireEventFromMsg,
@@ -686,6 +680,19 @@ BrowserElementParent.prototype = {
     this._sendAsyncMsg('stop');
   }),
 
+  executeScript: function(script, options) {
+    if (!this._isAlive()) {
+      throw Components.Exception("Dead content process",
+                                 Cr.NS_ERROR_DOM_INVALID_STATE_ERR);
+    }
+
+    // Enforcing options.url or options.origin
+    if (!options.url && !options.origin) {
+      throw Components.Exception("Invalid argument", Cr.NS_ERROR_INVALID_ARG);
+    }
+    return this._sendDOMRequest('execute-script', {script, options});
+  },
+
   /*
    * The valid range of zoom scale is defined in preference "zoom.maxPercent" and "zoom.minPercent".
    */
@@ -972,6 +979,33 @@ BrowserElementParent.prototype = {
     }
   },
 
+  getAudioChannelVolume: function(aAudioChannel) {
+    return this._sendDOMRequest('get-audio-channel-volume',
+                                {audioChannel: aAudioChannel});
+  },
+
+  setAudioChannelVolume: function(aAudioChannel, aVolume) {
+    return this._sendDOMRequest('set-audio-channel-volume',
+                                {audioChannel: aAudioChannel,
+                                 volume: aVolume});
+  },
+
+  getAudioChannelMuted: function(aAudioChannel) {
+    return this._sendDOMRequest('get-audio-channel-muted',
+                                {audioChannel: aAudioChannel});
+  },
+
+  setAudioChannelMuted: function(aAudioChannel, aMuted) {
+    return this._sendDOMRequest('set-audio-channel-muted',
+                                {audioChannel: aAudioChannel,
+                                 muted: aMuted});
+  },
+
+  isAudioChannelActive: function(aAudioChannel) {
+    return this._sendDOMRequest('get-is-audio-channel-active',
+                                {audioChannel: aAudioChannel});
+  },
+
   /**
    * Called when the visibility of the window which owns this iframe changes.
    */
@@ -1009,14 +1043,19 @@ BrowserElementParent.prototype = {
     this._windowUtils.remoteFrameFullscreenReverted();
   },
 
-  _fullscreenChange: function(evt) {
-    if (this._isAlive() && evt.target == this._window.document) {
-      if (!this._window.document.mozFullScreen) {
-        this._sendAsyncMsg("exit-fullscreen");
-      } else if (this._pendingDOMFullscreen) {
-        this._pendingDOMFullscreen = false;
-        this._sendAsyncMsg("entered-fullscreen");
-      }
+  _handleOwnerEvent: function(evt) {
+    switch (evt.type) {
+      case 'visibilitychange':
+        this._ownerVisibilityChange();
+        break;
+      case 'mozfullscreenchange':
+        if (!this._window.document.mozFullScreen) {
+          this._sendAsyncMsg('exit-fullscreen');
+        } else if (this._pendingDOMFullscreen) {
+          this._pendingDOMFullscreen = false;
+          this._sendAsyncMsg('entered-fullscreen');
+        }
+        break;
     }
   },
 

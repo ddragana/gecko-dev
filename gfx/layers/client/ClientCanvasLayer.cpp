@@ -88,8 +88,7 @@ ClientCanvasLayer::Initialize(const Data& aData)
         factory = MakeUnique<SurfaceFactory_Gralloc>(mGLContext, caps, forwarder, mFlags);
 #else
         if (mGLContext->GetContextType() == GLContextType::EGL) {
-          bool isCrossProcess = (XRE_GetProcessType() != GeckoProcessType_Default);
-          if (!isCrossProcess) {
+          if (XRE_IsParentProcess()) {
             factory = SurfaceFactory_EGLImage::Create(mGLContext, caps, forwarder,
                                                       mFlags);
           }
@@ -133,9 +132,7 @@ ClientCanvasLayer::RenderLayer()
   PROFILER_LABEL("ClientCanvasLayer", "RenderLayer",
     js::ProfileEntry::Category::GRAPHICS);
 
-  if (GetMaskLayer()) {
-    ToClientLayer(GetMaskLayer())->RenderLayer();
-  }
+  RenderMaskLayers(this);
 
   if (!IsDirty()) {
     return;
@@ -176,7 +173,6 @@ ClientCanvasLayer::RenderLayer()
 
   ClientManager()->Hold(this);
   mCanvasClient->Updated();
-  mCanvasClient->OnTransaction();
 }
 
 CanvasClient::CanvasClientType
@@ -198,5 +194,5 @@ ClientLayerManager::CreateCanvasLayer()
   return layer.forget();
 }
 
-}
-}
+} // namespace layers
+} // namespace mozilla

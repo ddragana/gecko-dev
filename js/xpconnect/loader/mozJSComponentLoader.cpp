@@ -116,7 +116,7 @@ Dump(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
-Debug(JSContext* cx, unsigned argc, jsval* vp)
+Debug(JSContext* cx, unsigned argc, Value* vp)
 {
 #ifdef DEBUG
     return Dump(cx, argc, vp);
@@ -583,14 +583,13 @@ mozJSComponentLoader::PrepareObjectForLocation(JSContext* aCx,
     if (testFile) {
         *aRealFile = true;
 
-        if (XRE_GetProcessType() == GeckoProcessType_Default) {
-            nsCOMPtr<nsIXPConnectJSObjectHolder> locationHolder;
+        if (XRE_IsParentProcess()) {
+            RootedObject locationObj(aCx);
+
             rv = xpc->WrapNative(aCx, obj, aComponentFile,
                                  NS_GET_IID(nsIFile),
-                                 getter_AddRefs(locationHolder));
+                                 locationObj.address());
             NS_ENSURE_SUCCESS(rv, nullptr);
-
-            RootedObject locationObj(aCx, locationHolder->GetJSObject());
             NS_ENSURE_TRUE(locationObj, nullptr);
 
             if (!JS_DefineProperty(aCx, obj, "__LOCATION__", locationObj, 0))

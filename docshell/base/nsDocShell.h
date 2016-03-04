@@ -33,7 +33,9 @@
 #include "nsAutoPtr.h"
 #include "nsThreadUtils.h"
 #include "nsContentUtils.h"
-#include "TimelineMarker.h"
+#include "timeline/TimelineMarker.h"
+#include "timeline/TimelineConsumers.h"
+#include "timeline/ObservedDocShell.h"
 
 // Threshold value in ms for META refresh based redirects
 #define REFRESH_REDIRECT_TIMER 15000
@@ -60,8 +62,8 @@
 namespace mozilla {
 namespace dom {
 class EventTarget;
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 class nsDocShell;
 class nsDOMNavigationTiming;
@@ -262,47 +264,12 @@ public:
   void AddProfileTimelineMarker(const char* aName, TracingMetadata aMetaData);
   void AddProfileTimelineMarker(mozilla::UniquePtr<TimelineMarker>&& aMarker);
 
-  // Global counter for how many docShells are currently recording profile
-  // timeline markers
-  static unsigned long gProfileTimelineRecordingsCount;
-
-  class ObservedDocShell : public mozilla::LinkedListElement<ObservedDocShell>
-  {
-  public:
-    explicit ObservedDocShell(nsDocShell* aDocShell)
-      : mDocShell(aDocShell)
-    { }
-
-    nsDocShell* operator*() const { return mDocShell.get(); }
-
-  private:
-    nsRefPtr<nsDocShell> mDocShell;
-  };
-
 private:
-  static mozilla::LinkedList<ObservedDocShell>* gObservedDocShells;
-
-  static mozilla::LinkedList<ObservedDocShell>& GetOrCreateObservedDocShells()
-  {
-    if (!gObservedDocShells) {
-      gObservedDocShells = new mozilla::LinkedList<ObservedDocShell>();
-    }
-    return *gObservedDocShells;
-  }
-
-  // Never null if timeline markers are being observed.
-  mozilla::UniquePtr<ObservedDocShell> mObserved;
-
-  // Return true if timeline markers are being observed for this docshell. False
-  // otherwise.
+  // An observed docshell wrapper is created when recording markers is enabled.
+  mozilla::UniquePtr<mozilla::ObservedDocShell> mObserved;
   bool IsObserved() const { return !!mObserved; }
 
 public:
-  static const mozilla::LinkedList<ObservedDocShell>& GetObservedDocShells()
-  {
-    return GetOrCreateObservedDocShells();
-  }
-
   // Tell the favicon service that aNewURI has the same favicon as aOldURI.
   static void CopyFavicon(nsIURI* aOldURI,
                           nsIURI* aNewURI,
@@ -1009,11 +976,6 @@ private:
   // A depth count of how many times NotifyRunToCompletionStart
   // has been called without a matching NotifyRunToCompletionStop.
   uint32_t mJSRunToCompletionDepth;
-
-  nsTArray<mozilla::UniquePtr<TimelineMarker>> mProfileTimelineMarkers;
-
-  // Get rid of all the timeline markers accumulated so far
-  void ClearProfileTimelineMarkers();
 
   // Separate function to do the actual name (i.e. not _top, _self etc.)
   // searching for FindItemWithName.

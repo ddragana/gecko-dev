@@ -313,6 +313,11 @@ describe("loop.shared.utils", function() {
   });
 
   describe("#formatURL", function() {
+    beforeEach(function() {
+      // Stub to prevent console messages.
+      sandbox.stub(window.console, "error");
+    });
+
     it("should decode encoded URIs", function() {
       expect(sharedUtils.formatURL("http://invalid.com/?a=Foo%20Bar"))
         .eql({
@@ -335,10 +340,16 @@ describe("loop.shared.utils", function() {
     it("should return null if it the url is not valid", function() {
       expect(sharedUtils.formatURL("hinvalid//url")).eql(null);
     });
+
+    it("should log an error message to the console", function() {
+      sharedUtils.formatURL("hinvalid//url");
+
+      sinon.assert.calledOnce(console.error);
+    });
   });
 
   describe("#composeCallUrlEmail", function() {
-    var composeEmail;
+    var composeEmail, telemetryAddValue;
 
     beforeEach(function() {
       // fake mozL10n
@@ -355,10 +366,18 @@ describe("loop.shared.utils", function() {
         }
       });
       composeEmail = sandbox.spy();
+      telemetryAddValue = sandbox.spy();
       navigator.mozLoop = {
+        SHARING_ROOM_URL: {
+          EMAIL_FROM_CALLFAILED: 2,
+          EMAIL_FROM_CONVERSATION: 3
+        },
         getLoopPref: sandbox.spy(),
-        composeEmail: composeEmail
+        composeEmail: composeEmail,
+        telemetryAddValue: telemetryAddValue
       };
+
+      sandbox.stub(window.console, "error");
     });
 
     it("should compose a call url email", function() {
@@ -374,6 +393,19 @@ describe("loop.shared.utils", function() {
 
       sinon.assert.calledOnce(composeEmail);
       sinon.assert.calledWith(composeEmail, "subject_context", "body_context");
+    });
+
+    it("should record a telemetry event when an email is composed", function() {
+      sharedUtils.composeCallUrlEmail("http://invalid", null,
+        "Hello, is me you're looking for?", "callfailed");
+
+      sinon.assert.calledOnce(telemetryAddValue, "LOOP_SHARING_ROOM_URL",  2);
+    });
+
+    it("should log an error for invalid URLs", function() {
+      sharedUtils.composeCallUrlEmail("http://invalid", "fake@invalid.tld");
+
+      sinon.assert.calledOnce(console.error);
     });
   });
 

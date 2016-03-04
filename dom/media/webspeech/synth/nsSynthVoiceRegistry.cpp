@@ -56,7 +56,8 @@ GetAllSpeechSynthActors(InfallibleTArray<mozilla::dom::SpeechSynthesisParent*>& 
     }
   }
 }
-}
+
+} // namespace
 
 namespace mozilla {
 namespace dom {
@@ -100,7 +101,7 @@ NS_IMPL_ISUPPORTS(nsSynthVoiceRegistry, nsISynthVoiceRegistry)
 nsSynthVoiceRegistry::nsSynthVoiceRegistry()
   : mSpeechSynthChild(nullptr)
 {
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+  if (XRE_IsContentProcess()) {
 
     mSpeechSynthChild = new SpeechSynthesisChild();
     ContentChild::GetSingleton()->SendPSpeechSynthesisConstructor(mSpeechSynthChild);
@@ -165,7 +166,7 @@ void
 nsSynthVoiceRegistry::Shutdown()
 {
   LOG(LogLevel::Debug, ("[%s] nsSynthVoiceRegistry::Shutdown()",
-                     (XRE_GetProcessType() == GeckoProcessType_Content) ? "Content" : "Default"));
+                     (XRE_IsContentProcess()) ? "Content" : "Default"));
   gSynthVoiceRegistry = nullptr;
 }
 
@@ -236,8 +237,9 @@ nsSynthVoiceRegistry::AddVoice(nsISpeechService* aService,
        NS_ConvertUTF16toUTF8(aLang).get(),
        aLocalService ? "true" : "false"));
 
-  NS_ENSURE_FALSE(XRE_GetProcessType() == GeckoProcessType_Content,
-                  NS_ERROR_NOT_AVAILABLE);
+  if(NS_WARN_IF(XRE_IsContentProcess())) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   return AddVoiceImpl(aService, aUri, aName, aLang,
                       aLocalService);
@@ -250,13 +252,17 @@ nsSynthVoiceRegistry::RemoveVoice(nsISpeechService* aService,
   LOG(LogLevel::Debug,
       ("nsSynthVoiceRegistry::RemoveVoice uri='%s' (%s)",
        NS_ConvertUTF16toUTF8(aUri).get(),
-       (XRE_GetProcessType() == GeckoProcessType_Content) ? "child" : "parent"));
+       (XRE_IsContentProcess()) ? "child" : "parent"));
 
   bool found = false;
   VoiceData* retval = mUriVoiceMap.GetWeak(aUri, &found);
 
-  NS_ENSURE_TRUE(found, NS_ERROR_NOT_AVAILABLE);
-  NS_ENSURE_TRUE(aService == retval->mService, NS_ERROR_INVALID_ARG);
+  if(NS_WARN_IF(!(found))) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  if(NS_WARN_IF(!(aService == retval->mService))) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
   mVoices.RemoveElement(retval);
   mDefaultVoices.RemoveElement(retval);
@@ -277,7 +283,9 @@ nsSynthVoiceRegistry::SetDefaultVoice(const nsAString& aUri,
 {
   bool found = false;
   VoiceData* retval = mUriVoiceMap.GetWeak(aUri, &found);
-  NS_ENSURE_TRUE(found, NS_ERROR_NOT_AVAILABLE);
+  if(NS_WARN_IF(!(found))) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   mDefaultVoices.RemoveElement(retval);
 
@@ -289,7 +297,7 @@ nsSynthVoiceRegistry::SetDefaultVoice(const nsAString& aUri,
     mDefaultVoices.AppendElement(retval);
   }
 
-  if (XRE_GetProcessType() == GeckoProcessType_Default) {
+  if (XRE_IsParentProcess()) {
     nsTArray<SpeechSynthesisParent*> ssplist;
     GetAllSpeechSynthActors(ssplist);
 
@@ -312,7 +320,9 @@ nsSynthVoiceRegistry::GetVoiceCount(uint32_t* aRetval)
 NS_IMETHODIMP
 nsSynthVoiceRegistry::GetVoice(uint32_t aIndex, nsAString& aRetval)
 {
-  NS_ENSURE_TRUE(aIndex < mVoices.Length(), NS_ERROR_INVALID_ARG);
+  if(NS_WARN_IF(!(aIndex < mVoices.Length()))) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
   aRetval = mVoices[aIndex]->mUri;
 
@@ -324,7 +334,9 @@ nsSynthVoiceRegistry::IsDefaultVoice(const nsAString& aUri, bool* aRetval)
 {
   bool found;
   VoiceData* voice = mUriVoiceMap.GetWeak(aUri, &found);
-  NS_ENSURE_TRUE(found, NS_ERROR_NOT_AVAILABLE);
+  if(NS_WARN_IF(!(found))) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   for (int32_t i = mDefaultVoices.Length(); i > 0; ) {
     VoiceData* defaultVoice = mDefaultVoices[--i];
@@ -344,7 +356,9 @@ nsSynthVoiceRegistry::IsLocalVoice(const nsAString& aUri, bool* aRetval)
 {
   bool found;
   VoiceData* voice = mUriVoiceMap.GetWeak(aUri, &found);
-  NS_ENSURE_TRUE(found, NS_ERROR_NOT_AVAILABLE);
+  if(NS_WARN_IF(!(found))) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   *aRetval = voice->mIsLocal;
   return NS_OK;
@@ -355,7 +369,9 @@ nsSynthVoiceRegistry::GetVoiceLang(const nsAString& aUri, nsAString& aRetval)
 {
   bool found;
   VoiceData* voice = mUriVoiceMap.GetWeak(aUri, &found);
-  NS_ENSURE_TRUE(found, NS_ERROR_NOT_AVAILABLE);
+  if(NS_WARN_IF(!(found))) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   aRetval = voice->mLang;
   return NS_OK;
@@ -366,7 +382,9 @@ nsSynthVoiceRegistry::GetVoiceName(const nsAString& aUri, nsAString& aRetval)
 {
   bool found;
   VoiceData* voice = mUriVoiceMap.GetWeak(aUri, &found);
-  NS_ENSURE_TRUE(found, NS_ERROR_NOT_AVAILABLE);
+  if(NS_WARN_IF(!(found))) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   aRetval = voice->mName;
   return NS_OK;
@@ -381,7 +399,9 @@ nsSynthVoiceRegistry::AddVoiceImpl(nsISpeechService* aService,
 {
   bool found = false;
   mUriVoiceMap.GetWeak(aUri, &found);
-  NS_ENSURE_FALSE(found, NS_ERROR_INVALID_ARG);
+  if(NS_WARN_IF(found)) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
   nsRefPtr<VoiceData> voice = new VoiceData(aService, aUri, aName, aLang,
                                             aLocalService);
@@ -477,11 +497,15 @@ nsSynthVoiceRegistry::FindBestMatch(const nsAString& aUri,
   // Try UI language.
   nsresult rv;
   nsCOMPtr<nsILocaleService> localeService = do_GetService(NS_LOCALESERVICE_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, nullptr);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return nullptr;
+  }
 
   nsAutoString uiLang;
   rv = localeService->GetLocaleComponentForUserAgent(uiLang);
-  NS_ENSURE_SUCCESS(rv, nullptr);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return nullptr;
+  }
 
   if (FindVoiceByLang(uiLang, &retval)) {
     LOG(LogLevel::Debug,
@@ -521,7 +545,7 @@ nsSynthVoiceRegistry::SpeakUtterance(SpeechSynthesisUtterance& aUtterance,
   }
 
   nsRefPtr<nsSpeechTask> task;
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+  if (XRE_IsContentProcess()) {
     task = new SpeechTaskChild(&aUtterance);
     SpeechSynthesisRequestChild* actor =
       new SpeechSynthesisRequestChild(static_cast<SpeechTaskChild*>(task.get()));

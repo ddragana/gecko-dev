@@ -235,8 +235,10 @@
               align="center">
           <hbox align="center">
             <image id="fxaProfileImage"
-              onclick="gSyncPane.openChangeProfileImage();" hidden="true"/>
+              onclick="gSyncPane.openChangeProfileImage();" hidden="true"
+              tooltiptext="&profilePicture.tooltip;"/>
             <label id="fxaEmailAddress1"/>
+            <label id="fxaDisplayName" hidden="true"/>
           </hbox>
           <spacer flex="1"/>
           <button id="verifiedManage"
@@ -266,6 +268,9 @@
         <!-- logged in locally but server rejected credentials -->
         <hbox id="fxaLoginRejected"
               flex="1">
+          <vbox>
+            <image id="fxaLoginRejectedWarning"/>
+          </vbox>
           <description>
             &signedInLoginFailure.beforename.label;
             <label id="fxaEmailAddress3"/>
@@ -296,6 +301,8 @@
           <checkbox label="&engine.passwords.label;"
                     accesskey="&engine.passwords.accesskey;"
                     preference="engine.passwords"/>
+        </vbox>
+        <vbox align="start">
           <checkbox label="&engine.history.label;"
                     accesskey="&engine.history.accesskey;"
                     preference="engine.history"/>
@@ -314,7 +321,7 @@
         <spacer/>
       </hbox>
     </groupbox>
-    <vbox>
+    <groupbox>
       <caption>
         <label accesskey="&syncDeviceName.accesskey;"
                control="fxaSyncComputerName">
@@ -323,8 +330,7 @@
       </caption>
       <hbox id="fxaDeviceName">
         <hbox flex="1">
-          <textbox id="fxaSyncComputerName" class="plain"
-                   disabled="true" flex="1"/>
+          <textbox id="fxaSyncComputerName" disabled="true" flex="1"/>
         </hbox>
         <hbox>
           <button id="fxaChangeDeviceName"
@@ -337,7 +343,7 @@
                   hidden="true"/>
         </hbox>
       </hbox>
-    </vbox>
+    </groupbox>
     <spacer flex="1"/>
     <vbox id="tosPP-small">
       <label id="tosPP-small-ToS" class="text-link">

@@ -7,6 +7,7 @@
 
 #include "mozilla/net/FTPChannelParent.h"
 #include "nsFTPChannel.h"
+#include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsFtpProtocolHandler.h"
 #include "nsIEncodedChannel.h"
@@ -106,7 +107,7 @@ FTPChannelParent::DoAsyncOpen(const URIParams& aURI,
                               const uint64_t& aStartPos,
                               const nsCString& aEntityID,
                               const OptionalInputStreamParams& aUploadStream,
-                              const LoadInfoArgs& aLoadInfoArgs)
+                              const OptionalLoadInfoArgs& aLoadInfoArgs)
 {
   nsCOMPtr<nsIURI> uri = DeserializeURI(aURI);
   if (!uri)

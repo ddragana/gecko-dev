@@ -72,6 +72,7 @@
 #include "nsIDocShell.h"
 
 #include "nsNetUtil.h"
+#include "nsNetCID.h"
 
 #include "mozilla/Mutex.h"
 #include "mozilla/PluginLibrary.h"
@@ -249,7 +250,7 @@ nsNPAPIPlugin::PluginCrashed(const nsAString& pluginDumpID,
 bool
 nsNPAPIPlugin::RunPluginOOP(const nsPluginTag *aPluginTag)
 {
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+  if (XRE_IsContentProcess()) {
     return true;
   }
 
@@ -404,7 +405,7 @@ GetNewPluginLibrary(nsPluginTag *aPluginTag)
     return nullptr;
   }
 
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+  if (XRE_IsContentProcess()) {
     return PluginModuleContentParent::LoadModule(aPluginTag->mId);
   }
 
@@ -681,7 +682,7 @@ doGetIdentifier(JSContext *cx, const NPUTF8* name)
 {
   NS_ConvertUTF8toUTF16 utf16name(name);
 
-  JSString *str = ::JS_InternUCStringN(cx, utf16name.get(), utf16name.Length());
+  JSString *str = ::JS_AtomizeAndPinUCStringN(cx, utf16name.get(), utf16name.Length());
 
   if (!str)
     return nullptr;
@@ -1232,13 +1233,9 @@ _getpluginelement(NPP npp)
   nsCOMPtr<nsIXPConnect> xpc(do_GetService(nsIXPConnect::GetCID()));
   NS_ENSURE_TRUE(xpc, nullptr);
 
-  nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+  JS::RootedObject obj(cx);
   xpc->WrapNative(cx, ::JS::CurrentGlobalOrNull(cx), element,
-                  NS_GET_IID(nsIDOMElement),
-                  getter_AddRefs(holder));
-  NS_ENSURE_TRUE(holder, nullptr);
-
-  JS::Rooted<JSObject*> obj(cx, holder->GetJSObject());
+                  NS_GET_IID(nsIDOMElement), obj.address());
   NS_ENSURE_TRUE(obj, nullptr);
 
   return nsJSObjWrapper::GetNewOrUsed(npp, cx, obj);
@@ -1482,6 +1479,7 @@ _evaluate(NPP npp, NPObject* npobj, NPString *script, NPVariant *result)
     return false;
   }
 
+  nsAutoMicroTask mt;
   dom::AutoEntryScript aes(win, "NPAPI NPN_evaluate");
   aes.TakeOwnershipOfErrorReporting();
   JSContext* cx = aes.cx();

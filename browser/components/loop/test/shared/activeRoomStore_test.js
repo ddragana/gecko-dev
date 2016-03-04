@@ -20,6 +20,7 @@ describe("loop.store.ActiveRoomStore", function () {
 
     dispatcher = new loop.Dispatcher();
     sandbox.stub(dispatcher, "dispatch");
+    sandbox.stub(window, "close");
 
     fakeMozLoop = {
       setLoopPref: sinon.stub(),
@@ -233,6 +234,71 @@ describe("loop.store.ActiveRoomStore", function () {
     });
   });
 
+  describe("#retryAfterRoomFailure", function() {
+    beforeEach(function() {
+      sandbox.stub(console, "error");
+    });
+
+    it("should reject attempts to retry for invalid/expired urls", function() {
+      store.setStoreState({
+        failureReason: FAILURE_DETAILS.EXPIRED_OR_INVALID
+      });
+
+      store.retryAfterRoomFailure();
+
+      sinon.assert.calledOnce(console.error);
+      sinon.assert.calledWithMatch(console.error, "Invalid");
+      sinon.assert.notCalled(dispatcher.dispatch);
+    });
+
+    it("should reject attempts if the failure exit state is not expected", function() {
+      store.setStoreState({
+        failureReason: FAILURE_DETAILS.UNKNOWN,
+        failureExitState: ROOM_STATES.INIT
+      });
+
+      store.retryAfterRoomFailure();
+
+      sinon.assert.calledOnce(console.error);
+      sinon.assert.calledWithMatch(console.error, "Unexpected");
+      sinon.assert.notCalled(dispatcher.dispatch);
+    });
+
+    it("should dispatch a FetchServerData action when the exit state is GATHER", function() {
+      store.setStoreState({
+        failureReason: FAILURE_DETAILS.UNKNOWN,
+        failureExitState: ROOM_STATES.GATHER,
+        roomCryptoKey: "fakeKey",
+        roomToken: "fakeToken"
+      });
+
+      store.retryAfterRoomFailure();
+
+      sinon.assert.calledOnce(dispatcher.dispatch);
+      sinon.assert.calledWithExactly(dispatcher.dispatch,
+        new sharedActions.FetchServerData({
+          cryptoKey: "fakeKey",
+          token: "fakeToken",
+          windowType: "room"
+        }));
+    });
+
+    it("should join the room for other states", function() {
+      sandbox.stub(store, "joinRoom");
+
+      store.setStoreState({
+        failureReason: FAILURE_DETAILS.UNKNOWN,
+        failureExitState: ROOM_STATES.MEDIA_WAIT,
+        roomCryptoKey: "fakeKey",
+        roomToken: "fakeToken"
+      });
+
+      store.retryAfterRoomFailure();
+
+      sinon.assert.calledOnce(store.joinRoom);
+    });
+  });
+
   describe("#setupWindowData", function() {
     var fakeToken, fakeRoomData;
 
@@ -346,10 +412,10 @@ describe("loop.store.ActiveRoomStore", function () {
       expect(store.getStoreState().roomToken).eql("fakeToken");
     });
 
-    it("should set the state to `READY`", function() {
+    it("should set the state to `GATHER`", function() {
       store.fetchServerData(fetchServerAction);
 
-      expect(store.getStoreState().roomState).eql(ROOM_STATES.READY);
+      expect(store.getStoreState().roomState).eql(ROOM_STATES.GATHER);
     });
 
     it("should call mozLoop.rooms.get to get the room data", function() {
@@ -371,6 +437,7 @@ describe("loop.store.ActiveRoomStore", function () {
         new sharedActions.UpdateRoomInfo({
           roomInfoFailure: ROOM_INFO_FAILURES.NO_DATA,
           roomOwner: "Dan",
+          roomState: ROOM_STATES.READY,
           roomUrl: "http://invalid"
         }));
     });
@@ -389,7 +456,9 @@ describe("loop.store.ActiveRoomStore", function () {
 
         sinon.assert.calledOnce(dispatcher.dispatch);
         sinon.assert.calledWithExactly(dispatcher.dispatch,
-          new sharedActions.UpdateRoomInfo(roomDetails));
+          new sharedActions.UpdateRoomInfo(_.extend({
+            roomState: ROOM_STATES.READY
+          }, roomDetails)));
       });
     });
 
@@ -422,7 +491,8 @@ describe("loop.store.ActiveRoomStore", function () {
         sinon.assert.calledOnce(dispatcher.dispatch);
         sinon.assert.calledWithExactly(dispatcher.dispatch,
           new sharedActions.UpdateRoomInfo(_.extend({
-            roomInfoFailure: ROOM_INFO_FAILURES.WEB_CRYPTO_UNSUPPORTED
+            roomInfoFailure: ROOM_INFO_FAILURES.WEB_CRYPTO_UNSUPPORTED,
+            roomState: ROOM_STATES.READY
           }, expectedDetails)));
       });
 
@@ -432,7 +502,8 @@ describe("loop.store.ActiveRoomStore", function () {
         sinon.assert.calledOnce(dispatcher.dispatch);
         sinon.assert.calledWithExactly(dispatcher.dispatch,
           new sharedActions.UpdateRoomInfo(_.extend({
-            roomInfoFailure: ROOM_INFO_FAILURES.NO_CRYPTO_KEY
+            roomInfoFailure: ROOM_INFO_FAILURES.NO_CRYPTO_KEY,
+            roomState: ROOM_STATES.READY
           }, expectedDetails)));
       });
 
@@ -454,7 +525,8 @@ describe("loop.store.ActiveRoomStore", function () {
         sinon.assert.calledOnce(dispatcher.dispatch);
         sinon.assert.calledWithExactly(dispatcher.dispatch,
           new sharedActions.UpdateRoomInfo(_.extend({
-            roomInfoFailure: ROOM_INFO_FAILURES.DECRYPT_FAILED
+            roomInfoFailure: ROOM_INFO_FAILURES.DECRYPT_FAILED,
+            roomState: ROOM_STATES.READY
           }, expectedDetails)));
       });
 
@@ -483,34 +555,14 @@ describe("loop.store.ActiveRoomStore", function () {
 
         store.fetchServerData(fetchServerAction);
 
+        var expectedData = _.extend({
+          roomState: ROOM_STATES.READY
+        }, roomContext, expectedDetails);
+
         sinon.assert.calledOnce(dispatcher.dispatch);
         sinon.assert.calledWithExactly(dispatcher.dispatch,
-          new sharedActions.UpdateRoomInfo(_.extend(roomContext, expectedDetails)));
+          new sharedActions.UpdateRoomInfo(expectedData));
       });
-    });
-  });
-
-  describe("#feedbackComplete", function() {
-    it("should set the room state to READY", function() {
-      store.setStoreState({
-        roomState: ROOM_STATES.ENDED,
-        used: true
-      });
-
-      store.feedbackComplete(new sharedActions.FeedbackComplete());
-
-      expect(store.getStoreState().roomState).eql(ROOM_STATES.READY);
-    });
-
-    it("should reset the 'used' state", function() {
-      store.setStoreState({
-        roomState: ROOM_STATES.ENDED,
-        used: true
-      });
-
-      store.feedbackComplete(new sharedActions.FeedbackComplete());
-
-      expect(store.getStoreState().used).eql(false);
     });
   });
 
@@ -1177,6 +1229,15 @@ describe("loop.store.ActiveRoomStore", function () {
       store.setStoreState({
         screenSharingState: SCREEN_SHARE_STATES.ACTIVE
       });
+
+      // Stub to prevent errors surfacing in the console.
+      sandbox.stub(window.console, "error");
+    });
+
+    it("should log an error in the console", function() {
+      listener(new Error("foo"));
+
+      sinon.assert.calledOnce(console.error);
     });
 
     it("should update the SDK driver when a new window id is received", function() {
@@ -1505,6 +1566,24 @@ describe("loop.store.ActiveRoomStore", function () {
               fake: "url"
             }
           }));
+      });
+
+      it("should call close window", function() {
+        var fakeRoomData = {
+          decryptedContext: {
+            description: "fakeDescription",
+            roomName: "fakeName",
+            urls: {
+              fake: "url"
+            }
+          },
+          roomOwner: "you",
+          roomUrl: "original"
+        };
+
+        fakeMozLoop.rooms.on.callArgWith(1, "update", fakeRoomData);
+
+        sinon.assert.calledOnce(window.close);
       });
     });
 

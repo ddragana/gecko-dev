@@ -24,7 +24,6 @@
 #include "nsCRT.h"
 #include "nsSecCheckWrapChannel.h"
 #include "nsSimpleNestedURI.h"
-#include "nsNetUtil.h"
 #include "nsTArray.h"
 #include "nsIConsoleService.h"
 #include "nsIUploadChannel2.h"
@@ -44,6 +43,9 @@
 #include "mozilla/LoadInfo.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/net/DNS.h"
+#include "CaptivePortalService.h"
+#include "ReferrerPolicy.h"
 
 #ifdef MOZ_WIDGET_GONK
 #include "nsINetworkManager.h"
@@ -55,6 +57,7 @@
 
 using namespace mozilla;
 using mozilla::net::IsNeckoChild;
+using mozilla::net::CaptivePortalService;
 
 #define PORT_PREF_PREFIX           "network.security.ports."
 #define PORT_PREF(x)               PORT_PREF_PREFIX x
@@ -68,6 +71,7 @@ using mozilla::net::IsNeckoChild;
 #define NECKO_BUFFER_CACHE_COUNT_PREF "network.buffer.cache.count"
 #define NECKO_BUFFER_CACHE_SIZE_PREF  "network.buffer.cache.size"
 #define NETWORK_NOTIFY_CHANGED_PREF   "network.notify.changed"
+#define NETWORK_CAPTIVE_PORTAL_PREF   "network.captive-portal-service.enabled"
 
 #define MAX_RECURSION_COUNT 50
 
@@ -171,6 +175,9 @@ nsIOService::nsIOService()
     , mAutoDialEnabled(false)
     , mNetworkNotifyChanged(true)
     , mPreviousWifiState(-1)
+    , mLastOfflineStateChange(PR_IntervalNow())
+    , mLastConnectivityChange(PR_IntervalNow())
+    , mLastNetworkLinkChange(PR_IntervalNow())
 {
 }
 
@@ -196,7 +203,9 @@ nsIOService::Init()
     }
     else
         NS_WARNING("failed to get error service");
-    
+
+    InitializeCaptivePortalService();
+
     // setup our bad port list stuff
     for(int i=0; gBadPortList[i]; i++)
         mRestrictedPortList.AppendElement(gBadPortList[i]);
@@ -211,6 +220,7 @@ nsIOService::Init()
         prefBranch->AddObserver(NECKO_BUFFER_CACHE_COUNT_PREF, this, true);
         prefBranch->AddObserver(NECKO_BUFFER_CACHE_SIZE_PREF, this, true);
         prefBranch->AddObserver(NETWORK_NOTIFY_CHANGED_PREF, this, true);
+        prefBranch->AddObserver(NETWORK_CAPTIVE_PORTAL_PREF, this, true);
         PrefsChanged(prefBranch);
     }
     
@@ -244,6 +254,22 @@ nsIOService::Init()
 nsIOService::~nsIOService()
 {
     gIOService = nullptr;
+}
+
+nsresult
+nsIOService::InitializeCaptivePortalService()
+{
+    if (XRE_GetProcessType() != GeckoProcessType_Default) {
+        // We only initalize a captive portal service in the main process
+        return NS_OK;
+    }
+
+    mCaptivePortalService = do_GetService(NS_CAPTIVEPORTAL_CID);
+    if (mCaptivePortalService) {
+        return static_cast<CaptivePortalService*>(mCaptivePortalService.get())->Initialize();
+    }
+
+    return NS_OK;
 }
 
 nsresult
@@ -282,7 +308,7 @@ nsIOService::InitializeNetworkLinkService()
     }
 
     // go into managed mode if we can, and chrome process
-    if (XRE_GetProcessType() == GeckoProcessType_Default)
+    if (XRE_IsParentProcess())
     {
         mNetworkLinkService = do_GetService(NS_NETWORK_LINK_SERVICE_CONTRACTID, &rv);
     }
@@ -328,10 +354,52 @@ NS_IMPL_ISUPPORTS(nsIOService,
 ////////////////////////////////////////////////////////////////////////////////
 
 nsresult
+nsIOService::RecheckCaptivePortalIfLocalRedirect(nsIChannel* newChan)
+{
+    nsresult rv;
+
+    if (!mCaptivePortalService) {
+        return NS_OK;
+    }
+
+    nsCOMPtr<nsIURI> uri;
+    rv = newChan->GetURI(getter_AddRefs(uri));
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
+
+    nsCString host;
+    rv = uri->GetHost(host);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
+
+    PRNetAddr prAddr;
+    if (PR_StringToNetAddr(host.BeginReading(), &prAddr) != PR_SUCCESS) {
+        // The redirect wasn't to an IP literal, so there's probably no need
+        // to trigger the captive portal detection right now. It can wait.
+        return NS_OK;
+    }
+
+    mozilla::net::NetAddr netAddr;
+    PRNetAddrToNetAddr(&prAddr, &netAddr);
+    if (IsIPAddrLocal(&netAddr)) {
+        // Redirects to local IP addresses are probably captive portals
+        mCaptivePortalService->RecheckCaptivePortal();
+    }
+
+    return NS_OK;
+}
+
+nsresult
 nsIOService::AsyncOnChannelRedirect(nsIChannel* oldChan, nsIChannel* newChan,
                                     uint32_t flags,
                                     nsAsyncRedirectVerifyHelper *helper)
 {
+    // If a redirect to a local network address occurs, then chances are we
+    // are in a captive portal, so we trigger a recheck.
+    RecheckCaptivePortalIfLocalRedirect(newChan);
+
     nsCOMPtr<nsIChannelEventSink> sink =
         do_GetService(NS_GLOBAL_CHANNELEVENTSINK_CONTRACTID);
     if (sink) {
@@ -908,7 +976,7 @@ nsIOService::SetOffline(bool offline)
 
     NS_ASSERTION(observerService, "The observer service should not be null");
 
-    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    if (XRE_IsParentProcess()) {
         if (observerService) {
             (void)observerService->NotifyObservers(nullptr,
                 NS_IPC_IOSERVICE_SET_OFFLINE_TOPIC, offline ? 
@@ -937,6 +1005,7 @@ nsIOService::SetOffline(bool offline)
             if (mSocketTransportService)
                 mSocketTransportService->SetOffline(true);
 
+            mLastOfflineStateChange = PR_IntervalNow();
             if (observerService)
                 observerService->NotifyObservers(subject,
                                                  NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
@@ -957,12 +1026,14 @@ nsIOService::SetOffline(bool offline)
             if (mProxyService)
                 mProxyService->ReloadPAC();
 
+            mLastOfflineStateChange = PR_IntervalNow();
             // don't care if notification fails
             // Only send the ONLINE notification if there is connectivity
-            if (observerService && mConnectivity)
+            if (observerService && mConnectivity) {
                 observerService->NotifyObservers(subject,
                                                  NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
                                                  NS_LITERAL_STRING(NS_IOSERVICE_ONLINE).get());
+            }
         }
     }
 
@@ -997,7 +1068,7 @@ nsIOService::SetConnectivity(bool aConnectivity)
 {
     // This should only be called from ContentChild to pass the connectivity
     // value from the chrome process to the content process.
-    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    if (XRE_IsParentProcess()) {
         return NS_ERROR_NOT_AVAILABLE;
     }
     return SetConnectivityInternal(aConnectivity);
@@ -1013,13 +1084,17 @@ nsIOService::SetConnectivityInternal(bool aConnectivity)
     }
     mConnectivity = aConnectivity;
 
+    // This is used for PR_Connect PR_Close telemetry so it is important that
+    // we have statistic about network change event even if we are offline.
+    mLastConnectivityChange = PR_IntervalNow();
+
     nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();
     if (!observerService) {
         return NS_OK;
     }
     // This notification sends the connectivity to the child processes
-    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    if (XRE_IsParentProcess()) {
         observerService->NotifyObservers(nullptr,
             NS_IPC_IOSERVICE_SET_CONNECTIVITY_TOPIC, aConnectivity ?
             MOZ_UTF16("true") :
@@ -1153,6 +1228,28 @@ nsIOService::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         nsresult rv = prefs->GetBoolPref(NETWORK_NOTIFY_CHANGED_PREF, &allow);
         if (NS_SUCCEEDED(rv)) {
             mNetworkNotifyChanged = allow;
+        }
+    }
+
+    if (!pref || strcmp(pref, NETWORK_CAPTIVE_PORTAL_PREF) == 0) {
+        static int disabledForTest = -1;
+        if (disabledForTest == -1) {
+            char *s = getenv("MOZ_DISABLE_NONLOCAL_CONNECTIONS");
+            if (s) {
+                disabledForTest = (strncmp(s, "0", 1) == 0) ? 0 : 1;
+            } else {
+                disabledForTest = 0;
+            }
+        }
+
+        bool captivePortalEnabled;
+        nsresult rv = prefs->GetBoolPref(NETWORK_CAPTIVE_PORTAL_PREF, &captivePortalEnabled);
+        if (NS_SUCCEEDED(rv) && mCaptivePortalService) {
+            if (captivePortalEnabled && !disabledForTest) {
+                static_cast<CaptivePortalService*>(mCaptivePortalService.get())->Start();
+            } else {
+                static_cast<CaptivePortalService*>(mCaptivePortalService.get())->Stop();
+            }
         }
     }
 }
@@ -1289,9 +1386,6 @@ nsIOService::Observe(nsISupports *subject,
             // If we fail here, we will fail always on.
             mNetworkLinkServiceInitialized = true;
 
-            // The browser starts off as offline. We go into online mode after this.
-            SetOffline(false);
-
             // And now reflect the preference setting
             nsCOMPtr<nsIPrefBranch> prefBranch;
             GetPrefBranch(getter_AddRefs(prefBranch));
@@ -1304,6 +1398,11 @@ nsIOService::Observe(nsISupports *subject,
         mShutdown = true;
 
         SetOffline(true);
+
+        if (mCaptivePortalService) {
+            static_cast<CaptivePortalService*>(mCaptivePortalService.get())->Stop();
+            mCaptivePortalService = nullptr;
+        }
 
         // Break circular reference.
         mProxyService = nullptr;
@@ -1321,6 +1420,10 @@ nsIOService::Observe(nsISupports *subject,
                 NotifyObservers(nullptr,
                                 NS_NETWORK_LINK_TOPIC,
                                 MOZ_UTF16(NS_NETWORK_LINK_DATA_CHANGED));
+        }
+
+        if (mCaptivePortalService) {
+            mCaptivePortalService->RecheckCaptivePortal();
         }
     } else if (!strcmp(topic, kNetworkActiveChanged)) {
 #ifdef MOZ_WIDGET_GONK
@@ -1512,11 +1615,16 @@ nsIOService::OnNetworkLinkEvent(const char *data)
 
     bool isUp = true;
     if (!strcmp(data, NS_NETWORK_LINK_DATA_CHANGED)) {
+        mLastNetworkLinkChange = PR_IntervalNow();
         // CHANGED means UP/DOWN didn't change
         return NS_OK;
     } else if (!strcmp(data, NS_NETWORK_LINK_DATA_DOWN)) {
         isUp = false;
     } else if (!strcmp(data, NS_NETWORK_LINK_DATA_UP)) {
+        if (mCaptivePortalService) {
+            // Interface is up. Triggering a captive portal recheck.
+            mCaptivePortalService->RecheckCaptivePortal();
+        }
         isUp = true;
     } else if (!strcmp(data, NS_NETWORK_LINK_DATA_UNKNOWN)) {
         nsresult rv = mNetworkLinkService->GetIsLinkUp(&isUp);
@@ -1581,6 +1689,16 @@ nsIOService::ExtractCharsetFromContentType(const nsACString &aTypeHeader,
         *aHadCharset = false;
     }
     return NS_OK;
+}
+
+// parse policyString to policy enum value (see ReferrerPolicy.h)
+NS_IMETHODIMP
+nsIOService::ParseAttributePolicyString(const nsAString& policyString,
+                                                uint32_t *outPolicyEnum)
+{
+  NS_ENSURE_ARG(outPolicyEnum);
+  *outPolicyEnum = (uint32_t)mozilla::net::AttributeReferrerPolicyFromString(policyString);
+  return NS_OK;
 }
 
 // nsISpeculativeConnect
@@ -1759,7 +1877,7 @@ private:
     int32_t mState;
 };
 
-}
+} // namespace
 
 NS_IMETHODIMP
 nsIOService::SetAppOffline(uint32_t aAppId, int32_t aState)

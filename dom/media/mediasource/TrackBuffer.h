@@ -31,7 +31,8 @@ public:
 
   nsRefPtr<ShutdownPromise> Shutdown();
 
-  bool AppendData(MediaByteBuffer* aData, TimeUnit aTimestampOffset) override;
+  bool AppendData(MediaByteBuffer* aData,
+                  media::TimeUnit aTimestampOffset) override;
 
   // Append data to the current decoder.  Also responsible for calling
   // NotifyDataArrived on the decoder to keep buffered range computation up
@@ -43,13 +44,16 @@ public:
   // bound the data being evicted. It will not evict more than aThreshold
   // bytes. aBufferStartTime contains the new start time of the current
   // decoders buffered data after the eviction.
-  EvictDataResult EvictData(TimeUnit aPlaybackTime, uint32_t aThreshold, TimeUnit* aBufferStartTime) override;
+  EvictDataResult EvictData(media::TimeUnit aPlaybackTime,
+                            uint32_t aThreshold,
+                            media::TimeUnit* aBufferStartTime) override;
 
   // Evicts data held in all the decoders SourceBufferResource from the start
   // of the buffer through to aTime.
-  void EvictBefore(TimeUnit aTime) override;
+  void EvictBefore(media::TimeUnit aTime) override;
 
-  nsRefPtr<RangeRemovalPromise> RangeRemoval(TimeUnit aStart, TimeUnit aEnd) override;
+  nsRefPtr<RangeRemovalPromise> RangeRemoval(media::TimeUnit aStart,
+                                             media::TimeUnit aEnd) override;
 
   void AbortAppendData() override;
 
@@ -68,7 +72,7 @@ public:
 
   void Detach() override;
 
-  TimeUnit GroupEndTimestamp() override
+  media::TimeUnit GroupEndTimestamp() override
   {
     return Buffered().GetEnd();
   }
@@ -138,8 +142,8 @@ private:
   // Queue on the parent's decoder task queue a call to NotifyDataRemoved.
   void NotifyReaderDataRemoved(MediaDecoderReader* aReader);
 
-  typedef MediaPromise<bool, nsresult, /* IsExclusive = */ true> BufferedRangesUpdatedPromise;
-  nsRefPtr<BufferedRangesUpdatedPromise> UpdateBufferedRanges(Interval<int64_t> aByteRange, bool aNotifyParent);
+  typedef MozPromise<bool, nsresult, /* IsExclusive = */ true> BufferedRangesUpdatedPromise;
+  nsRefPtr<BufferedRangesUpdatedPromise> UpdateBufferedRanges(media::Interval<int64_t> aByteRange, bool aNotifyParent);
 
   // Queue execution of InitializeDecoder on mTaskQueue.
   bool QueueInitializeDecoder(SourceBufferDecoder* aDecoder);
@@ -170,7 +174,7 @@ private:
   void RemoveDecoder(SourceBufferDecoder* aDecoder);
 
   // Remove all empty decoders from the provided list;
-  void RemoveEmptyDecoders(const nsTArray<nsRefPtr<SourceBufferDecoder>>& aDecoders);
+  void RemoveEmptyDecoders(const nsTArray<SourceBufferDecoder*>& aDecoders);
 
   void OnMetadataRead(MetadataHolder* aMetadata,
                       SourceBufferDecoder* aDecoder,
@@ -185,7 +189,7 @@ private:
   // A task queue using the shared media thread pool.  Used exclusively to
   // initialize (i.e. call ReadMetadata on) decoders as they are created via
   // NewDecoder.
-  RefPtr<MediaTaskQueue> mTaskQueue;
+  RefPtr<TaskQueue> mTaskQueue;
 
   // All of the decoders managed by this TrackBuffer.  Access protected by
   // mParentDecoder's monitor.
@@ -211,7 +215,7 @@ private:
   // AppendData.  Accessed on the main thread only.
   int64_t mLastStartTimestamp;
   Maybe<int64_t> mLastEndTimestamp;
-  void AdjustDecodersTimestampOffset(TimeUnit aOffset);
+  void AdjustDecodersTimestampOffset(media::TimeUnit aOffset);
 
   // The timestamp offset used by our current decoder.
   media::TimeUnit mLastTimestampOffset;
@@ -226,17 +230,17 @@ private:
   MediaInfo mInfo;
 
   void ContinueShutdown();
-  MediaPromiseHolder<ShutdownPromise> mShutdownPromise;
+  MozPromiseHolder<ShutdownPromise> mShutdownPromise;
   bool mDecoderPerSegment;
   bool mShutdown;
 
-  MediaPromiseHolder<AppendPromise> mInitializationPromise;
+  MozPromiseHolder<AppendPromise> mInitializationPromise;
   // Track our request for metadata from the reader.
-  MediaPromiseRequestHolder<MediaDecoderReader::MetadataPromise> mMetadataRequest;
+  MozPromiseRequestHolder<MediaDecoderReader::MetadataPromise> mMetadataRequest;
 
-  MediaPromiseHolder<RangeRemovalPromise> mRangeRemovalPromise;
+  MozPromiseHolder<RangeRemovalPromise> mRangeRemovalPromise;
 
-  Interval<int64_t> mLastAppendRange;
+  media::Interval<int64_t> mLastAppendRange;
 
   // Protected by Parent's decoder Monitor.
   media::TimeIntervals mBufferedRanges;
@@ -245,4 +249,5 @@ private:
 };
 
 } // namespace mozilla
+
 #endif /* MOZILLA_TRACKBUFFER_H_ */

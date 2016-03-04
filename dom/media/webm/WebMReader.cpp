@@ -144,7 +144,7 @@ static void webm_log(nestegg * context,
 static bool sIsIntelDecoderEnabled = false;
 #endif
 
-WebMReader::WebMReader(AbstractMediaDecoder* aDecoder, MediaTaskQueue* aBorrowedTaskQueue)
+WebMReader::WebMReader(AbstractMediaDecoder* aDecoder, TaskQueue* aBorrowedTaskQueue)
   : MediaDecoderReader(aDecoder, aBorrowedTaskQueue)
   , mContext(nullptr)
   , mVideoTrack(0)
@@ -209,7 +209,7 @@ nsresult WebMReader::Init(MediaDecoderReader* aCloneDonor)
 
     InitLayersBackendType();
 
-    mVideoTaskQueue = new FlushableMediaTaskQueue(
+    mVideoTaskQueue = new FlushableTaskQueue(
       SharedThreadPool::Get(NS_LITERAL_CSTRING("IntelVP8 Video Decode")));
     NS_ENSURE_TRUE(mVideoTaskQueue, NS_ERROR_FAILURE);
   }
@@ -538,7 +538,7 @@ bool WebMReader::DecodeAudioPacket(NesteggPacketHolder* aHolder)
   return true;
 }
 
-already_AddRefed<NesteggPacketHolder> WebMReader::NextPacket(TrackType aTrackType)
+nsRefPtr<NesteggPacketHolder> WebMReader::NextPacket(TrackType aTrackType)
 {
   // The packet queue that packets will be pushed on if they
   // are not the type we are interested in.
@@ -575,18 +575,18 @@ already_AddRefed<NesteggPacketHolder> WebMReader::NextPacket(TrackType aTrackTyp
 
     if (hasOtherType && otherTrack == holder->Track()) {
       // Save the packet for when we want these packets
-      otherPackets.Push(holder.forget());
+      otherPackets.Push(holder);
       continue;
     }
 
     // The packet is for the track we want to play
     if (hasType && ourTrack == holder->Track()) {
-      return holder.forget();
+      return holder;
     }
   } while (true);
 }
 
-already_AddRefed<NesteggPacketHolder>
+nsRefPtr<NesteggPacketHolder>
 WebMReader::DemuxPacket()
 {
   nestegg_packet* packet;
@@ -629,7 +629,7 @@ WebMReader::DemuxPacket()
     return nullptr;
   }
 
-  return holder.forget();
+  return holder;
 }
 
 bool WebMReader::DecodeAudioData()
@@ -655,10 +655,10 @@ bool WebMReader::FilterPacketByTime(int64_t aEndTime, WebMPacketQueue& aOutput)
     }
     int64_t tstamp = holder->Timestamp();
     if (tstamp >= aEndTime) {
-      PushVideoPacket(holder.forget());
+      PushVideoPacket(holder);
       return true;
     } else {
-      aOutput.PushFront(holder.forget());
+      aOutput.PushFront(holder);
     }
   }
 
@@ -691,7 +691,7 @@ int64_t WebMReader::GetNextKeyframeTime(int64_t aTimeThreshold)
       keyframeTime = holder->Timestamp();
     }
 
-    skipPacketQueue.PushFront(holder.forget());
+    skipPacketQueue.PushFront(holder);
   }
 
   uint32_t size = skipPacketQueue.GetSize();
@@ -716,9 +716,9 @@ bool WebMReader::DecodeVideoFrame(bool &aKeyframeSkip, int64_t aTimeThreshold)
   return mVideoDecoder->DecodeVideoFrame(aKeyframeSkip, aTimeThreshold);
 }
 
-void WebMReader::PushVideoPacket(already_AddRefed<NesteggPacketHolder> aItem)
+void WebMReader::PushVideoPacket(NesteggPacketHolder* aItem)
 {
-    mVideoPackets.PushFront(Move(aItem));
+    mVideoPackets.PushFront(aItem);
 }
 
 nsRefPtr<MediaDecoderReader::SeekPromise>
@@ -735,6 +735,7 @@ WebMReader::Seek(int64_t aTarget, int64_t aEndTime)
 nsresult WebMReader::SeekInternal(int64_t aTarget)
 {
   MOZ_ASSERT(OnTaskQueue());
+  NS_ENSURE_TRUE(HaveStartTime(), NS_ERROR_FAILURE);
   if (mVideoDecoder) {
     nsresult rv = mVideoDecoder->Flush();
     NS_ENSURE_SUCCESS(rv, rv);
@@ -749,8 +750,16 @@ nsresult WebMReader::SeekInternal(int64_t aTarget)
   uint64_t target = aTarget * NS_PER_USEC;
 
   if (mSeekPreroll) {
-    target = std::max(uint64_t(mStartTime * NS_PER_USEC),
-                      target - mSeekPreroll);
+    uint64_t startTime = uint64_t(StartTime()) * NS_PER_USEC;
+    if (target < mSeekPreroll || target - mSeekPreroll < startTime) {
+      target = startTime;
+    } else {
+      target -= mSeekPreroll;
+    }
+    LOG(LogLevel::Debug,
+        ("Reader [%p] SeekPreroll: %f StartTime: %f AdjustedTarget: %f",
+        this, double(mSeekPreroll) / NS_PER_S,
+        double(startTime) / NS_PER_S, double(target) / NS_PER_S));
   }
   int r = nestegg_track_seek(mContext, trackToSeek, target);
   if (r != 0) {
@@ -777,7 +786,7 @@ nsresult WebMReader::SeekInternal(int64_t aTarget)
 media::TimeIntervals WebMReader::GetBuffered()
 {
   MOZ_ASSERT(OnTaskQueue());
-  NS_ENSURE_TRUE(mStartTime >= 0, media::TimeIntervals());
+  NS_ENSURE_TRUE(HaveStartTime(), media::TimeIntervals());
   AutoPinned<MediaResource> resource(mDecoder->GetResource());
 
   media::TimeIntervals buffered;
@@ -804,7 +813,7 @@ media::TimeIntervals WebMReader::GetBuffered()
                                                         ranges[index].mEnd,
                                                         &start, &end);
     if (rv) {
-      int64_t startOffset = mStartTime * NS_PER_USEC;
+      int64_t startOffset = StartTime() * NS_PER_USEC;
       NS_ASSERTION(startOffset >= 0 && uint64_t(startOffset) <= start,
                    "startOffset negative or larger than start time");
       if (!(startOffset >= 0 && uint64_t(startOffset) <= start)) {

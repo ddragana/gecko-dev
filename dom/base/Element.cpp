@@ -29,7 +29,6 @@
 #include "nsILinkHandler.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIURL.h"
-#include "nsNetUtil.h"
 #include "nsContainerFrame.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsIPresShell.h"
@@ -52,6 +51,7 @@
 #include "nsDOMString.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIDOMMutationEvent.h"
+#include "mozilla/AnimationComparator.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/EventDispatcher.h"
@@ -140,6 +140,7 @@
 #include "mozilla/dom/ElementBinding.h"
 #include "mozilla/dom/VRDevice.h"
 #include "nsComputedDOMStyle.h"
+#include "mozilla/Preferences.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1059,10 +1060,12 @@ Element::CreateShadowRoot(ErrorResult& aError)
   return shadowRoot.forget();
 }
 
-NS_IMPL_CYCLE_COLLECTION(DestinationInsertionPointList, mParent, mDestinationPoints)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DestinationInsertionPointList, mParent,
+                                      mDestinationPoints)
 
 NS_INTERFACE_TABLE_HEAD(DestinationInsertionPointList)
-  NS_INTERFACE_TABLE(DestinationInsertionPointList, nsINodeList)
+  NS_WRAPPERCACHE_INTERFACE_TABLE_ENTRY
+  NS_INTERFACE_TABLE(DestinationInsertionPointList, nsINodeList, nsIDOMNodeList)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(DestinationInsertionPointList)
 NS_INTERFACE_MAP_END
 
@@ -1678,7 +1681,7 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
                                       nsContentUtils::eDOM_PROPERTIES,
                                       "RemovedFullScreenElement");
       // Fully exit full-screen.
-      nsIDocument::ExitFullscreen(OwnerDoc(), /* async */ false);
+      nsIDocument::ExitFullscreenInDocTree(OwnerDoc());
     }
     if (HasPointerLock()) {
       nsIDocument::UnlockPointer();
@@ -3114,10 +3117,6 @@ GetFullScreenError(nsIDocument* aDoc)
     return "FullScreenDeniedNotInputDriven";
   }
 
-  if (nsContentUtils::IsSitePermDeny(aDoc->NodePrincipal(), "fullscreen")) {
-    return "FullScreenDeniedBlocked";
-  }
-
   return nullptr;
 }
 
@@ -3202,6 +3201,8 @@ Element::GetAnimations(nsTArray<nsRefPtr<Animation>>& aAnimations)
       }
     }
   }
+
+  aAnimations.Sort(AnimationPtrComparator<nsRefPtr<Animation>>());
 }
 
 NS_IMETHODIMP
@@ -3480,4 +3481,17 @@ Element::FontSizeInflation()
   }
 
   return 1.0;
+}
+
+net::ReferrerPolicy
+Element::GetReferrerPolicy()
+{
+  if (Preferences::GetBool("network.http.enablePerElementReferrer", false) &&
+      IsHTMLElement()) {
+    const nsAttrValue* referrerValue = GetParsedAttr(nsGkAtoms::referrer);
+    if (referrerValue && referrerValue->Type() == nsAttrValue::eEnum) {
+      return net::ReferrerPolicy(referrerValue->GetEnumValue());
+    }
+  }
+  return net::RP_Unset;
 }

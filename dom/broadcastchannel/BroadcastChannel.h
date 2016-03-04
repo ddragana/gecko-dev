@@ -20,13 +20,13 @@ namespace mozilla {
 
 namespace ipc {
 class PrincipalInfo;
-}
+} // namespace ipc
 
 namespace dom {
 
 namespace workers {
 class WorkerFeature;
-}
+} // namespace workers
 
 class BroadcastChannelChild;
 class BroadcastChannelMessage;
@@ -92,7 +92,7 @@ public:
 private:
   BroadcastChannel(nsPIDOMWindow* aWindow,
                    const PrincipalInfo& aPrincipalInfo,
-                   const nsAString& aOrigin,
+                   const nsACString& aOrigin,
                    const nsAString& aChannel,
                    bool aPrivateBrowsing);
 
@@ -117,7 +117,7 @@ private:
 
   nsAutoPtr<PrincipalInfo> mPrincipalInfo;
 
-  nsString mOrigin;
+  nsCString mOrigin;
   nsString mChannel;
   bool mPrivateBrowsing;
 

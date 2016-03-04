@@ -21,8 +21,9 @@
 #include "nsIClientAuthDialogs.h"
 #include "nsIWebProgressListener.h"
 #include "nsClientAuthRemember.h"
+#include "nsServiceManagerUtils.h"
 
-#include "nsNetUtil.h"
+#include "nsISocketProvider.h"
 #include "nsPrintfCString.h"
 #include "SSLServerCertVerification.h"
 #include "nsNSSCertHelper.h"
@@ -649,7 +650,7 @@ getSocketInfoIfRunning(PRFileDesc* fd, Operation op,
   return socketInfo;
 }
 
-} // unnnamed namespace
+} // namespace
 
 static PRStatus
 nsSSLIOLayerConnect(PRFileDesc* fd, const PRNetAddr* addr,
@@ -1269,7 +1270,7 @@ checkHandshake(int32_t bytesTransfered, bool wasReading,
   return bytesTransfered;
 }
 
-}
+} // namespace
 
 static int16_t
 nsSSLIOLayerPoll(PRFileDesc* fd, int16_t in_flags, int16_t* out_flags)
@@ -1739,7 +1740,6 @@ private:
 static const char* const kFallbackWildcardList[] =
 {
   ".kuronekoyamato.co.jp", // bug 1128366
-  ".userstorage.mega.co.nz", // bug 1133496
   ".wildcard.test",
 };
 

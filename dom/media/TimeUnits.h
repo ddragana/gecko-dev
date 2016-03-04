@@ -16,8 +16,8 @@
 namespace mozilla {
 namespace media {
 class TimeIntervals;
-}
-}
+} // namespace media
+} // namespace mozilla
 // CopyChooser specalization for nsTArray
 template<>
 struct nsTArray_CopyChooser<mozilla::media::TimeIntervals>
@@ -117,6 +117,14 @@ public:
 
   static TimeUnit FromInfinity() {
     return TimeUnit(INT64_MAX);
+  }
+
+  static TimeUnit Invalid() {
+    TimeUnit ret;
+    ret.mValue = CheckedInt64(INT64_MAX);
+    // Force an overflow to render the CheckedInt invalid.
+    ret.mValue += 1;
+    return ret;
   }
 
   int64_t ToMicroseconds() const {

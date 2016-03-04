@@ -18,6 +18,7 @@
 #include "nsRefPtr.h"
 
 template <class> class nsCOMPtr;
+class nsIDocument;
 class nsIPresShell;
 class nsIWidget;
 
@@ -85,7 +86,7 @@ private:
   int mActiveAPZTransforms;
 };
 
-}
-}
+} // namespace layers
+} // namespace mozilla
 
 #endif /* mozilla_layers_APZEventState_h */

@@ -25,6 +25,7 @@
 
 #include "nsGtkKeyUtils.h"
 #include "nsGtkCursors.h"
+#include "nsScreenGtk.h"
 
 #include <gtk/gtk.h>
 #if (MOZ_WIDGET_GTK == 3)
@@ -329,8 +330,6 @@ nsWindow::nsWindow()
 {
     mIsTopLevel       = false;
     mIsDestroyed      = false;
-    mNeedsResize      = false;
-    mNeedsMove        = false;
     mListenForResizes = false;
     mIsShown          = false;
     mNeedsShow        = false;
@@ -969,17 +968,6 @@ nsWindow::Show(bool aState)
     if (!aState)
         mNeedsShow = false;
 
-    // If someone is showing this window and it needs a resize then
-    // resize the widget.
-    if (aState) {
-        if (mNeedsMove) {
-            NativeResize(mBounds.x, mBounds.y, mBounds.width, mBounds.height,
-                         false);
-        } else if (mNeedsResize) {
-            NativeResize(mBounds.width, mBounds.height, false);
-        }
-    }
-
 #ifdef ACCESSIBILITY
     if (aState && a11y::ShouldA11yBeEnabled())
         CreateRootAccessible();
@@ -1008,57 +996,7 @@ nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
     if (!mCreated)
         return NS_OK;
 
-    // There are several cases here that we need to handle, based on a
-    // matrix of the visibility of the widget, the sanity of this resize
-    // and whether or not the widget was previously sane.
-
-    // Has this widget been set to visible?
-    if (mIsShown) {
-        // Are the bounds sane?
-        if (AreBoundsSane()) {
-            // Yep?  Resize the window
-            //Maybe, the toplevel has moved
-
-            // Note that if the widget needs to be positioned because its
-            // size was previously insane in Resize(x,y,w,h), then we need
-            // to set the x and y here too, because the widget wasn't
-            // moved back then
-            if (mNeedsMove)
-                NativeResize(mBounds.x, mBounds.y,
-                             mBounds.width, mBounds.height, aRepaint);
-            else
-                NativeResize(mBounds.width, mBounds.height, aRepaint);
-
-            // Does it need to be shown because it was previously insane?
-            if (mNeedsShow)
-                NativeShow(true);
-        }
-        else {
-            // If someone has set this so that the needs show flag is false
-            // and it needs to be hidden, update the flag and hide the
-            // window.  This flag will be cleared the next time someone
-            // hides the window or shows it.  It also prevents us from
-            // calling NativeShow(false) excessively on the window which
-            // causes unneeded X traffic.
-            if (!mNeedsShow) {
-                mNeedsShow = true;
-                NativeShow(false);
-            }
-        }
-    }
-    // If the widget hasn't been shown, mark the widget as needing to be
-    // resized before it is shown.
-    else {
-        if (AreBoundsSane() && mListenForResizes) {
-            // For widgets that we listen for resizes for (widgets created
-            // with native parents) we apparently _always_ have to resize.  I
-            // dunno why, but apparently we're lame like that.
-            NativeResize(width, height, aRepaint);
-        }
-        else {
-            mNeedsResize = true;
-        }
-    }
+    NativeResize();
 
     NotifyRollupGeometryChange();
     ResizePluginSocketWidget();
@@ -1087,51 +1025,10 @@ nsWindow::Resize(double aX, double aY, double aWidth, double aHeight,
     mBounds.y = y;
     mBounds.SizeTo(width, height);
 
-    mNeedsMove = true;
-
     if (!mCreated)
         return NS_OK;
 
-    // There are several cases here that we need to handle, based on a
-    // matrix of the visibility of the widget, the sanity of this resize
-    // and whether or not the widget was previously sane.
-
-    // Has this widget been set to visible?
-    if (mIsShown) {
-        // Are the bounds sane?
-        if (AreBoundsSane()) {
-            // Yep?  Resize the window
-            NativeResize(x, y, width, height, aRepaint);
-            // Does it need to be shown because it was previously insane?
-            if (mNeedsShow)
-                NativeShow(true);
-        }
-        else {
-            // If someone has set this so that the needs show flag is false
-            // and it needs to be hidden, update the flag and hide the
-            // window.  This flag will be cleared the next time someone
-            // hides the window or shows it.  It also prevents us from
-            // calling NativeShow(false) excessively on the window which
-            // causes unneeded X traffic.
-            if (!mNeedsShow) {
-                mNeedsShow = true;
-                NativeShow(false);
-            }
-        }
-    }
-    // If the widget hasn't been shown, mark the widget as needing to be
-    // resized before it is shown
-    else {
-        if (AreBoundsSane() && mListenForResizes){
-            // For widgets that we listen for resizes for (widgets created
-            // with native parents) we apparently _always_ have to resize.  I
-            // dunno why, but apparently we're lame like that.
-            NativeResize(x, y, width, height, aRepaint);
-        }
-        else {
-            mNeedsResize = true;
-        }
-    }
+    NativeMoveResize();
 
     NotifyRollupGeometryChange();
     ResizePluginSocketWidget();
@@ -1207,9 +1104,17 @@ nsWindow::Move(double aX, double aY)
     if (!mCreated)
         return NS_OK;
 
-    mNeedsMove = false;
+    NativeMove();
 
-    GdkPoint point = DevicePixelsToGdkPointRoundDown(nsIntPoint(x, y));
+    NotifyRollupGeometryChange();
+    return NS_OK;
+}
+
+
+void
+nsWindow::NativeMove()
+{
+    GdkPoint point = DevicePixelsToGdkPointRoundDown(mBounds.TopLeft());
 
     if (mIsTopLevel) {
         gtk_window_move(GTK_WINDOW(mShell), point.x, point.y);
@@ -1217,9 +1122,6 @@ nsWindow::Move(double aX, double aY)
     else if (mGdkWindow) {
         gdk_window_move(mGdkWindow, point.x, point.y);
     }
-
-    NotifyRollupGeometryChange();
-    return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1520,7 +1422,8 @@ nsWindow::GetClientOffset()
 {
     PROFILER_LABEL("nsWindow", "GetClientOffset", js::ProfileEntry::Category::GRAPHICS);
 
-    if (!mIsTopLevel) {
+    if (!mIsTopLevel || !mShell || !mGdkWindow ||
+        gtk_window_get_window_type(GTK_WINDOW(mShell)) == GTK_WINDOW_POPUP) {
         return nsIntPoint(0, 0);
     }
 
@@ -1530,10 +1433,8 @@ nsWindow::GetClientOffset()
     int format_returned;
     int length_returned;
     long *frame_extents;
-    GdkWindow* window;
 
-    if (!mShell || !(window = gtk_widget_get_window(mShell)) ||
-        !gdk_property_get(window,
+    if (!gdk_property_get(mGdkWindow,
                           gdk_atom_intern ("_NET_FRAME_EXTENTS", FALSE),
                           cardinal_atom,
                           0, // offset
@@ -2270,7 +2171,7 @@ nsWindow::OnExposeEvent(cairo_t *cr)
     }
 #  ifdef MOZ_HAVE_SHMIMAGE
     if (mShmImage && MOZ_LIKELY(!mIsDestroyed)) {
-        mShmImage->Put(mGdkWindow, exposeRegion);
+        mShmImage->Put(mGdkWindow, region);
     }
 #  endif  // MOZ_HAVE_SHMIMAGE
 #endif // MOZ_X11
@@ -2360,13 +2261,9 @@ nsWindow::OnConfigureEvent(GtkWidget *aWidget, GdkEventConfigure *aEvent)
     // This event indicates that the window position may have changed.
     // mBounds.Size() is updated in OnSizeAllocate().
 
-    // (The gtk_window_get_window_type() function is only available from
-    // version 2.20.)
     NS_ASSERTION(GTK_IS_WINDOW(aWidget),
                  "Configure event on widget that is not a GtkWindow");
-    gint type;
-    g_object_get(aWidget, "type", &type, nullptr);
-    if (type == GTK_WINDOW_POPUP) {
+    if (gtk_window_get_window_type(GTK_WINDOW(aWidget)) == GTK_WINDOW_POPUP) {
         // Override-redirect window
         //
         // These windows should not be moved by the window manager, and so any
@@ -3477,16 +3374,24 @@ nsWindow::Create(nsIWidget        *aParent,
     case eWindowType_invisible: {
         mIsTopLevel = true;
 
+        // Popups that are not noautohide are only temporary. The are used
+        // for menus and the like and disappear when another window is used.
+        // For most popups, use the standard GtkWindowType GTK_WINDOW_POPUP,
+        // which will use a Window with the override-redirect attribute
+        // (for temporary windows).
+        // For long-lived windows, their stacking order is managed by the
+        // window manager, as indicated by GTK_WINDOW_TOPLEVEL ...
+        GtkWindowType type =
+            mWindowType != eWindowType_popup || aInitData->mNoAutoHide ?
+              GTK_WINDOW_TOPLEVEL : GTK_WINDOW_POPUP;
+        mShell = gtk_window_new(type);
+
         // We only move a general managed toplevel window if someone has
         // actually placed the window somewhere.  If no placement has taken
         // place, we just let the window manager Do The Right Thing.
-        //
-        // Indicate that if we're shown, we at least need to have our size set.
-        // If we get explicitly moved, the position will also be set.
-        mNeedsResize = true;
+        NativeResize();
 
         if (mWindowType == eWindowType_dialog) {
-            mShell = gtk_window_new(GTK_WINDOW_TOPLEVEL);
             SetDefaultIcon();
             gtk_window_set_wmclass(GTK_WINDOW(mShell), "Dialog", 
                                    gdk_get_program_class());
@@ -3499,18 +3404,8 @@ nsWindow::Create(nsIWidget        *aParent,
             // With popup windows, we want to control their position, so don't
             // wait for the window manager to place them (which wouldn't
             // happen with override-redirect windows anyway).
-            mNeedsMove = true;
+            NativeMove();
 
-            // Popups that are not noautohide are only temporary. The are used
-            // for menus and the like and disappear when another window is used.
-            // For most popups, use the standard GtkWindowType GTK_WINDOW_POPUP,
-            // which will use a Window with the override-redirect attribute
-            // (for temporary windows).
-            // For long-lived windows, their stacking order is managed by the
-            // window manager, as indicated by GTK_WINDOW_TOPLEVEL ...
-            GtkWindowType type = aInitData->mNoAutoHide ?
-                                     GTK_WINDOW_TOPLEVEL : GTK_WINDOW_POPUP;
-            mShell = gtk_window_new(type);
             gtk_window_set_wmclass(GTK_WINDOW(mShell), "Popup",
                                    gdk_get_program_class());
 
@@ -3583,7 +3478,6 @@ nsWindow::Create(nsIWidget        *aParent,
             }
         }
         else { // must be eWindowType_toplevel
-            mShell = gtk_window_new(GTK_WINDOW_TOPLEVEL);
             SetDefaultIcon();
             gtk_window_set_wmclass(GTK_WINDOW(mShell), "Toplevel", 
                                    gdk_get_program_class());
@@ -3627,7 +3521,7 @@ nsWindow::Create(nsIWidget        *aParent,
             if (aInitData->mNoAutoHide) {
                 gint wmd = ConvertBorderStyles(mBorderStyle);
                 if (wmd != -1)
-                  gdk_window_set_decorations(gtk_widget_get_window(mShell), (GdkWMDecoration) wmd);
+                  gdk_window_set_decorations(mGdkWindow, (GdkWMDecoration) wmd);
             }
 
             // If the popup ignores mouse events, set an empty input shape.
@@ -3850,8 +3744,7 @@ nsWindow::SetWindowClass(const nsAString &xulWinType)
   res_name[0] = toupper(res_name[0]);
   if (!role) role = res_name;
 
-  GdkWindow *shellWindow = gtk_widget_get_window(GTK_WIDGET(mShell));
-  gdk_window_set_role(shellWindow, role);
+  gdk_window_set_role(mGdkWindow, role);
 
 #ifdef MOZ_X11
   GdkDisplay *display = gdk_display_get_default();
@@ -3867,7 +3760,7 @@ nsWindow::SetWindowClass(const nsAString &xulWinType)
       // Can't use gtk_window_set_wmclass() for this; it prints
       // a warning & refuses to make the change.
       XSetClassHint(GDK_DISPLAY_XDISPLAY(display),
-                    gdk_x11_window_get_xid(shellWindow),
+                    gdk_x11_window_get_xid(mGdkWindow),
                     class_hint);
       XFree(class_hint);
   }
@@ -3879,19 +3772,29 @@ nsWindow::SetWindowClass(const nsAString &xulWinType)
 }
 
 void
-nsWindow::NativeResize(int32_t aWidth, int32_t aHeight, bool    aRepaint)
+nsWindow::NativeResize()
 {
-    gint width = DevicePixelsToGdkCoordRoundUp(aWidth);
-    gint height = DevicePixelsToGdkCoordRoundUp(aHeight);
+    if (!AreBoundsSane()) {
+        // If someone has set this so that the needs show flag is false
+        // and it needs to be hidden, update the flag and hide the
+        // window.  This flag will be cleared the next time someone
+        // hides the window or shows it.  It also prevents us from
+        // calling NativeShow(false) excessively on the window which
+        // causes unneeded X traffic.
+        if (!mNeedsShow && mIsShown) {
+            mNeedsShow = true;
+            NativeShow(false);
+        }
+        return;
+    }
+
+    GdkRectangle size = DevicePixelsToGdkSizeRoundUp(mBounds.Size());
     
     LOG(("nsWindow::NativeResize [%p] %d %d\n", (void *)this,
-         width, height));
-
-    // clear our resize flag
-    mNeedsResize = false;
+         size.width, size.height));
 
     if (mIsTopLevel) {
-        gtk_window_resize(GTK_WINDOW(mShell), width, height);
+        gtk_window_resize(GTK_WINDOW(mShell), size.width, size.height);
     }
     else if (mContainer) {
         GtkWidget *widget = GTK_WIDGET(mContainer);
@@ -3899,47 +3802,65 @@ nsWindow::NativeResize(int32_t aWidth, int32_t aHeight, bool    aRepaint)
         gtk_widget_get_allocation(widget, &prev_allocation);
         allocation.x = prev_allocation.x;
         allocation.y = prev_allocation.y;
-        allocation.width = width;
-        allocation.height = height;
+        allocation.width = size.width;
+        allocation.height = size.height;
         gtk_widget_size_allocate(widget, &allocation);
     }
     else if (mGdkWindow) {
-        gdk_window_resize(mGdkWindow, width, height);
+        gdk_window_resize(mGdkWindow, size.width, size.height);
+    }
+
+    // Does it need to be shown because bounds were previously insane?
+    if (mNeedsShow && mIsShown) {
+        NativeShow(true);
     }
 }
 
 void
-nsWindow::NativeResize(int32_t aX, int32_t aY,
-                       int32_t aWidth, int32_t aHeight,
-                       bool    aRepaint)
+nsWindow::NativeMoveResize()
 {
-    gint width = DevicePixelsToGdkCoordRoundUp(aWidth);
-    gint height = DevicePixelsToGdkCoordRoundUp(aHeight);
-    gint x = DevicePixelsToGdkCoordRoundDown(aX);
-    gint y = DevicePixelsToGdkCoordRoundDown(aY);
+    if (!AreBoundsSane()) {
+        // If someone has set this so that the needs show flag is false
+        // and it needs to be hidden, update the flag and hide the
+        // window.  This flag will be cleared the next time someone
+        // hides the window or shows it.  It also prevents us from
+        // calling NativeShow(false) excessively on the window which
+        // causes unneeded X traffic.
+        if (!mNeedsShow && mIsShown) {
+            mNeedsShow = true;
+            NativeShow(false);
+        }
+        NativeMove();
+    }
 
-    mNeedsResize = false;
-    mNeedsMove = false;
+    GdkRectangle size = DevicePixelsToGdkSizeRoundUp(mBounds.Size());
+    GdkPoint topLeft = DevicePixelsToGdkPointRoundDown(mBounds.TopLeft());
 
-    LOG(("nsWindow::NativeResize [%p] %d %d %d %d\n", (void *)this,
-         x, y, width, height));
+    LOG(("nsWindow::NativeMoveResize [%p] %d %d %d %d\n", (void *)this,
+         topLeft.x, topLeft.y, size.width, size.height));
 
     if (mIsTopLevel) {
         // x and y give the position of the window manager frame top-left.
-        gtk_window_move(GTK_WINDOW(mShell), x, y);
+        gtk_window_move(GTK_WINDOW(mShell), topLeft.x, topLeft.y);
         // This sets the client window size.
-        gtk_window_resize(GTK_WINDOW(mShell), width, height);
+        gtk_window_resize(GTK_WINDOW(mShell), size.width, size.height);
     }
     else if (mContainer) {
         GtkAllocation allocation;
-        allocation.x = x;
-        allocation.y = y;
-        allocation.width = width;
-        allocation.height = height;
+        allocation.x = topLeft.x;
+        allocation.y = topLeft.y;
+        allocation.width = size.width;
+        allocation.height = size.height;
         gtk_widget_size_allocate(GTK_WIDGET(mContainer), &allocation);
     }
     else if (mGdkWindow) {
-        gdk_window_move_resize(mGdkWindow, x, y, width, height);
+        gdk_window_move_resize(mGdkWindow,
+                               topLeft.x, topLeft.y, size.width, size.height);
+    }
+
+    // Does it need to be shown because bounds were previously insane?
+    if (mNeedsShow && mIsShown) {
+        NativeShow(true);
     }
 }
 
@@ -4300,9 +4221,8 @@ nsWindow::ApplyTransparencyBitmap()
     // We use X11 calls where possible, because GDK handles expose events
     // for shaped windows in a way that's incompatible with us (Bug 635903).
     // It doesn't occur when the shapes are set through X.
-    GdkWindow *shellWindow = gtk_widget_get_window(mShell);
-    Display* xDisplay = GDK_WINDOW_XDISPLAY(shellWindow);
-    Window xDrawable = GDK_WINDOW_XID(shellWindow);
+    Display* xDisplay = GDK_WINDOW_XDISPLAY(mGdkWindow);
+    Window xDrawable = GDK_WINDOW_XID(mGdkWindow);
     Pixmap maskPixmap = XCreateBitmapFromData(xDisplay,
                                               xDrawable,
                                               mTransparencyBitmap,
@@ -4315,7 +4235,7 @@ nsWindow::ApplyTransparencyBitmap()
 #else
 #if (MOZ_WIDGET_GTK == 2)
     gtk_widget_reset_shapes(mShell);
-    GdkBitmap* maskBitmap = gdk_bitmap_create_from_data(gtk_widget_get_window(mShell),
+    GdkBitmap* maskBitmap = gdk_bitmap_create_from_data(mGdkWindow,
             mTransparencyBitmap,
             mTransparencyBitmapWidth, mTransparencyBitmapHeight);
     if (!maskBitmap)
@@ -4356,12 +4276,11 @@ nsWindow::ClearTransparencyBitmap()
         return;
 
 #ifdef MOZ_X11
-    GdkWindow *window = gtk_widget_get_window(mShell);
-    if (!window)
+    if (!mGdkWindow)
         return;
 
-    Display* xDisplay = GDK_WINDOW_XDISPLAY(window);
-    Window xWindow = gdk_x11_window_get_xid(window);
+    Display* xDisplay = GDK_WINDOW_XDISPLAY(mGdkWindow);
+    Window xWindow = gdk_x11_window_get_xid(mGdkWindow);
 
     XShapeCombineMask(xDisplay, xWindow, ShapeBounding, 0, 0, None, ShapeSet);
 #endif
@@ -4735,9 +4654,8 @@ nsWindow::HideWindowChrome(bool aShouldHide)
     // confused if we change the window decorations while the window
     // is visible.
     bool wasVisible = false;
-    GdkWindow *shellWindow = gtk_widget_get_window(mShell);
-    if (gdk_window_is_visible(shellWindow)) {
-        gdk_window_hide(shellWindow);
+    if (gdk_window_is_visible(mGdkWindow)) {
+        gdk_window_hide(mGdkWindow);
         wasVisible = true;
     }
 
@@ -4748,10 +4666,10 @@ nsWindow::HideWindowChrome(bool aShouldHide)
         wmd = ConvertBorderStyles(mBorderStyle);
 
     if (wmd != -1)
-      gdk_window_set_decorations(shellWindow, (GdkWMDecoration) wmd);
+      gdk_window_set_decorations(mGdkWindow, (GdkWMDecoration) wmd);
 
     if (wasVisible)
-        gdk_window_show(shellWindow);
+        gdk_window_show(mGdkWindow);
 
     // For some window managers, adding or removing window decorations
     // requires unmapping and remapping our toplevel window.  Go ahead
@@ -6187,11 +6105,6 @@ nsWindow::EndRemoteDrawingInRegion(DrawTarget* aDrawTarget, nsIntRegion& aInvali
     aInvalidRegion.AndWith(nsIntRect(nsIntPoint(0, 0), mThebesSurface->GetSize()));
   }
 
-  gint scale = GdkScaleFactor();
-  if (scale != 1) {
-    aInvalidRegion.ScaleInverseRoundOut(scale, scale);
-  }
-
   mShmImage->Put(mGdkWindow, aInvalidRegion);
 
 #  endif // MOZ_HAVE_SHMIMAGE
@@ -6417,10 +6330,10 @@ nsWindow::GdkScaleFactor()
     // Available as of GTK 3.10+
     static auto sGdkWindowGetScaleFactorPtr = (gint (*)(GdkWindow*))
         dlsym(RTLD_DEFAULT, "gdk_window_get_scale_factor");
-    if (sGdkWindowGetScaleFactorPtr)
+    if (sGdkWindowGetScaleFactorPtr && mGdkWindow)
         return (*sGdkWindowGetScaleFactorPtr)(mGdkWindow);
 #endif
-    return 1;
+    return nsScreenGtk::GetGtkMonitorScaleFactor();
 }
 
 
@@ -6450,6 +6363,14 @@ nsWindow::DevicePixelsToGdkRectRoundOut(nsIntRect rect) {
     int right = (rect.x + rect.width + scale - 1) / scale;
     int bottom = (rect.y + rect.height + scale - 1) / scale;
     return { x, y, right - x, bottom - y };
+}
+
+GdkRectangle
+nsWindow::DevicePixelsToGdkSizeRoundUp(nsIntSize pixelSize) {
+    gint scale = GdkScaleFactor();
+    gint width = (pixelSize.width + scale - 1) / scale;
+    gint height = (pixelSize.height + scale - 1) / scale;
+    return { 0, 0, width, height };
 }
 
 int
@@ -6576,4 +6497,10 @@ nsWindow::SynthesizeNativeMouseScrollEvent(mozilla::LayoutDeviceIntPoint aPoint,
   gdk_event_put(&event);
 
   return NS_OK;
+}
+
+int32_t
+nsWindow::RoundsWidgetCoordinatesTo()
+{
+    return GdkScaleFactor();
 }

@@ -7,7 +7,7 @@
 #ifndef mozilla_dom_SourceBuffer_h_
 #define mozilla_dom_SourceBuffer_h_
 
-#include "MediaPromise.h"
+#include "mozilla/MozPromise.h"
 #include "MediaSource.h"
 #include "js/RootingAPI.h"
 #include "mozilla/Assertions.h"
@@ -38,9 +38,6 @@ class TrackBuffersManager;
 
 namespace dom {
 
-using media::TimeUnit;
-using media::TimeIntervals;
-
 class TimeRanges;
 
 class SourceBuffer final : public DOMEventTargetHelper
@@ -60,7 +57,7 @@ public:
   }
 
   already_AddRefed<TimeRanges> GetBuffered(ErrorResult& aRv);
-  TimeIntervals GetTimeIntervals();
+  media::TimeIntervals GetTimeIntervals();
 
   double TimestampOffset() const
   {
@@ -168,7 +165,7 @@ private:
   void AppendDataErrored(nsresult aError);
 
   // Set timestampOffset, must be called on the main thread.
-  void SetTimestampOffset(const TimeUnit& aTimestampOffset);
+  void SetTimestampOffset(const media::TimeUnit& aTimestampOffset);
 
   nsRefPtr<MediaSource> mMediaSource;
 
@@ -180,7 +177,7 @@ private:
   double mAppendWindowEnd;
 
   double mApparentTimestampOffset;
-  TimeUnit mTimestampOffset;
+  media::TimeUnit mTimestampOffset;
 
   SourceBufferAppendMode mAppendMode;
   bool mUpdating;
@@ -195,11 +192,12 @@ private:
   uint32_t mUpdateID;
   int64_t mReportedOffset;
 
-  MediaPromiseRequestHolder<SourceBufferContentManager::AppendPromise> mPendingAppend;
+  MozPromiseRequestHolder<SourceBufferContentManager::AppendPromise> mPendingAppend;
   const nsCString mType;
 };
 
 } // namespace dom
 
 } // namespace mozilla
+
 #endif /* mozilla_dom_SourceBuffer_h_ */

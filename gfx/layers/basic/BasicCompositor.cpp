@@ -82,6 +82,12 @@ BasicCompositor::~BasicCompositor()
   MOZ_COUNT_DTOR(BasicCompositor);
 }
 
+bool
+BasicCompositor::Initialize()
+{
+  return mWidget ? mWidget->InitCompositor(this) : false;
+};
+
 int32_t
 BasicCompositor::GetMaxTextureSize() const
 {
@@ -182,7 +188,7 @@ DrawSurfaceWithTextureCoords(DrawTarget *aDest,
 
 #ifdef MOZ_ENABLE_SKIA
 static SkMatrix
-Matrix3DToSkia(const gfx3DMatrix& aMatrix)
+Matrix3DToSkia(const Matrix4x4& aMatrix)
 {
   SkMatrix transform;
   transform.setAll(aMatrix._11,
@@ -201,7 +207,7 @@ Matrix3DToSkia(const gfx3DMatrix& aMatrix)
 static void
 Transform(DataSourceSurface* aDest,
           DataSourceSurface* aSource,
-          const gfx3DMatrix& aTransform,
+          const Matrix4x4& aTransform,
           const Point& aDestOffset)
 {
   if (aTransform.IsSingular()) {
@@ -227,8 +233,8 @@ Transform(DataSourceSurface* aDest,
   src.setInfo(srcInfo, aSource->Stride());
   src.setPixels((uint32_t*)aSource->GetData());
 
-  gfx3DMatrix transform = aTransform;
-  transform.TranslatePost(Point3D(-aDestOffset.x, -aDestOffset.y, 0));
+  Matrix4x4 transform = aTransform;
+  transform.PostTranslate(Point3D(-aDestOffset.x, -aDestOffset.y, 0));
   destCanvas.setMatrix(Matrix3DToSkia(transform));
 
   SkPaint paint;
@@ -240,7 +246,7 @@ Transform(DataSourceSurface* aDest,
 }
 #else
 static pixman_transform
-Matrix3DToPixman(const gfx3DMatrix& aMatrix)
+Matrix3DToPixman(const Matrix4x4& aMatrix)
 {
   pixman_f_transform transform;
 
@@ -263,7 +269,7 @@ Matrix3DToPixman(const gfx3DMatrix& aMatrix)
 static void
 Transform(DataSourceSurface* aDest,
           DataSourceSurface* aSource,
-          const gfx3DMatrix& aTransform,
+          const Matrix4x4& aTransform,
           const Point& aDestOffset)
 {
   IntSize destSize = aDest->GetSize();
@@ -337,7 +343,7 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
 
   Matrix newTransform;
   Rect transformBounds;
-  gfx3DMatrix new3DTransform;
+  Matrix4x4 new3DTransform;
   IntPoint offset = mRenderTarget->GetOrigin();
 
   if (aTransform.Is2D()) {
@@ -352,8 +358,9 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
     dest->SetTransform(Matrix::Translation(-aRect.x, -aRect.y));
 
     // Get the bounds post-transform.
-    new3DTransform = To3DMatrix(aTransform);
-    gfxRect bounds = new3DTransform.TransformBounds(ThebesRect(aRect));
+    new3DTransform = aTransform;
+    gfxRect bounds = ThebesRect(aRect);
+    bounds.TransformBounds(new3DTransform);
     bounds.IntersectRect(bounds, gfxRect(offset.x, offset.y, buffer->GetSize().width, buffer->GetSize().height));
 
     transformBounds = ToRect(bounds);
@@ -364,7 +371,7 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
 
     // When we apply the 3D transformation, we do it against a temporary
     // surface, so undo the coordinate offset.
-    new3DTransform = gfx3DMatrix::Translation(aRect.x, aRect.y, 0) * new3DTransform;
+    new3DTransform = Matrix4x4::Translation(aRect.x, aRect.y, 0) * new3DTransform;
   }
 
   newTransform.PostTranslate(-offset.x, -offset.y);
@@ -587,5 +594,5 @@ BasicCompositor::EndFrame()
   mRenderTarget = nullptr;
 }
 
-}
-}
+} // namespace layers
+} // namespace mozilla

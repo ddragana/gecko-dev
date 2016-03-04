@@ -378,7 +378,19 @@ nsFrameLoader::ReallyStartLoadingInternal()
     }
   }
 
-  loadInfo->SetReferrerPolicy(mOwnerContent->OwnerDoc()->GetReferrerPolicy());
+  // get referrer policy for this iframe:
+  // first load document wide policy, then
+  // load iframe referrer attribute if enabled in preferences
+  // per element referrer overrules document wide referrer if enabled
+  net::ReferrerPolicy referrerPolicy = mOwnerContent->OwnerDoc()->GetReferrerPolicy();
+  HTMLIFrameElement* iframe = HTMLIFrameElement::FromContent(mOwnerContent);
+  if (iframe) {
+    net::ReferrerPolicy iframeReferrerPolicy = iframe->GetReferrerPolicy();
+    if (iframeReferrerPolicy != net::RP_Unset) {
+      referrerPolicy = iframeReferrerPolicy;
+    }
+  }
+  loadInfo->SetReferrerPolicy(referrerPolicy);
 
   // Default flags:
   int32_t flags = nsIWebNavigation::LOAD_FLAGS_NONE;
@@ -1600,12 +1612,12 @@ nsFrameLoader::ShouldUseRemoteProcess()
 
   // Don't try to launch nested children if we don't have OMTC.
   // They won't render!
-  if (XRE_GetProcessType() == GeckoProcessType_Content &&
+  if (XRE_IsContentProcess() &&
       !CompositorChild::ChildProcessHasCompositor()) {
     return false;
   }
 
-  if (XRE_GetProcessType() == GeckoProcessType_Content &&
+  if (XRE_IsContentProcess() &&
       !(PR_GetEnv("MOZ_NESTED_OOP_TABS") ||
         Preferences::GetBool("dom.ipc.tabs.nested.enabled", false))) {
     return false;
@@ -2649,7 +2661,7 @@ nsFrameLoader::ResetPermissionManagerStatus()
 {
   // The resetting of the permissions status can run only
   // in the main process.
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+  if (XRE_IsContentProcess()) {
     return;
   }
 

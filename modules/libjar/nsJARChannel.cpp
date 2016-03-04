@@ -15,6 +15,7 @@
 #include "nsIViewSourceChannel.h"
 #include "nsContentUtils.h"
 #include "nsProxyRelease.h"
+#include "nsContentSecurityManager.h"
 
 #include "nsIScriptSecurityManager.h"
 #include "nsIPrincipal.h"
@@ -683,8 +684,6 @@ nsJARChannel::OverrideSecurityInfo(nsISupports* aSecurityInfo)
                      "This can only be called when we don't have a security info object already");
   MOZ_RELEASE_ASSERT(aSecurityInfo,
                      "This can only be called with a valid security info object");
-  MOZ_RELEASE_ASSERT(ShouldIntercept(),
-                     "This can only be called on channels that can be intercepted");
   mSecurityInfo = aSecurityInfo;
   return NS_OK;
 }
@@ -694,8 +693,6 @@ nsJARChannel::OverrideURI(nsIURI* aRedirectedURI)
 {
   MOZ_RELEASE_ASSERT(mLoadFlags & LOAD_REPLACE,
                      "This can only happen if the LOAD_REPLACE flag is set");
-  MOZ_RELEASE_ASSERT(ShouldIntercept(),
-                     "This can only be called on channels that can be intercepted");
   mAppURI = aRedirectedURI;
 }
 
@@ -865,6 +862,15 @@ nsJARChannel::Open(nsIInputStream **stream)
     return NS_OK;
 }
 
+NS_IMETHODIMP
+nsJARChannel::Open2(nsIInputStream** aStream)
+{
+    nsCOMPtr<nsIStreamListener> listener;
+    nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
+    NS_ENSURE_SUCCESS(rv, rv);
+    return Open(aStream);
+}
+
 bool
 nsJARChannel::ShouldIntercept()
 {
@@ -924,6 +930,8 @@ nsJARChannel::OverrideWithSynthesizedResponse(nsIInputStream* aSynthesizedInput,
 
     SetContentType(aContentType);
 
+    mIsUnsafe = false;
+
     FinishAsyncOpen();
 
     rv = mSynthesizedResponsePump->AsyncRead(this, nullptr);
@@ -949,6 +957,9 @@ nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
     mListenerContext = ctx;
     mIsPending = true;
 
+// Bug 1171651 -  Disable the interception of app:// URIs in service workers
+//                on release builds
+#ifndef RELEASE_BUILD
     // Check if this channel should intercept the network request and prepare
     // for a possible synthesized response instead.
     if (ShouldIntercept()) {
@@ -971,8 +982,23 @@ nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
 
       return NS_OK;
     }
+#endif
 
     return ContinueAsyncOpen();
+}
+
+NS_IMETHODIMP
+nsJARChannel::AsyncOpen2(nsIStreamListener *aListener)
+{
+  if (!mLoadInfo) {
+    MOZ_ASSERT(mLoadInfo, "can not enforce security without loadInfo");
+    return NS_ERROR_UNEXPECTED;
+  }
+  // setting the flag on the loadInfo indicates that the underlying
+  // channel will be openend using AsyncOpen2() and hence performs
+  // the necessary security checks.
+  mLoadInfo->SetEnforceSecurity(true);
+  return AsyncOpen(aListener, nullptr);
 }
 
 nsresult
@@ -993,8 +1019,6 @@ nsJARChannel::ContinueAsyncOpen()
         // Not a local file...
         // kick off an async download of the base URI...
         nsCOMPtr<nsIStreamListener> downloader = new MemoryDownloader(this);
-        // Since we might not have a loadinfo on all channels yet
-        // we have to provide default arguments in case mLoadInfo is null;
         uint32_t loadFlags =
             mLoadFlags & ~(LOAD_DOCUMENT_URI | LOAD_CALL_CONTENT_SNIFFERS);
         rv = NS_NewChannelInternal(getter_AddRefs(channel),
@@ -1009,7 +1033,12 @@ nsJARChannel::ContinueAsyncOpen()
             mListener = nullptr;
             return rv;
         }
-        rv = channel->AsyncOpen(downloader, nullptr);
+        if (mLoadInfo && mLoadInfo->GetEnforceSecurity()) {
+            rv = channel->AsyncOpen2(downloader);
+        }
+        else {
+            rv = channel->AsyncOpen(downloader, nullptr);
+        }
     } else if (mOpeningRemote) {
         // nothing to do: already asked parent to open file.
     } else {

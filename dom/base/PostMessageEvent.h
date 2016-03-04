@@ -11,9 +11,11 @@
 #include "nsCOMPtr.h"
 #include "nsRefPtr.h"
 #include "nsTArray.h"
+#include "nsThreadUtils.h"
 
 class nsGlobalWindow;
 class nsIPrincipal;
+class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
@@ -37,8 +39,7 @@ public:
                    bool aTrustedCaller);
 
   bool Write(JSContext* aCx, JS::Handle<JS::Value> aMessage,
-             JS::Handle<JS::Value> aTransfer, bool aSubsumes,
-             nsPIDOMWindow* aWindow);
+             JS::Handle<JS::Value> aTransfer, nsPIDOMWindow* aWindow);
 
 private:
   ~PostMessageEvent();
@@ -102,7 +103,7 @@ private:
   nsTArray<MessagePortIdentifier> mPortIdentifiers;
 };
 
-} // dom namespace
-} // mozilla namespace
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_PostMessageEvent_h

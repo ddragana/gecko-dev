@@ -13,7 +13,6 @@
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 
-#include "gfxPrefs.h"
 #include "gfxTypes.h"
 #include "gfxFontFamilyList.h"
 #include "gfxBlur.h"
@@ -42,7 +41,7 @@ class SRGBOverrideObserver;
 namespace mozilla {
 namespace gl {
 class SkiaGLGlue;
-}
+} // namespace gl
 namespace gfx {
 class DrawTarget;
 class SourceSurface;
@@ -56,12 +55,13 @@ BackendTypeBit(BackendType b)
 {
   return 1 << uint8_t(b);
 }
-}
-}
+
+} // namespace gfx
+} // namespace mozilla
 
 #define MOZ_PERFORMANCE_WARNING(module, ...) \
   do { \
-    if (gfxPrefs::PerfWarnings()) { \
+    if (gfxPlatform::PerfWarnings()) { \
       printf_stderr("[" module "] " __VA_ARGS__); \
     } \
   } while (0)
@@ -69,41 +69,12 @@ BackendTypeBit(BackendType b)
 extern cairo_user_data_key_t kDrawTarget;
 
 // pref lang id's for font prefs
-// !!! needs to match the list of pref font.default.xx entries listed in all.js !!!
-// !!! don't use as bit mask, this may grow larger !!!
-
 enum eFontPrefLang {
-    eFontPrefLang_Western     =  0,
-    eFontPrefLang_Japanese    =  1,
-    eFontPrefLang_ChineseTW   =  2,
-    eFontPrefLang_ChineseCN   =  3,
-    eFontPrefLang_ChineseHK   =  4,
-    eFontPrefLang_Korean      =  5,
-    eFontPrefLang_Cyrillic    =  6,
-    eFontPrefLang_Greek       =  7,
-    eFontPrefLang_Thai        =  8,
-    eFontPrefLang_Hebrew      =  9,
-    eFontPrefLang_Arabic      = 10,
-    eFontPrefLang_Devanagari  = 11,
-    eFontPrefLang_Tamil       = 12,
-    eFontPrefLang_Armenian    = 13,
-    eFontPrefLang_Bengali     = 14,
-    eFontPrefLang_Canadian    = 15,
-    eFontPrefLang_Ethiopic    = 16,
-    eFontPrefLang_Georgian    = 17,
-    eFontPrefLang_Gujarati    = 18,
-    eFontPrefLang_Gurmukhi    = 19,
-    eFontPrefLang_Khmer       = 20,
-    eFontPrefLang_Malayalam   = 21,
-    eFontPrefLang_Oriya       = 22,
-    eFontPrefLang_Telugu      = 23,
-    eFontPrefLang_Kannada     = 24,
-    eFontPrefLang_Sinhala     = 25,
-    eFontPrefLang_Tibetan     = 26,
+    #define FONT_PREF_LANG(enum_id_, str_, atom_id_) eFontPrefLang_ ## enum_id_
+    #include "gfxFontPrefLangList.h"
+    #undef FONT_PREF_LANG
 
-    eFontPrefLang_Others      = 27, // x-unicode
-
-    eFontPrefLang_CJKSet      = 28  // special code for CJK set
+    , eFontPrefLang_CJKSet  // special code for CJK set
 };
 
 enum eCMSMode {
@@ -188,6 +159,12 @@ public:
      */
     static gfxPlatform *GetPlatform();
 
+    /**
+     * Returns whether or not graphics has been initialized yet. This is
+     * intended for Telemetry where we don't necessarily want to initialize
+     * graphics just to observe its state.
+     */
+    static bool Initialized();
 
     /**
      * Shut down Thebes.
@@ -203,8 +180,8 @@ public:
      * and image format.
      */
     virtual already_AddRefed<gfxASurface>
-      CreateOffscreenSurface(const IntSize& size,
-                             gfxContentType contentType) = 0;
+      CreateOffscreenSurface(const IntSize& aSize,
+                             gfxImageFormat aFormat) = 0;
 
     /**
      * Beware that these methods may return DrawTargets which are not fully supported
@@ -289,11 +266,11 @@ public:
 
     /// These should be used instead of directly accessing the preference,
     /// as different platforms may override the behaviour.
-    virtual bool UseProgressivePaint() { return gfxPrefs::ProgressivePaintDoNotUseDirectly(); }
+    virtual bool UseProgressivePaint();
 
     static bool AsyncPanZoomEnabled();
 
-    void GetAzureBackendInfo(mozilla::widget::InfoObject &aObj) {
+    virtual void GetAzureBackendInfo(mozilla::widget::InfoObject &aObj) {
       aObj.DefineProperty("AzureCanvasBackend", GetBackendName(mPreferredCanvasBackend));
       aObj.DefineProperty("AzureSkiaAccelerated", UseAcceleratedSkiaCanvas());
       aObj.DefineProperty("AzureFallbackCanvasBackend", GetBackendName(mFallbackCanvasBackend));
@@ -454,8 +431,6 @@ public:
 
     virtual bool DidRenderingDeviceReset(DeviceResetReason* aResetReason = nullptr) { return false; }
 
-    void GetPrefFonts(nsIAtom *aLanguage, nsString& array, bool aAppendUnicode = true);
-
     // in some situations, need to make decisions about ambiguous characters, may need to look at multiple pref langs
     void GetLangPrefs(eFontPrefLang aPrefLangs[], uint32_t &aLen, eFontPrefLang aCharLang, eFontPrefLang aPageLang);
     
@@ -509,6 +484,12 @@ public:
     static bool CanUseDirect3D11();
     virtual bool CanUseHardwareVideoDecoding();
     static bool CanUseDirect3D11ANGLE();
+
+    // Returns whether or not layers acceleration should be used.
+    bool ShouldUseLayersAcceleration();
+
+    // Returns a prioritized list of all available compositor backends.
+    void GetCompositorBackends(bool useAcceleration, nsTArray<mozilla::layers::LayersBackend>& aBackends);
 
     /**
      * Is it possible to use buffer rotation.  Note that these
@@ -650,6 +631,17 @@ public:
                                  const mozilla::gfx::IntSize& aSize,
                                  mozilla::gfx::SurfaceFormat aFormat);
 
+    /**
+     * Wrapper around gfxPrefs::PerfWarnings().
+     * Extracted into a function to avoid including gfxPrefs.h from this file.
+     */
+    static bool PerfWarnings();
+
+    void NotifyCompositorCreated(mozilla::layers::LayersBackend aBackend);
+    mozilla::layers::LayersBackend GetCompositorBackend() const {
+      return mCompositorBackend;
+    }
+
 protected:
     gfxPlatform();
     virtual ~gfxPlatform();
@@ -661,6 +653,17 @@ protected:
      * Initialized hardware vsync based on each platform.
      */
     virtual already_AddRefed<mozilla::gfx::VsyncSource> CreateHardwareVsyncSource();
+
+    // Returns whether or not layers should be accelerated by default on this platform.
+    virtual bool AccelerateLayersByDefault();
+
+    // Returns a prioritized list of available compositor backends for acceleration.
+    virtual void GetAcceleratedCompositorBackends(nsTArray<mozilla::layers::LayersBackend>& aBackends);
+
+    // Returns whether or not the basic compositor is supported.
+    virtual bool SupportsBasicCompositor() const {
+      return true;
+    }
 
     /**
      * Initialise the preferred and fallback canvas backends
@@ -759,6 +762,10 @@ private:
 
     mozilla::RefPtr<mozilla::gfx::DrawEventRecorder> mRecorder;
     mozilla::RefPtr<mozilla::gl::SkiaGLGlue> mSkiaGlue;
+
+    // Backend that we are compositing with. NONE, if no compositor has been
+    // created yet.
+    mozilla::layers::LayersBackend mCompositorBackend;
 };
 
 #endif /* GFX_PLATFORM_H */

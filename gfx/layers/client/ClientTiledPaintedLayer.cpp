@@ -311,7 +311,8 @@ ClientTiledPaintedLayer::RenderHighPrecision(nsIntRegion& aInvalidRegion,
   TILING_LOG("TILING %p: Non-progressive paint new valid region %s\n", this, Stringify(mValidRegion).c_str());
 
   mContentClient->mTiledBuffer.SetFrameResolution(mPaintData.mResolution);
-  mContentClient->mTiledBuffer.PaintThebes(mValidRegion, aInvalidRegion, aCallback, aCallbackData);
+  mContentClient->mTiledBuffer.PaintThebes(mValidRegion, aInvalidRegion, aInvalidRegion,
+                                           aCallback, aCallbackData);
   mPaintData.mPaintFinished = true;
   return true;
 }
@@ -393,10 +394,6 @@ ClientTiledPaintedLayer::RenderLayer()
   LayerManager::DrawPaintedLayerCallback callback =
     ClientManager()->GetPaintedLayerCallback();
   void *data = ClientManager()->GetPaintedLayerCallbackData();
-  if (!callback) {
-    ClientManager()->SetTransactionIncomplete();
-    return;
-  }
 
   if (!mContentClient) {
     mContentClient = new TiledContentClient(this, ClientManager());
@@ -442,11 +439,14 @@ ClientTiledPaintedLayer::RenderLayer()
     return;
   }
 
+  if (!callback) {
+    ClientManager()->SetTransactionIncomplete();
+    return;
+  }
+
   if (!ClientManager()->IsRepeatTransaction()) {
-    // Only paint the mask layer on the first transaction.
-    if (GetMaskLayer()) {
-      ToClientLayer(GetMaskLayer())->RenderLayer();
-    }
+    // Only paint the mask layers on the first transaction.
+    RenderMaskLayers(this);
 
     // For more complex cases we need to calculate a bunch of metrics before we
     // can do the paint.
@@ -547,5 +547,5 @@ ClientTiledPaintedLayer::PrintInfo(std::stringstream& aStream, const char* aPref
   }
 }
 
-} // mozilla
-} // layers
+} // namespace layers
+} // namespace mozilla

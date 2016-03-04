@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* globals DevToolsUtils, DOMParser, eventListenerService, CssLogic */
 
 "use strict";
 
@@ -117,7 +118,8 @@ HELPER_SHEET += ":-moz-devtools-highlighted { outline: 2px dashed #F06!important
 
 Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 
-loader.lazyImporter(this, "gDevTools", "resource:///modules/devtools/gDevTools.jsm");
+loader.lazyRequireGetter(this, "DevToolsUtils",
+                         "devtools/toolkit/DevToolsUtils");
 
 loader.lazyGetter(this, "DOMParser", function() {
   return Cc["@mozilla.org/xmlextras/domparser;1"].createInstance(Ci.nsIDOMParser);
@@ -846,6 +848,12 @@ let NodeFront = protocol.FrontClass(NodeActor, {
   },
   get nodeName() {
     return this._form.nodeName;
+  },
+  get doctypeString() {
+    return '<!DOCTYPE ' + this._form.name +
+     (this._form.publicId ? ' PUBLIC "' +  this._form.publicId + '"': '') +
+     (this._form.systemId ? ' "' + this._form.systemId + '"' : '') +
+     '>';
   },
 
   get baseURI() {
@@ -2397,11 +2405,11 @@ var WalkerActor = protocol.ActorClass({
    * @param {NodeActor} node The node.
    */
   outerHTML: method(function(node) {
-    let html = "";
+    let outerHTML = "";
     if (!isNodeDead(node)) {
-      html = node.rawNode.outerHTML;
+      outerHTML = node.rawNode.outerHTML;
     }
-    return LongStringActor(this.conn, html);
+    return LongStringActor(this.conn, outerHTML);
   }, {
     request: {
       node: Arg(0, "domnode")
@@ -3675,7 +3683,7 @@ var InspectorActor = exports.InspectorActor = protocol.ActorClass({
 
     // If the request hangs for too long, kill it to avoid queuing up other requests
     // to the same actor, except if we're running tests
-    if (!gDevTools.testing) {
+    if (!DevToolsUtils.testing) {
       this.window.setTimeout(() => {
         deferred.reject(new Error("Image " + url + " could not be retrieved in time"));
       }, IMAGE_FETCHING_TIMEOUT);

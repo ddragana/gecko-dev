@@ -29,6 +29,7 @@ LDFLAGS="${LDFLAGS=}"
 HOST_CFLAGS="${HOST_CFLAGS=}"
 HOST_CXXFLAGS="${HOST_CXXFLAGS=}"
 HOST_LDFLAGS="${HOST_LDFLAGS=}"
+RUSTFLAGS="${RUSTFLAGS=}"
 
 dnl ========================================================
 dnl = Preserve certain environment flags passed to configure
@@ -429,7 +430,7 @@ if test -n "$RUSTC"; then
   AC_MSG_RESULT([$RUSTC_VERSION (v${_RUSTC_MAJOR_VERSION}.${_RUSTC_MINOR_VERSION}.${_RUSTC_PATCH_VERSION})])
 fi
 MOZ_ARG_ENABLE_BOOL([rust],
-                    [  --enable-rust           Include rust language sources],
+                    [  --enable-rust           Include Rust language sources],
                     [MOZ_RUST=1],
                     [MOZ_RUST= ])
 if test -z "$RUSTC" -a -n "$MOZ_RUST"; then
@@ -440,7 +441,7 @@ fi
 if test -n "$MOZ_RUST" && test -z "$_RUSTC_MAJOR_VERSION" -o \
   "$_RUSTC_MAJOR_VERSION" -lt 1; then
   AC_MSG_ERROR([Rust compiler ${RUSTC_VERSION} is too old.
-    To compile rust language sources please install at least
+    To compile Rust language sources please install at least
     version 1.0 of the 'rustc' toolchain and make sure it is
     first in your path.
     You can verify this by typing 'rustc --version'.])
@@ -476,16 +477,36 @@ dnl Special MacOS X checks
 dnl ========================================================
 
 if test -n "$MACOSX_DEPLOYMENT_TARGET" -a -n "$MOZ_RUST"; then
-  AC_MSG_CHECKING([MacOS X compatibility with rust])
-  # rustc doesn't support MacOS X 10.6 or earlier.
+  AC_MSG_CHECKING([rustc compatibility with MacOS X])
+  # Stock rustc doesn't support MacOS X 10.6 or earlier.
   # https://github.com/rust-lang/rust/issues/25342
   _MACOSX_TARGET_MINOR=`echo "$MACOSX_DEPLOYMENT_TARGET" | cut -d. -f2`
   if test "$_MACOSX_TARGET_MINOR" -lt 7; then
-    AC_MSG_ERROR([rustc does not support MacOS X $MACOSX_DEPLOYMENT_TARGET
-      Add 'ac_add_options --enable-macos-target=10.7' (or later)
-      to mozconfig, or disable rust support.])
+    dnl Test C linkage against rust code to see if the rust
+    dnl toolchain output is compatible.
+    cat > conftest.rs <<EOF
+      [#[no_mangle]]
+      pub extern fn rusty_answer() -> u8 { 42 }
+EOF
+    ac_try="$RUSTC --crate-type staticlib -o conftest.a conftest.rs >/dev/null"
+    AC_TRY_EVAL(ac_try)
+    save_LDFLAGS=$LDFLAGS
+    LDFLAGS="$LDFLAGS conftest.a -lpthread -lm"
+    AC_TRY_LINK_FUNC([rusty_answer], [
+      AC_MSG_RESULT([$MACOSX_DEPLOYMENT_TARGET is ok with this rustc])
+    ], [
+      AC_MSG_RESULT([cannot link on $MACOSX_DEPLOYMENT_TARGET])
+      MOZ_RUST=
+    ])
+    LDFLAGS=$save_LDFLAGS
+    rm -rf conftest*
   else
     AC_MSG_RESULT([$MACOSX_DEPLOYMENT_TARGET is ok])
+  fi
+  if test -z "$MOZ_RUST"; then
+    AC_MSG_ERROR([rustc does not support MacOS X $MACOSX_DEPLOYMENT_TARGET
+      Add 'ac_add_options --enable-macos-target=10.7' (or later)
+      to mozconfig, disable Rust support, or use an alternate toolchain.])
   fi
 fi
 
@@ -1022,7 +1043,7 @@ MOZ_FS_LAYOUT=unix
 
 USE_DEPENDENT_LIBS=1
 
-_PLATFORM_DEFAULT_TOOLKIT=cairo-gtk2
+_PLATFORM_DEFAULT_TOOLKIT=cairo-gtk3
 
 if test -n "$CROSS_COMPILE"; then
     OS_TARGET="${target_os}"
@@ -1959,14 +1980,14 @@ MOZILLA_SYMBOLVERSION=`$PYTHON $srcdir/python/mozbuild/mozbuild/milestone.py --t
 
 dnl Get version of various core apps from the version files.
 FIREFOX_VERSION=`cat $_topsrcdir/browser/config/version.txt`
-FIREFOX_VERSION_ABOUT=`cat $_topsrcdir/browser/config/version_about.txt`
+FIREFOX_VERSION_DISPLAY=`cat $_topsrcdir/browser/config/version_display.txt`
 
 if test -z "$FIREFOX_VERSION"; then
     AC_MSG_ERROR([FIREFOX_VERSION is unexpectedly blank.])
 fi
 
-if test -z "$FIREFOX_VERSION_ABOUT"; then
-    AC_MSG_ERROR([FIREFOX_VERSION_ABOUT is unexpectedly blank.])
+if test -z "$FIREFOX_VERSION_DISPLAY"; then
+    AC_MSG_ERROR([FIREFOX_VERSION_DISPLAY is unexpectedly blank.])
 fi
 
 AC_DEFINE_UNQUOTED(MOZILLA_VERSION,"$MOZILLA_VERSION")
@@ -6275,6 +6296,74 @@ elif test -n "$MOZ_LIBJPEG_TURBO"; then
 fi
 
 dnl ========================================================
+dnl = libav-fft configuration
+dnl ========================================================
+
+MOZ_LIBAV_FFT=
+
+dnl Turn on libav-fft for 32-bit windows, and all 64-bit supported platforms.
+dnl 32-bit linux/os x have text relocation issues.
+
+case "$OS_ARCH:$CPU_ARCH" in
+  WINNT:x86)
+      MOZ_LIBAV_FFT=1
+  ;;
+  *:x86_64)
+      MOZ_LIBAV_FFT=1
+  ;;
+esac
+
+dnl Detect if we can use yasm to compile libav's assembly
+
+if test -n "$MOZ_LIBAV_FFT"; then
+  AC_DEFINE(MOZ_LIBAV_FFT)
+  dnl Do we support libav-fft on this platform?
+  case "$OS_ARCH:$CPU_ARCH" in
+  Darwin:x86_64)
+    LIBAV_FFT_ASFLAGS="-f macho64 -rnasm -pnasm -D__x86_64__ -DPIC -DMACHO"
+  ;;
+  WINNT:x86)
+    LIBAV_FFT_ASFLAGS="-f win32 -rnasm -pnasm -DPIC -DWIN32"
+  ;;
+  WINNT:x86_64)
+    LIBAV_FFT_ASFLAGS="-f win64 -rnasm -pnasm -D__x86_64__ -DPIC -DWIN64 -DMSVC"
+  ;;
+  *:x86_64)
+    if $CC -E -dM -</dev/null | grep -q __ELF__; then
+      LIBAV_FFT_ASFLAGS="-f elf64 -rnasm -pnasm -D__x86_64__ -DPIC -DELF"
+    fi
+  ;;
+  *)
+    AC_MSG_ERROR([libav's FFT routines are only available for 32-bit windows or 64-bit x86 based platforms.])
+  ;;
+  esac
+fi
+
+if test -n "$LIBAV_FFT_ASFLAGS"; then
+  dnl If we're on an x86 or x64 system which supports libav-fft's asm routines
+  dnl check for Yasm, and error out if it doesn't exist or we have too old of a
+  dnl version.
+  LIBAV_FFT_AS=$YASM
+  if test -z "$LIBAV_FFT_AS" ; then
+    AC_MSG_ERROR([Yasm is required to build with libav's optimized FFT routines, but you do not appear to have Yasm installed. See https://developer.mozilla.org/en/YASM for more details.])
+  fi
+  dnl Check that we have the right yasm version.  We require 1.0.1 or newer
+  dnl on Linux and 1.1 or newer everywhere else.
+  if test "$OS_ARCH" = "Linux" ; then
+    if test "$_YASM_MAJOR_VERSION" -lt "1" -o \( "$_YASM_MAJOR_VERSION" -eq "1" -a "$_YASM_MINOR_VERSION" -eq "0" -a "$_YASM_RELEASE" -lt "1" \) ; then
+      AC_MSG_ERROR([Yasm 1.0.1 or greater is required to build with libav's optimized FFT routines, but you do not appear to have Yasm installed.  See https://developer.mozilla.org/en/YASM for more details.])
+    fi
+  else
+    if test "$_YASM_MAJOR_VERSION" -lt "1" -o \( "$_YASM_MAJOR_VERSION" -eq "1" -a "$_YASM_MINOR_VERSION" -lt "1" \) ; then
+      AC_MSG_ERROR([Yasm 1.1 or greater is required to build with libav's optimized FFT routines, but you do not appear to have Yasm installed.  See https://developer.mozilla.org/en/YASM for more details.])
+    fi
+  fi
+elif test -n "$MOZ_LIBAV_FFT" -a "${CPU_ARCH}" != "arm"; then
+  dnl Warn if we're not building either libav or opendl-max optimized routines.
+  AC_MSG_WARN([No assembler or assembly support for libav-fft.  Using unoptimized C routines.])
+fi
+
+dnl ========================================================
 dnl = Enable compilation of specific extension modules
 dnl ========================================================
 
@@ -6581,6 +6670,15 @@ AC_SUBST(MOZ_NO_EV_CERTS)
 dnl ========================================================
 dnl = Sandboxing support
 dnl ========================================================
+if test -n "$MOZ_TSAN"; then
+    # Bug 1182565: TSan conflicts with sandboxing on Linux.
+    case $OS_TARGET in
+    Linux|Android)
+        MOZ_SANDBOX=
+        ;;
+    esac
+fi
+
 MOZ_ARG_DISABLE_BOOL(sandbox,
 [  --disable-sandbox        Disable sandboxing support],
     MOZ_SANDBOX=,
@@ -6957,6 +7055,10 @@ if test -z "$MOZ_OPTIMIZE_FLAGS"; then
     MOZ_OPTIMIZE_FLAGS="-O"
 fi
 
+if test -z "$MOZ_OPTIMIZE_RUSTFLAGS"; then
+    MOZ_OPTIMIZE_RUSTFLAGS="-O"
+fi
+
 MOZ_ARG_ENABLE_STRING(optimize,
 [  --disable-optimize      Disable compiler optimization
   --enable-optimize=[OPT] Specify compiler optimization flags [OPT=-O]],
@@ -6974,7 +7076,7 @@ MOZ_SET_FRAMEPTR_FLAGS
 
 if test "$COMPILE_ENVIRONMENT"; then
 if test -n "$MOZ_OPTIMIZE"; then
-    AC_MSG_CHECKING([for valid optimization flags])
+    AC_MSG_CHECKING([for valid C compiler optimization flags])
     _SAVE_CFLAGS=$CFLAGS
     CFLAGS="$CFLAGS $MOZ_OPTIMIZE_FLAGS"
     AC_TRY_COMPILE([#include <stdio.h>],
@@ -6983,7 +7085,7 @@ if test -n "$MOZ_OPTIMIZE"; then
         _results=no)
     AC_MSG_RESULT([$_results])
     if test "$_results" = "no"; then
-        AC_MSG_ERROR([These compiler flags are invalid: $MOZ_OPTIMIZE_FLAGS])
+        AC_MSG_ERROR([These compiler flags for C are invalid: $MOZ_OPTIMIZE_FLAGS])
     fi
     CFLAGS=$_SAVE_CFLAGS
 fi
@@ -6992,6 +7094,7 @@ fi # COMPILE_ENVIRONMENT
 AC_SUBST(MOZ_OPTIMIZE)
 AC_SUBST(MOZ_FRAMEPTR_FLAGS)
 AC_SUBST(MOZ_OPTIMIZE_FLAGS)
+AC_SUBST(MOZ_OPTIMIZE_RUSTFLAGS)
 AC_SUBST(MOZ_OPTIMIZE_LDFLAGS)
 AC_SUBST(MOZ_ALLOW_HEAP_EXECUTE_FLAGS)
 AC_SUBST(MOZ_PGO)
@@ -8489,12 +8592,6 @@ if test -n "$MOZ_SERVICES_CLOUDSYNC"; then
   AC_DEFINE(MOZ_SERVICES_CLOUDSYNC)
 fi
 
-dnl Build Captive Portal Detector if required
-AC_SUBST(MOZ_CAPTIVEDETECT)
-if test -n "$MOZ_CAPTIVEDETECT"; then
-  AC_DEFINE(MOZ_CAPTIVEDETECT)
-fi
-
 dnl Build second screen and casting features for external devices if required
 AC_SUBST(MOZ_DEVICES)
 if test -n "$MOZ_DEVICES"; then
@@ -8698,7 +8795,7 @@ AC_SUBST(MOZ_CHILD_PROCESS_BUNDLE)
 # Mac Bundle name, Updater, Installer), it is typically used for nightly
 # builds (e.g. Aurora for Firefox).
 # - MOZ_APP_VERSION: Defines the application version number.
-# - MOZ_APP_VERSION_ABOUT: Defines the application version number. Used
+# - MOZ_APP_VERSION_DISPLAY: Defines the application version number. Used
 # in the "About" window. If not set, defaults to MOZ_APP_VERSION.
 # - MOZ_APP_NAME: Used for e.g. the binary program file name. If not set,
 # defaults to a lowercase form of MOZ_APP_BASENAME.
@@ -8718,8 +8815,8 @@ if test -z "$MOZ_APP_REMOTINGNAME"; then
    MOZ_APP_REMOTINGNAME=$MOZ_APP_NAME
 fi
 
-if test -z "$MOZ_APP_VERSION_ABOUT"; then
-   MOZ_APP_VERSION_ABOUT=$MOZ_APP_VERSION
+if test -z "$MOZ_APP_VERSION_DISPLAY"; then
+   MOZ_APP_VERSION_DISPLAY=$MOZ_APP_VERSION
 fi
 
 # For extensions and langpacks, we require a max version that is compatible
@@ -8758,7 +8855,7 @@ AC_DEFINE_UNQUOTED(MOZ_APP_UA_NAME, "$MOZ_APP_UA_NAME")
 AC_SUBST(MOZ_APP_UA_NAME)
 AC_DEFINE_UNQUOTED(MOZ_APP_UA_VERSION, "$MOZ_APP_VERSION")
 AC_SUBST(MOZ_APP_VERSION)
-AC_SUBST(MOZ_APP_VERSION_ABOUT)
+AC_SUBST(MOZ_APP_VERSION_DISPLAY)
 AC_SUBST(MOZ_APP_MAXVERSION)
 AC_DEFINE_UNQUOTED(FIREFOX_VERSION,$FIREFOX_VERSION)
 AC_SUBST(FIREFOX_VERSION)
@@ -8965,6 +9062,9 @@ AC_SUBST(MOZ_INSTRUMENT_EVENT_LOOP)
 AC_SUBST(MOZ_CODE_COVERAGE)
 AC_SUBST(LIBJPEG_TURBO_AS)
 AC_SUBST_LIST(LIBJPEG_TURBO_ASFLAGS)
+AC_SUBST(MOZ_LIBAV_FFT)
+AC_SUBST(LIBAV_FFT_AS)
+AC_SUBST_LIST(LIBAV_FFT_ASFLAGS)
 
 AC_SUBST(MOZ_PACKAGE_JSSHELL)
 AC_SUBST(MOZ_FOLD_LIBS)

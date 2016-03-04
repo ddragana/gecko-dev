@@ -10,9 +10,11 @@
 #include "nsIContentPolicy.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIHttpChannel.h"
+#include "nsIHttpChannelInternal.h"
 #include "nsIInputStreamPump.h"
 #include "nsIIOService.h"
 #include "nsIProtocolHandler.h"
+#include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIStreamLoader.h"
 #include "nsIStreamListenerTee.h"
@@ -26,6 +28,8 @@
 #include "nsDocShellCID.h"
 #include "nsISupportsPrimitives.h"
 #include "nsNetUtil.h"
+#include "nsIPipe.h"
+#include "nsIOutputStream.h"
 #include "nsScriptLoader.h"
 #include "nsString.h"
 #include "nsStreamUtils.h"
@@ -41,14 +45,18 @@
 #include "mozilla/dom/cache/CacheTypes.h"
 #include "mozilla/dom/cache/Cache.h"
 #include "mozilla/dom/cache/CacheStorage.h"
+#include "mozilla/dom/ChannelInfo.h"
 #include "mozilla/dom/Exceptions.h"
 #include "mozilla/dom/InternalResponse.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/Response.h"
+#include "mozilla/UniquePtr.h"
 #include "Principal.h"
 #include "WorkerFeature.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
+#include "WorkerScope.h"
 
 #define MAX_CONCURRENT_SCRIPTS 1000
 
@@ -58,7 +66,9 @@ using mozilla::dom::cache::Cache;
 using mozilla::dom::cache::CacheStorage;
 using mozilla::dom::Promise;
 using mozilla::dom::PromiseNativeHandler;
-using mozilla::dom::workers::exceptions::ThrowDOMExceptionForNSResult;
+using mozilla::ErrorResult;
+using mozilla::ipc::PrincipalInfo;
+using mozilla::UniquePtr;
 
 namespace {
 
@@ -140,13 +150,6 @@ ChannelFromScriptURL(nsIPrincipal* principal,
       return NS_ERROR_DOM_SECURITY_ERR;
     }
   } else if (aIsMainScript) {
-    // If this script loader is being used to make a new worker then we need
-    // to do a same-origin check. Otherwise we need to clear the load with the
-    // security manager.
-    nsCString scheme;
-    rv = uri->GetScheme(scheme);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     // We pass true as the 3rd argument to checkMayLoad here.
     // This allows workers in sandboxed documents to load data URLs
     // (and other URLs that inherit their principal from their
@@ -272,6 +275,8 @@ struct ScriptLoadInfo
 
   CacheStatus mCacheStatus;
 
+  Maybe<bool> mMutedErrorFlag;
+
   bool Finished() const
   {
     return mLoadingFinished && !mCachePromise && !mChannel;
@@ -321,6 +326,8 @@ class CacheScriptLoader;
 class CacheCreator final : public PromiseNativeHandler
 {
 public:
+  NS_DECL_ISUPPORTS
+
   explicit CacheCreator(WorkerPrivate* aWorkerPrivate)
     : mCacheName(aWorkerPrivate->ServiceWorkerCacheName())
     , mPrivateBrowsing(aWorkerPrivate->IsInPrivateBrowsing())
@@ -387,11 +394,13 @@ private:
   bool mPrivateBrowsing;
 };
 
+NS_IMPL_ISUPPORTS0(CacheCreator)
+
 class CacheScriptLoader final : public PromiseNativeHandler
                                   , public nsIStreamLoaderObserver
 {
 public:
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_ISUPPORTS
   NS_DECL_NSISTREAMLOADEROBSERVER
 
   CacheScriptLoader(WorkerPrivate* aWorkerPrivate, ScriptLoadInfo& aLoadInfo,
@@ -433,7 +442,7 @@ private:
   bool mFailed;
   nsCOMPtr<nsIInputStreamPump> mPump;
   nsCOMPtr<nsIURI> mBaseURI;
-  ChannelInfo mChannelInfo;
+  mozilla::dom::ChannelInfo mChannelInfo;
   UniquePtr<PrincipalInfo> mPrincipalInfo;
 };
 
@@ -442,6 +451,8 @@ NS_IMPL_ISUPPORTS(CacheScriptLoader, nsIStreamLoaderObserver)
 class CachePromiseHandler final : public PromiseNativeHandler
 {
 public:
+  NS_DECL_ISUPPORTS
+
   CachePromiseHandler(ScriptLoaderRunnable* aRunnable,
                       ScriptLoadInfo& aLoadInfo,
                       uint32_t aIndex)
@@ -469,6 +480,8 @@ private:
   ScriptLoadInfo& mLoadInfo;
   uint32_t mIndex;
 };
+
+NS_IMPL_ISUPPORTS0(CachePromiseHandler)
 
 class ScriptLoaderRunnable final : public WorkerFeature,
                                    public nsIRunnable,
@@ -597,8 +610,8 @@ private:
     MOZ_ASSERT(channel == loadInfo.mChannel);
 
     // We synthesize the result code, but its never exposed to content.
-    nsRefPtr<InternalResponse> ir =
-      new InternalResponse(200, NS_LITERAL_CSTRING("OK"));
+    nsRefPtr<mozilla::dom::InternalResponse> ir =
+      new mozilla::dom::InternalResponse(200, NS_LITERAL_CSTRING("OK"));
     ir->SetBody(mReader);
 
     // Set the channel info of the channel on the response so that it's
@@ -626,9 +639,10 @@ private:
 
     ir->SetPrincipalInfo(Move(principalInfo));
 
-    nsRefPtr<Response> response = new Response(mCacheCreator->Global(), ir);
+    nsRefPtr<mozilla::dom::Response> response =
+      new mozilla::dom::Response(mCacheCreator->Global(), ir);
 
-    RequestOrUSVString request;
+    mozilla::dom::RequestOrUSVString request;
 
     MOZ_ASSERT(!loadInfo.mFullURL.IsEmpty());
     request.SetAsUSVString().Rebind(loadInfo.mFullURL.Data(),
@@ -870,6 +884,16 @@ private:
       return rv;
     }
 
+    // If we are loading a script for a ServiceWorker then we must not
+    // try to intercept it.  If the interception matches the current
+    // ServiceWorker's scope then we could deadlock the load.
+    if (mWorkerPrivate->IsServiceWorker()) {
+      nsCOMPtr<nsIHttpChannelInternal> internal = do_QueryInterface(channel);
+      if (internal) {
+        internal->ForceNoIntercept();
+      }
+    }
+
     if (loadInfo.mCacheStatus != ScriptLoadInfo::ToBeCached) {
       rv = channel->AsyncOpen(loader, indexSupports);
       if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -925,12 +949,33 @@ private:
 
     NS_ASSERTION(aString, "This should never be null!");
 
-    // Make sure we're not seeing the result of a 404 or something by checking
-    // the 'requestSucceeded' attribute on the http channel.
     nsCOMPtr<nsIRequest> request;
     nsresult rv = aLoader->GetRequest(getter_AddRefs(request));
     NS_ENSURE_SUCCESS(rv, rv);
 
+    nsCOMPtr<nsIChannel> channel = do_QueryInterface(request);
+    MOZ_ASSERT(channel);
+
+    nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
+    NS_ASSERTION(ssm, "Should never be null!");
+
+    nsCOMPtr<nsIPrincipal> channelPrincipal;
+    rv = ssm->GetChannelResultPrincipal(channel, getter_AddRefs(channelPrincipal));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    nsIPrincipal* principal = mWorkerPrivate->GetPrincipal();
+    if (!principal) {
+      WorkerPrivate* parentWorker = mWorkerPrivate->GetParent();
+      MOZ_ASSERT(parentWorker, "Must have a parent!");
+      principal = parentWorker->GetPrincipal();
+    }
+
+    aLoadInfo.mMutedErrorFlag.emplace(principal->Subsumes(channelPrincipal));
+
+    // Make sure we're not seeing the result of a 404 or something by checking
+    // the 'requestSucceeded' attribute on the http channel.
     nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(request);
     if (httpChannel) {
       bool requestSucceeded;
@@ -965,9 +1010,6 @@ private:
     } else if (!aLoadInfo.mScriptTextBuf) {
       return NS_ERROR_FAILURE;
     }
-
-    nsCOMPtr<nsIChannel> channel = do_QueryInterface(request);
-    NS_ASSERTION(channel, "This should never fail!");
 
     // Figure out what we actually loaded.
     nsCOMPtr<nsIURI> finalURI;
@@ -1066,13 +1108,25 @@ private:
   void
   DataReceivedFromCache(uint32_t aIndex, const uint8_t* aString,
                         uint32_t aStringLen,
-                        const ChannelInfo& aChannelInfo,
+                        const mozilla::dom::ChannelInfo& aChannelInfo,
                         UniquePtr<PrincipalInfo> aPrincipalInfo)
   {
     AssertIsOnMainThread();
     MOZ_ASSERT(aIndex < mLoadInfos.Length());
     ScriptLoadInfo& loadInfo = mLoadInfos[aIndex];
     MOZ_ASSERT(loadInfo.mCacheStatus == ScriptLoadInfo::Cached);
+
+    nsCOMPtr<nsIPrincipal> responsePrincipal =
+      PrincipalInfoToPrincipal(*aPrincipalInfo);
+
+    nsIPrincipal* principal = mWorkerPrivate->GetPrincipal();
+    if (!principal) {
+      WorkerPrivate* parentWorker = mWorkerPrivate->GetParent();
+      MOZ_ASSERT(parentWorker, "Must have a parent!");
+      principal = parentWorker->GetPrincipal();
+    }
+
+    loadInfo.mMutedErrorFlag.emplace(principal->Subsumes(responsePrincipal));
 
     // May be null.
     nsIDocument* parentDoc = mWorkerPrivate->GetDocument();
@@ -1091,14 +1145,12 @@ private:
         mWorkerPrivate->SetBaseURI(finalURI);
       }
 
-      DebugOnly<nsIPrincipal*> principal = mWorkerPrivate->GetPrincipal();
+      mozilla::DebugOnly<nsIPrincipal*> principal = mWorkerPrivate->GetPrincipal();
       MOZ_ASSERT(principal);
       nsILoadGroup* loadGroup = mWorkerPrivate->GetLoadGroup();
       MOZ_ASSERT(loadGroup);
 
-      nsCOMPtr<nsIPrincipal> responsePrincipal =
-        PrincipalInfoToPrincipal(*aPrincipalInfo);
-      DebugOnly<bool> equal = false;
+      mozilla::DebugOnly<bool> equal = false;
       MOZ_ASSERT(responsePrincipal && NS_SUCCEEDED(responsePrincipal->Equals(principal, &equal)));
       MOZ_ASSERT(equal);
 
@@ -1234,14 +1286,14 @@ CacheCreator::CreateCacheStorage(nsIPrincipal* aPrincipal)
   nsIXPConnect* xpc = nsContentUtils::XPConnect();
   MOZ_ASSERT(xpc, "This should never be null!");
 
-  AutoSafeJSContext cx;
-  nsCOMPtr<nsIXPConnectJSObjectHolder> sandbox;
-  nsresult rv = xpc->CreateSandbox(cx, aPrincipal, getter_AddRefs(sandbox));
+  mozilla::AutoSafeJSContext cx;
+  JS::Rooted<JSObject*> sandbox(cx);
+  nsresult rv = xpc->CreateSandbox(cx, aPrincipal, sandbox.address());
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
-  mSandboxGlobalObject = xpc::NativeGlobal(sandbox->GetJSObject());
+  mSandboxGlobalObject = xpc::NativeGlobal(sandbox);
   if (NS_WARN_IF(!mSandboxGlobalObject)) {
     return NS_ERROR_FAILURE;
   }
@@ -1258,7 +1310,7 @@ CacheCreator::CreateCacheStorage(nsIPrincipal* aPrincipal)
   // to this point.
   ErrorResult error;
   mCacheStorage =
-    CacheStorage::CreateOnMainThread(cache::CHROME_ONLY_NAMESPACE,
+    CacheStorage::CreateOnMainThread(mozilla::dom::cache::CHROME_ONLY_NAMESPACE,
                                      mSandboxGlobalObject,
                                      aPrincipal, mPrivateBrowsing,
                                      true /* force trusted origin */,
@@ -1411,11 +1463,11 @@ CacheScriptLoader::Load(Cache* aCache)
   MOZ_ASSERT(mLoadInfo.mFullURL.IsEmpty());
   CopyUTF8toUTF16(spec, mLoadInfo.mFullURL);
 
-  RequestOrUSVString request;
+  mozilla::dom::RequestOrUSVString request;
   request.SetAsUSVString().Rebind(mLoadInfo.mFullURL.Data(),
                                   mLoadInfo.mFullURL.Length());
 
-  CacheQueryOptions params;
+  mozilla::dom::CacheQueryOptions params;
 
   ErrorResult error;
   nsRefPtr<Promise> promise = aCache->Match(request, params, error);
@@ -1457,7 +1509,7 @@ CacheScriptLoader::ResolvedCallback(JSContext* aCx,
   MOZ_ASSERT(aValue.isObject());
 
   JS::Rooted<JSObject*> obj(aCx, &aValue.toObject());
-  Response* response = nullptr;
+  mozilla::dom::Response* response = nullptr;
   nsresult rv = UNWRAP_OBJECT(Response, obj, response);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     Fail(rv);
@@ -1467,10 +1519,9 @@ CacheScriptLoader::ResolvedCallback(JSContext* aCx,
   nsCOMPtr<nsIInputStream> inputStream;
   response->GetBody(getter_AddRefs(inputStream));
   mChannelInfo = response->GetChannelInfo();
-  const UniquePtr<mozilla::ipc::PrincipalInfo>& pInfo =
-    response->GetPrincipalInfo();
+  const UniquePtr<PrincipalInfo>& pInfo = response->GetPrincipalInfo();
   if (pInfo) {
-    mPrincipalInfo = MakeUnique<mozilla::ipc::PrincipalInfo>(*pInfo);
+    mPrincipalInfo = mozilla::MakeUnique<PrincipalInfo>(*pInfo);
   }
 
   if (!inputStream) {
@@ -1538,7 +1589,7 @@ CacheScriptLoader::OnStreamComplete(nsIStreamLoader* aLoader, nsISupports* aCont
   return NS_OK;
 }
 
- class ChannelGetterRunnable final : public nsRunnable
+class ChannelGetterRunnable final : public nsRunnable
 {
   WorkerPrivate* mParentWorker;
   nsCOMPtr<nsIEventTarget> mSyncLoopTarget;
@@ -1678,6 +1729,7 @@ ScriptExecutorRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
     if (NS_FAILED(loadInfo.mLoadResult)) {
       scriptloader::ReportLoadError(aCx, loadInfo.mURL, loadInfo.mLoadResult,
                                     false);
+      aWorkerPrivate->MaybeDispatchLoadFailedRunnable();
       return true;
     }
 
@@ -1690,6 +1742,9 @@ ScriptExecutorRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
     if (mScriptLoader.mWorkerScriptType == DebuggerScript) {
       options.setVersion(JSVERSION_LATEST);
     }
+
+    MOZ_ASSERT(loadInfo.mMutedErrorFlag.isSome());
+    options.setMutedErrors(loadInfo.mMutedErrorFlag.valueOr(true));
 
     JS::SourceBufferHolder srcBuf(loadInfo.mScriptTextBuf,
                                   loadInfo.mScriptTextLength,

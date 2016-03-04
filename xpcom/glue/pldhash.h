@@ -17,10 +17,6 @@
 #include "mozilla/Types.h"
 #include "nscore.h"
 
-#ifdef PL_DHASHMETER
-#include <stdio.h>
-#endif
-
 #if defined(__GNUC__) && defined(__i386__)
 #define PL_DHASH_FASTCALL __attribute__ ((regparm (3),stdcall))
 #elif defined(XP_WIN)
@@ -28,33 +24,6 @@
 #else
 #define PL_DHASH_FASTCALL
 #endif
-
-/*
- * Table capacity limit; do not exceed.  The max capacity used to be 1<<23 but
- * that occasionally that wasn't enough.  Making it much bigger than 1<<26
- * probably isn't worthwhile -- tables that big are kind of ridiculous.  Also,
- * the growth operation will (deliberately) fail if |capacity * mEntrySize|
- * overflows a uint32_t, and mEntrySize is always at least 8 bytes.
- */
-#define PL_DHASH_MAX_CAPACITY           ((uint32_t)1 << 26)
-
-#define PL_DHASH_MIN_CAPACITY           8
-
-/*
- * Making this half of the max capacity ensures it'll fit. Nobody should need
- * an initial length anywhere nearly this large, anyway.
- */
-#define PL_DHASH_MAX_INITIAL_LENGTH     (PL_DHASH_MAX_CAPACITY / 2)
-
-/* This gives a default initial capacity of 8. */
-#define PL_DHASH_DEFAULT_INITIAL_LENGTH 4
-
-/*
- * Multiplicative hash uses an unsigned 32 bit integer and the golden ratio,
- * expressed as a fixed-point 32-bit fraction.
- */
-#define PL_DHASH_BITS           32
-#define PL_DHASH_GOLDEN_RATIO   0x9E3779B9U
 
 typedef uint32_t PLDHashNumber;
 
@@ -74,10 +43,10 @@ struct PLDHashTableOps;
  *
  * Each hash table sub-type should make its entry type a subclass of
  * PLDHashEntryHdr. The mKeyHash member contains the result of multiplying the
- * hash code returned from the hashKey callback (see below) by
- * PL_DHASH_GOLDEN_RATIO, then constraining the result to avoid the magic 0 and
- * 1 values. The stored mKeyHash value is table size invariant, and it is
- * maintained automatically -- users need never access it.
+ * hash code returned from the hashKey callback (see below) by kGoldenRatio,
+ * then constraining the result to avoid the magic 0 and 1 values. The stored
+ * mKeyHash value is table size invariant, and it is maintained automatically
+ * -- users need never access it.
  */
 struct PLDHashEntryHdr
 {
@@ -87,62 +56,155 @@ private:
   PLDHashNumber mKeyHash;
 };
 
-/*
- * These are the codes returned by PLDHashEnumerator functions, which control
- * PL_DHashTableEnumerate's behavior.
- */
-enum PLDHashOperator
-{
-  PL_DHASH_NEXT = 0,          /* enumerator says continue */
-  PL_DHASH_STOP = 1,          /* enumerator says stop */
-  PL_DHASH_REMOVE = 2         /* enumerator says remove */
-};
-
-/*
- * Enumerate entries in table using etor:
- *
- *   count = PL_DHashTableEnumerate(table, etor, arg);
- *
- * PL_DHashTableEnumerate calls etor like so:
- *
- *   op = etor(table, entry, number, arg);
- *
- * where number is a zero-based ordinal assigned to live entries according to
- * their order in aTable->mEntryStore.
- *
- * The return value, op, is treated as a set of flags.  If op is PL_DHASH_NEXT,
- * then continue enumerating.  If op contains PL_DHASH_REMOVE, then clear (via
- * aTable->mOps->clearEntry) and free entry.  Then we check whether op contains
- * PL_DHASH_STOP; if so, stop enumerating and return the number of live entries
- * that were enumerated so far.  Return the total number of live entries when
- * enumeration completes normally.
- *
- * If etor calls PL_DHashTableAdd or PL_DHashTableRemove on table, it must
- * return PL_DHASH_STOP; otherwise undefined behavior results.
- *
- * If any enumerator returns PL_DHASH_REMOVE, aTable->mEntryStore may be shrunk
- * or compressed after enumeration, but before PL_DHashTableEnumerate returns.
- * Such an enumerator therefore can't safely set aside entry pointers, but an
- * enumerator that never returns PL_DHASH_REMOVE can set pointers to entries
- * aside, e.g., to avoid copying live entries into an array of the entry type.
- * Copying entry pointers is cheaper, and safe so long as the caller of such a
- * "stable" Enumerate doesn't use the set-aside pointers after any call either
- * to PL_DHashTableAdd or PL_DHashTableRemove, or to an "unstable" form of
- * Enumerate, which might grow or shrink mEntryStore.
- *
- * If your enumerator wants to remove certain entries, but set aside pointers
- * to other entries that it retains, it can use PL_DHashTableRawRemove on the
- * entries to be removed, returning PL_DHASH_NEXT to skip them.  Likewise, if
- * you want to remove entries, but for some reason you do not want mEntryStore
- * to be shrunk or compressed, you can call PL_DHashTableRawRemove safely on
- * the entry being enumerated, rather than returning PL_DHASH_REMOVE.
- */
-typedef PLDHashOperator (*PLDHashEnumerator)(PLDHashTable* aTable,
-                                             PLDHashEntryHdr* aHdr,
-                                             uint32_t aNumber, void* aArg);
-
 typedef size_t (*PLDHashSizeOfEntryExcludingThisFun)(
   PLDHashEntryHdr* aHdr, mozilla::MallocSizeOf aMallocSizeOf, void* aArg);
+
+#ifdef DEBUG
+
+// This class does three kinds of checking:
+//
+// - that calls to one of |mOps| or to an enumerator do not cause re-entry into
+//   the table in an unsafe way;
+//
+// - that multiple threads do not access the table in an unsafe way;
+//
+// - that a table marked as immutable is not modified.
+//
+// "Safe" here means that multiple concurrent read operations are ok, but a
+// write operation (i.e. one that can cause the entry storage to be reallocated
+// or destroyed) cannot safely run concurrently with another read or write
+// operation. This meaning of "safe" is only partial; for example, it does not
+// cover whether a single entry in the table is modified by two separate
+// threads. (Doing such checking would be much harder.)
+//
+// It does this with two variables:
+//
+// - mState, which embodies a tri-stage tagged union with the following
+//   variants:
+//   - Idle
+//   - Read(n), where 'n' is the number of concurrent read operations
+//   - Write
+//
+// - mIsWritable, which indicates if the table is mutable.
+//
+class Checker
+{
+public:
+  MOZ_CONSTEXPR Checker() : mState(kIdle), mIsWritable(1) {}
+
+  Checker& operator=(Checker&& aOther) {
+    // Atomic<> doesn't have an |operator=(Atomic<>&&)|.
+    mState = uint32_t(aOther.mState);
+    mIsWritable = uint32_t(aOther.mIsWritable);
+
+    aOther.mState = kIdle;
+
+    return *this;
+  }
+
+  static bool IsIdle(uint32_t aState)  { return aState == kIdle; }
+  static bool IsRead(uint32_t aState)  { return kRead1 <= aState &&
+                                                aState <= kReadMax; }
+  static bool IsRead1(uint32_t aState) { return aState == kRead1; }
+  static bool IsWrite(uint32_t aState) { return aState == kWrite; }
+
+  bool IsIdle() const { return mState == kIdle; }
+
+  bool IsWritable() const { return !!mIsWritable; }
+
+  void SetNonWritable() { mIsWritable = 0; }
+
+  // NOTE: the obvious way to implement these functions is to (a) check
+  // |mState| is reasonable, and then (b) update |mState|. But the lack of
+  // atomicity in such an implementation can cause problems if we get unlucky
+  // thread interleaving between (a) and (b).
+  //
+  // So instead for |mState| we are careful to (a) first get |mState|'s old
+  // value and assign it a new value in single atomic operation, and only then
+  // (b) check the old value was reasonable. This ensures we don't have
+  // interleaving problems.
+  //
+  // For |mIsWritable| we don't need to be as careful because it can only in
+  // transition in one direction (from writable to non-writable).
+
+  void StartReadOp()
+  {
+    uint32_t oldState = mState++;     // this is an atomic increment
+    MOZ_ASSERT(IsIdle(oldState) || IsRead(oldState));
+    MOZ_ASSERT(oldState < kReadMax);  // check for overflow
+  }
+
+  void EndReadOp()
+  {
+    uint32_t oldState = mState--;     // this is an atomic decrement
+    MOZ_ASSERT(IsRead(oldState));
+  }
+
+  void StartWriteOp()
+  {
+    MOZ_ASSERT(IsWritable());
+    uint32_t oldState = mState.exchange(kWrite);
+    MOZ_ASSERT(IsIdle(oldState));
+  }
+
+  void EndWriteOp()
+  {
+    // Check again that the table is writable, in case it was marked as
+    // non-writable just after the IsWritable() assertion in StartWriteOp()
+    // occurred.
+    MOZ_ASSERT(IsWritable());
+    uint32_t oldState = mState.exchange(kIdle);
+    MOZ_ASSERT(IsWrite(oldState));
+  }
+
+  void StartIteratorRemovalOp()
+  {
+    // When doing removals at the end of iteration, we go from Read1 state to
+    // Write and then back.
+    MOZ_ASSERT(IsWritable());
+    uint32_t oldState = mState.exchange(kWrite);
+    MOZ_ASSERT(IsRead1(oldState));
+  }
+
+  void EndIteratorRemovalOp()
+  {
+    // Check again that the table is writable, in case it was marked as
+    // non-writable just after the IsWritable() assertion in
+    // StartIteratorRemovalOp() occurred.
+    MOZ_ASSERT(IsWritable());
+    uint32_t oldState = mState.exchange(kRead1);
+    MOZ_ASSERT(IsWrite(oldState));
+  }
+
+  void StartDestructorOp()
+  {
+    // A destructor op is like a write, but the table doesn't need to be
+    // writable.
+    uint32_t oldState = mState.exchange(kWrite);
+    MOZ_ASSERT(IsIdle(oldState));
+  }
+
+  void EndDestructorOp()
+  {
+    uint32_t oldState = mState.exchange(kIdle);
+    MOZ_ASSERT(IsWrite(oldState));
+  }
+
+private:
+  // Things of note about the representation of |mState|.
+  // - The values between kRead1..kReadMax represent valid Read(n) values.
+  // - kIdle and kRead1 are deliberately chosen so that incrementing the -
+  //   former gives the latter.
+  // - 9999 concurrent readers should be enough for anybody.
+  static const uint32_t kIdle    = 0;
+  static const uint32_t kRead1   = 1;
+  static const uint32_t kReadMax = 9999;
+  static const uint32_t kWrite   = 10000;
+
+  mutable mozilla::Atomic<uint32_t> mState;
+  mutable mozilla::Atomic<uint32_t> mIsWritable;
+};
+#endif
 
 /*
  * A PLDHashTable may be allocated on the stack or within another structure or
@@ -169,39 +231,29 @@ private:
   uint32_t            mRemovedCount;  /* removed entry sentinels in table */
   uint32_t            mGeneration;    /* entry storage generation number */
   char*               mEntryStore;    /* entry storage; allocated lazily */
-#ifdef PL_DHASHMETER
-  struct PLDHashStats
-  {
-    uint32_t        mSearches;      /* total number of table searches */
-    uint32_t        mSteps;         /* hash chain links traversed */
-    uint32_t        mHits;          /* searches that found key */
-    uint32_t        mMisses;        /* searches that didn't find key */
-    uint32_t        mSearches;      /* number of Search() calls */
-    uint32_t        mAddMisses;     /* adds that miss, and do work */
-    uint32_t        mAddOverRemoved;/* adds that recycled a removed entry */
-    uint32_t        mAddHits;       /* adds that hit an existing entry */
-    uint32_t        mAddFailures;   /* out-of-memory during add growth */
-    uint32_t        mRemoveHits;    /* removes that hit, and do work */
-    uint32_t        mRemoveMisses;  /* useless removes that miss */
-    uint32_t        mRemoveFrees;   /* removes that freed entry directly */
-    uint32_t        mRemoveEnums;   /* removes done by Enumerate */
-    uint32_t        mGrows;         /* table expansions */
-    uint32_t        mShrinks;       /* table contractions */
-    uint32_t        mCompresses;    /* table compressions */
-    uint32_t        mEnumShrinks;   /* contractions after Enumerate */
-  } mStats;
-#endif
 
 #ifdef DEBUG
-  // We use an atomic counter here so that the various ++/-- operations can't
-  // get corrupted when a table is shared between threads. The associated
-  // assertions should in no way be taken to mean that thread safety is being
-  // validated! Proper synchronization and thread safety assertions must be
-  // employed by any consumers.
-  mutable mozilla::Atomic<uint32_t> mRecursionLevel;
+  mutable Checker mChecker;
 #endif
 
 public:
+  // Table capacity limit; do not exceed. The max capacity used to be 1<<23 but
+  // that occasionally that wasn't enough. Making it much bigger than 1<<26
+  // probably isn't worthwhile -- tables that big are kind of ridiculous.
+  // Also, the growth operation will (deliberately) fail if |capacity *
+  // mEntrySize| overflows a uint32_t, and mEntrySize is always at least 8
+  // bytes.
+  static const uint32_t kMaxCapacity = ((uint32_t)1 << 26);
+
+  static const uint32_t kMinCapacity = 8;
+
+  // Making this half of kMaxCapacity ensures it'll fit. Nobody should need an
+  // initial length anywhere nearly this large, anyway.
+  static const uint32_t kMaxInitialLength = kMaxCapacity / 2;
+
+  // This gives a default initial capacity of 8.
+  static const uint32_t kDefaultInitialLength = 4;
+
   // Initialize the table with |aOps| and |aEntrySize|. The table's initial
   // capacity is chosen such that |aLength| elements can be inserted without
   // rehashing; if |aLength| is a power-of-two, this capacity will be
@@ -211,7 +263,7 @@ public:
   //
   // This will crash if |aEntrySize| and/or |aLength| are too large.
   PLDHashTable(const PLDHashTableOps* aOps, uint32_t aEntrySize,
-               uint32_t aLength = PL_DHASH_DEFAULT_INITIAL_LENGTH);
+               uint32_t aLength = kDefaultInitialLength);
 
   PLDHashTable(PLDHashTable&& aOther)
       // These two fields are |const|. Initialize them here because the
@@ -222,7 +274,7 @@ public:
       // to the destructor, which the move assignment operator does.
     , mEntryStore(nullptr)
 #ifdef DEBUG
-    , mRecursionLevel(0)
+    , mChecker()
 #endif
   {
     *this = mozilla::Move(aOther);
@@ -256,10 +308,8 @@ public:
 
   void RawRemove(PLDHashEntryHdr* aEntry);
 
-  uint32_t Enumerate(PLDHashEnumerator aEtor, void* aArg);
-
   // This function is equivalent to
-  // ClearAndPrepareForLength(PL_DHASH_DEFAULT_INITIAL_LENGTH).
+  // ClearAndPrepareForLength(kDefaultInitialLength).
   void Clear();
 
   // This function clears the table's contents and frees its entry storage,
@@ -288,19 +338,19 @@ public:
 
   void ClearEntryStub(PLDHashEntryHdr* aEntry);
 
-#ifdef PL_DHASHMETER
-  void DumpMeter(PLDHashEnumerator aDump, FILE* aFp);
-#endif
-
-  // This is an iterator for PLDHashtable. It is not safe to modify the
-  // table while it is being iterated over; on debug builds, attempting to do
-  // so will result in an assertion failure.
+  // This is an iterator for PLDHashtable. Assertions will detect some, but not
+  // all, mid-iteration table modifications that might invalidate (e.g.
+  // reallocate) the entry storage.
+  //
+  // Any element can be removed during iteration using Remove(). If any
+  // elements are removed, the table may be resized once iteration ends.
   //
   // Example usage:
   //
   //   for (auto iter = table.Iter(); !iter.Done(); iter.Next()) {
   //     auto entry = static_cast<FooEntry*>(iter.Get());
   //     // ... do stuff with |entry| ...
+  //     // ... possibly call iter.Remove() once ...
   //   }
   //
   // or:
@@ -308,6 +358,7 @@ public:
   //   for (PLDHashTable::Iterator iter(&table); !iter.Done(); iter.Next()) {
   //     auto entry = static_cast<FooEntry*>(iter.Get());
   //     // ... do stuff with |entry| ...
+  //     // ... possibly call iter.Remove() once ...
   //   }
   //
   // The latter form is more verbose but is easier to work with when
@@ -316,21 +367,32 @@ public:
   class Iterator
   {
   public:
-    explicit Iterator(const PLDHashTable* aTable);
+    explicit Iterator(PLDHashTable* aTable);
     Iterator(Iterator&& aOther);
     ~Iterator();
+
     bool Done() const;                // Have we finished?
     PLDHashEntryHdr* Get() const;     // Get the current entry.
     void Next();                      // Advance to the next entry.
 
+    // Remove the current entry. Must only be called once per entry, and Get()
+    // must not be called on that entry afterwards.
+    void Remove();
+
   protected:
-    const PLDHashTable* mTable;       // Main table pointer.
+    PLDHashTable* mTable;             // Main table pointer.
 
   private:
-    char* mCurrent;                   // Pointer to the current entry.
+    char* mStart;                     // The first entry.
     char* mLimit;                     // One past the last entry.
+    char* mCurrent;                   // Pointer to the current entry.
+    uint32_t mNexts;                  // Number of Next() calls.
+    uint32_t mNextsLimit;             // Next() call limit.
+
+    bool mHaveRemoved;                // Have any elements been removed?
 
     bool IsOnNonLiveEntry() const;
+    void MoveToNextEntry();
 
     Iterator() = delete;
     Iterator(const Iterator&) = delete;
@@ -338,45 +400,42 @@ public:
     Iterator& operator=(const Iterator&&) = delete;
   };
 
-  Iterator Iter() const { return Iterator(this); }
+  Iterator Iter() { return Iterator(this); }
 
-  // This is an iterator that allows elements to be removed during iteration.
-  // If any elements are removed, the table may be resized once iteration ends.
-  // Its usage is similar to that of Iterator, with the addition that Remove()
-  // can be called once per element.
-  class RemovingIterator : public Iterator
+  // Use this if you need to initialize an Iterator in a const method. If you
+  // use this case, you should not call Remove() on the iterator.
+  Iterator ConstIter() const
   {
-  public:
-    explicit RemovingIterator(PLDHashTable* aTable);
-    RemovingIterator(RemovingIterator&& aOther);
-    ~RemovingIterator();
-
-    // Remove the current entry. Must only be called once per entry, and Get()
-    // must not be called on that entry afterwards.
-    void Remove();
-
-  private:
-    bool mHaveRemoved;      // Have any elements been removed?
-
-    RemovingIterator() = delete;
-    RemovingIterator(const RemovingIterator&) = delete;
-    RemovingIterator& operator=(const RemovingIterator&) = delete;
-    RemovingIterator& operator=(const RemovingIterator&&) = delete;
-  };
-
-  RemovingIterator RemovingIter() const
-  {
-    return RemovingIterator(const_cast<PLDHashTable*>(this));
+    return Iterator(const_cast<PLDHashTable*>(this));
   }
 
 private:
+  // Multiplicative hash uses an unsigned 32 bit integer and the golden ratio,
+  // expressed as a fixed-point 32-bit fraction.
+  static const uint32_t kHashBits = 32;
+  static const uint32_t kGoldenRatio = 0x9E3779B9U;
+
+  static uint32_t HashShift(uint32_t aEntrySize, uint32_t aLength);
+
+  static const PLDHashNumber kCollisionFlag = 1;
+
   static bool EntryIsFree(PLDHashEntryHdr* aEntry);
+  static bool EntryIsRemoved(PLDHashEntryHdr* aEntry);
+  static bool EntryIsLive(PLDHashEntryHdr* aEntry);
+  static void MarkEntryFree(PLDHashEntryHdr* aEntry);
+  static void MarkEntryRemoved(PLDHashEntryHdr* aEntry);
+
+  PLDHashNumber Hash1(PLDHashNumber aHash0);
+  void Hash2(PLDHashNumber aHash, uint32_t& aHash2Out, uint32_t& aSizeMaskOut);
+
+  static bool MatchEntryKeyhash(PLDHashEntryHdr* aEntry, PLDHashNumber aHash);
+  PLDHashEntryHdr* AddressEntry(uint32_t aIndex);
 
   // We store mHashShift rather than sizeLog2 to optimize the collision-free
   // case in SearchTable.
   uint32_t CapacityFromHashShift() const
   {
-    return ((uint32_t)1 << (PL_DHASH_BITS - mHashShift));
+    return ((uint32_t)1 << (kHashBits - mHashShift));
   }
 
   PLDHashNumber ComputeKeyHash(const void* aKey);
@@ -560,14 +619,9 @@ PL_DHashTableRemove(PLDHashTable* aTable, const void* aKey);
  * NB: this is a "raw" or low-level routine, intended to be used only where
  * the inefficiency of a full PL_DHashTableRemove (which rehashes in order
  * to find the entry given its key) is not tolerable.  This function does not
- * shrink the table if it is underloaded.  It does not update mStats #ifdef
- * PL_DHASHMETER, either.
+ * shrink the table if it is underloaded.
  */
 void PL_DHashTableRawRemove(PLDHashTable* aTable, PLDHashEntryHdr* aEntry);
-
-uint32_t
-PL_DHashTableEnumerate(PLDHashTable* aTable, PLDHashEnumerator aEtor,
-                       void* aArg);
 
 /**
  * Measure the size of the table's entry storage, and if
@@ -604,11 +658,6 @@ size_t PL_DHashTableSizeOfIncludingThis(
  * mutations will cause assertions.
  */
 void PL_DHashMarkTableImmutable(PLDHashTable* aTable);
-#endif
-
-#ifdef PL_DHASHMETER
-void PL_DHashTableDumpMeter(PLDHashTable* aTable,
-                            PLDHashEnumerator aDump, FILE* aFp);
 #endif
 
 #endif /* pldhash_h___ */

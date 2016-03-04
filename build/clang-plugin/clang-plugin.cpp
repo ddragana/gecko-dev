@@ -29,6 +29,14 @@ typedef ASTConsumer *ASTConsumerPtr;
 
 namespace {
 
+QualType GetCallReturnType(const CallExpr *expr) {
+#if CLANG_VERSION_FULL >= 307
+  return expr->getCallReturnType(expr->getCalleeDecl()->getASTContext());
+#else
+  return expr->getCallReturnType();
+#endif
+}
+
 using namespace clang::ast_matchers;
 class DiagnosticsMatcher {
 public:
@@ -172,6 +180,11 @@ bool isIgnoredPathForImplicitCtor(const Decl *decl) {
         begin->compare_lower(StringRef("graphite2")) == 0) {
       return true;
     }
+    if (begin->compare_lower(StringRef("chromium")) == 0) {
+      // Ignore security/sandbox/chromium but not ipc/chromium.
+      ++begin;
+      return begin != end && begin->compare_lower(StringRef("sandbox")) == 0;
+    }
   }
   return false;
 }
@@ -225,6 +238,25 @@ public:
       return false;
 
     return attr->getAnnotation() == spelling;
+  }
+
+  void HandleUnusedExprResult(const Stmt *stmt) {
+    const Expr* E = dyn_cast_or_null<Expr>(stmt);
+    if (E) {
+      // XXX It would be nice if we could use getAsTagDecl,
+      // but our version of clang is too old.
+      // (getAsTagDecl would also cover enums etc.)
+      QualType T = E->getType();
+      CXXRecordDecl *decl = T->getAsCXXRecordDecl();
+      if (decl) {
+        decl = decl->getDefinition();
+        if (decl && hasCustomAnnotation(decl, "moz_must_use")) {
+          unsigned errorID = Diag.getDiagnosticIDs()->getCustomDiagID(
+            DiagnosticIDs::Error, "Unused MOZ_MUST_USE value of type %0");
+          Diag.Report(E->getLocStart(), errorID) << T;
+        }
+      }
+    }
   }
 
   bool VisitCXXRecordDecl(CXXRecordDecl *d) {
@@ -307,6 +339,41 @@ public:
       }
     }
 
+    return true;
+  }
+
+  bool VisitSwitchCase(SwitchCase* stmt) {
+    HandleUnusedExprResult(stmt->getSubStmt());
+    return true;
+  }
+  bool VisitCompoundStmt(CompoundStmt* stmt) {
+    for (CompoundStmt::body_iterator it = stmt->body_begin(), e = stmt->body_end();
+         it != e; ++it) {
+      HandleUnusedExprResult(*it);
+    }
+    return true;
+  }
+  bool VisitIfStmt(IfStmt* Stmt) {
+    HandleUnusedExprResult(Stmt->getThen());
+    HandleUnusedExprResult(Stmt->getElse());
+    return true;
+  }
+  bool VisitWhileStmt(WhileStmt* Stmt) {
+    HandleUnusedExprResult(Stmt->getBody());
+    return true;
+  }
+  bool VisitDoStmt(DoStmt* Stmt) {
+    HandleUnusedExprResult(Stmt->getBody());
+    return true;
+  }
+  bool VisitForStmt(ForStmt* Stmt) {
+    HandleUnusedExprResult(Stmt->getBody());
+    HandleUnusedExprResult(Stmt->getInit());
+    HandleUnusedExprResult(Stmt->getInc());
+    return true;
+  }
+  bool VisitBinComma(BinaryOperator* Op) {
+    HandleUnusedExprResult(Op->getLHS());
     return true;
   }
 };
@@ -784,7 +851,7 @@ void DiagnosticsMatcher::ScopeChecker::run(
     noteInferred(expr->getAllocatedType(), Diag);
   } else if (const CallExpr *expr =
       Result.Nodes.getNodeAs<CallExpr>("node")) {
-    QualType badType = expr->getCallReturnType()->getPointeeType();
+    QualType badType = GetCallReturnType(expr)->getPointeeType();
     Diag.Report(expr->getLocStart(), errorID) << badType;
     noteInferred(badType, Diag);
   }
@@ -837,7 +904,7 @@ void DiagnosticsMatcher::NonHeapClassChecker::run(
     Diag.Report(expr->getStartLoc(), stackID) << expr->getAllocatedType();
     noteInferred(expr->getAllocatedType(), Diag);
   } else if (const CallExpr *expr = Result.Nodes.getNodeAs<CallExpr>("node")) {
-    QualType badType = expr->getCallReturnType()->getPointeeType();
+    QualType badType = GetCallReturnType(expr)->getPointeeType();
     Diag.Report(expr->getLocStart(), stackID) << badType;
     noteInferred(badType, Diag);
   }
@@ -984,12 +1051,13 @@ class MozCheckAction : public PluginASTAction {
 public:
   ASTConsumerPtr CreateASTConsumer(CompilerInstance &CI, StringRef fileName) override {
 #if CLANG_VERSION_FULL >= 306
-    std::unique_ptr<MozChecker> checker(make_unique<MozChecker>(CI));
+    std::unique_ptr<MozChecker> checker(llvm::make_unique<MozChecker>(CI));
+    ASTConsumerPtr other(checker->getOtherConsumer());
 
-    std::vector<std::unique_ptr<ASTConsumer>> consumers;
+    std::vector<ASTConsumerPtr> consumers;
     consumers.push_back(std::move(checker));
-    consumers.push_back(checker->getOtherConsumer());
-    return make_unique<MultiplexConsumer>(std::move(consumers));
+    consumers.push_back(std::move(other));
+    return llvm::make_unique<MultiplexConsumer>(std::move(consumers));
 #else
     MozChecker *checker = new MozChecker(CI);
 

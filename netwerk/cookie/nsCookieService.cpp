@@ -39,6 +39,8 @@
 #include "prprf.h"
 #include "nsNetUtil.h"
 #include "nsNetCID.h"
+#include "nsISimpleEnumerator.h"
+#include "nsIInputStream.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsNetCID.h"
 #include "mozilla/storage.h"
@@ -47,6 +49,7 @@
 #include "mozilla/Telemetry.h"
 #include "nsIAppsService.h"
 #include "mozIApplication.h"
+#include "mozIApplicationClearPrivateDataParams.h"
 #include "nsIConsoleService.h"
 
 using namespace mozilla;
@@ -88,7 +91,6 @@ static nsCookieService *gCookieService;
 #define IDX_APP_ID 10
 #define IDX_BROWSER_ELEM 11
 
-static const int64_t kCookieStaleThreshold = 60 * PR_USEC_PER_SEC; // 1 minute in microseconds
 static const int64_t kCookiePurgeAge =
   int64_t(30 * 24 * 60 * 60) * PR_USEC_PER_SEC; // 30 days in microseconds
 
@@ -106,13 +108,6 @@ static const uint32_t kMaxNumberOfCookies = 3000;
 static const uint32_t kMaxCookiesPerHost  = 150;
 static const uint32_t kMaxBytesPerCookie  = 4096;
 static const uint32_t kMaxBytesPerPath    = 1024;
-
-// behavior pref constants
-static const uint32_t BEHAVIOR_ACCEPT        = 0; // allow all cookies
-static const uint32_t BEHAVIOR_REJECTFOREIGN = 1; // reject all third-party cookies
-static const uint32_t BEHAVIOR_REJECT        = 2; // reject all cookies
-static const uint32_t BEHAVIOR_LIMITFOREIGN  = 3; // reject third-party cookies unless the
-                                                  // eTLD already has at least one cookie
 
 // pref string constants
 static const char kPrefCookieBehavior[]     = "network.cookie.cookieBehavior";
@@ -596,7 +591,7 @@ public:
 
 NS_IMPL_ISUPPORTS(AppClearDataObserver, nsIObserver)
 
-} // anonymous namespace
+} // namespace
 
 size_t
 nsCookieKey::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
@@ -709,7 +704,7 @@ NS_IMPL_ISUPPORTS(nsCookieService,
 
 nsCookieService::nsCookieService()
  : mDBState(nullptr)
- , mCookieBehavior(BEHAVIOR_ACCEPT)
+ , mCookieBehavior(nsICookieService::BEHAVIOR_ACCEPT)
  , mThirdPartySession(false)
  , mMaxNumberOfCookies(kMaxNumberOfCookies)
  , mMaxCookiesPerHost(kMaxCookiesPerHost)
@@ -749,11 +744,11 @@ nsCookieService::Init()
 
   RegisterWeakMemoryReporter(this);
 
-  mObserverService = mozilla::services::GetObserverService();
-  NS_ENSURE_STATE(mObserverService);
-  mObserverService->AddObserver(this, "profile-before-change", true);
-  mObserverService->AddObserver(this, "profile-do-change", true);
-  mObserverService->AddObserver(this, "last-pb-context-exited", true);
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  NS_ENSURE_STATE(os);
+  os->AddObserver(this, "profile-before-change", true);
+  os->AddObserver(this, "profile-do-change", true);
+  os->AddObserver(this, "last-pb-context-exited", true);
 
   mPermissionService = do_GetService(NS_COOKIEPERMISSION_CONTRACTID);
   if (!mPermissionService) {
@@ -1356,10 +1351,14 @@ nsCookieService::HandleDBClosed(DBState* aDBState)
   COOKIE_LOGSTRING(LogLevel::Debug,
     ("HandleDBClosed(): DBState %x closed", aDBState));
 
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+
   switch (aDBState->corruptFlag) {
   case DBState::OK: {
     // Database is healthy. Notify of closure.
-    mObserverService->NotifyObservers(nullptr, "cookie-db-closed", nullptr);
+    if (os) {
+      os->NotifyObservers(nullptr, "cookie-db-closed", nullptr);
+    }
     break;
   }
   case DBState::CLOSING_FOR_REBUILD: {
@@ -1380,7 +1379,9 @@ nsCookieService::HandleDBClosed(DBState* aDBState)
     COOKIE_LOGSTRING(LogLevel::Warning,
       ("HandleDBClosed(): DBState %x encountered error rebuilding db; move to "
        "'cookies.sqlite.bak-rebuild' gave rv 0x%x", aDBState, rv));
-    mObserverService->NotifyObservers(nullptr, "cookie-db-closed", nullptr);
+    if (os) {
+      os->NotifyObservers(nullptr, "cookie-db-closed", nullptr);
+    }
     break;
   }
   }
@@ -1467,6 +1468,8 @@ nsCookieService::RebuildCorruptDB(DBState* aDBState)
   NS_ASSERTION(aDBState->corruptFlag == DBState::CLOSING_FOR_REBUILD,
     "should be in CLOSING_FOR_REBUILD state");
 
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+
   aDBState->corruptFlag = DBState::REBUILDING;
 
   if (mDefaultDBState != aDBState) {
@@ -1476,7 +1479,9 @@ nsCookieService::RebuildCorruptDB(DBState* aDBState)
     // do so now.
     COOKIE_LOGSTRING(LogLevel::Warning,
       ("RebuildCorruptDB(): DBState %x is stale, aborting", aDBState));
-    mObserverService->NotifyObservers(nullptr, "cookie-db-closed", nullptr);
+    if (os) {
+      os->NotifyObservers(nullptr, "cookie-db-closed", nullptr);
+    }
     return;
   }
 
@@ -1494,12 +1499,16 @@ nsCookieService::RebuildCorruptDB(DBState* aDBState)
     CleanupCachedStatements();
     CleanupDefaultDBConnection();
     mDefaultDBState->corruptFlag = DBState::OK;
-    mObserverService->NotifyObservers(nullptr, "cookie-db-closed", nullptr);
+    if (os) {
+      os->NotifyObservers(nullptr, "cookie-db-closed", nullptr);
+    }
     return;
   }
 
   // Notify observers that we're beginning the rebuild.
-  mObserverService->NotifyObservers(nullptr, "cookie-db-rebuilding", nullptr);
+  if (os) {
+    os->NotifyObservers(nullptr, "cookie-db-rebuilding", nullptr);
+  }
 
   // Enumerate the hash, and add cookies to the params array.
   mozIStorageAsyncStatement* stmt = aDBState->stmtInsert;
@@ -1782,8 +1791,9 @@ nsCookieService::SetCookieStringInternal(nsIURI             *aHostURI,
 void
 nsCookieService::NotifyRejected(nsIURI *aHostURI)
 {
-  if (mObserverService) {
-    mObserverService->NotifyObservers(aHostURI, "cookie-rejected", nullptr);
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  if (os) {
+    os->NotifyObservers(aHostURI, "cookie-rejected", nullptr);
   }
 }
 
@@ -1792,7 +1802,8 @@ nsCookieService::NotifyRejected(nsIURI *aHostURI)
 void
 nsCookieService::NotifyThirdParty(nsIURI *aHostURI, bool aIsAccepted, nsIChannel *aChannel)
 {
-  if (!mObserverService) {
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  if (!os) {
     return;
   }
 
@@ -1832,16 +1843,12 @@ nsCookieService::NotifyThirdParty(nsIURI *aHostURI, bool aIsAccepted, nsIChannel
     }
 
     nsAutoString referringHostUTF16 = NS_ConvertUTF8toUTF16(referringHost);
-    mObserverService->NotifyObservers(aHostURI,
-                                      topic,
-                                      referringHostUTF16.get());
+    os->NotifyObservers(aHostURI, topic, referringHostUTF16.get());
     return;
   } while (0);
 
   // This can fail for a number of reasons, in which kind we fallback to "?"
-  mObserverService->NotifyObservers(aHostURI,
-                                    topic,
-                                    MOZ_UTF16("?"));
+  os->NotifyObservers(aHostURI, topic, MOZ_UTF16("?"));
 }
 
 // notify observers that the cookie list changed. there are five possible
@@ -1858,8 +1865,10 @@ nsCookieService::NotifyChanged(nsISupports     *aSubject,
 {
   const char* topic = mDBState == mPrivateDBState ?
       "private-cookie-changed" : "cookie-changed";
-  if (mObserverService)
-    mObserverService->NotifyObservers(aSubject, topic, aData);
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  if (os) {
+    os->NotifyObservers(aSubject, topic, aData);
+  }
 }
 
 already_AddRefed<nsIArray>
@@ -2213,7 +2222,10 @@ nsCookieService::AsyncReadComplete()
   COOKIE_LOGSTRING(LogLevel::Debug, ("Read(): %ld cookies read",
                                   mDefaultDBState->cookieCount));
 
-  mObserverService->NotifyObservers(nullptr, "cookie-db-read", nullptr);
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  if (os) {
+    os->NotifyObservers(nullptr, "cookie-db-read", nullptr);
+  }
 }
 
 void
@@ -2755,8 +2767,9 @@ nsCookieService::GetCookieStringInternal(nsIURI *aHostURI,
 
     // all checks passed - add to list and check if lastAccessed stamp needs updating
     foundCookieList.AppendElement(cookie);
-    if (currentTimeInUsec - cookie->LastAccessed() > kCookieStaleThreshold)
+    if (cookie->IsStale()) {
       stale = true;
+    }
   }
 
   int32_t count = foundCookieList.Length();
@@ -2777,8 +2790,9 @@ nsCookieService::GetCookieStringInternal(nsIURI *aHostURI,
     for (int32_t i = 0; i < count; ++i) {
       cookie = foundCookieList.ElementAt(i);
 
-      if (currentTimeInUsec - cookie->LastAccessed() > kCookieStaleThreshold)
+      if (cookie->IsStale()) {
         UpdateCookieInList(cookie, currentTimeInUsec, paramsArray);
+      }
     }
     // Update the database now if necessary.
     if (paramsArray) {
@@ -2989,6 +3003,24 @@ nsCookieService::AddInternal(const nsCookieKey             &aKey,
       if (!aFromHttp && oldCookie->IsHttpOnly()) {
         COOKIE_LOGFAILURE(SET_COOKIE, aHostURI, aCookieHeader,
           "previously stored cookie is httponly; coming from script");
+        return;
+      }
+
+      // If the new cookie has the same value, expiry date, and isSecure,
+      // isSession, and isHttpOnly flags then we can just keep the old one.
+      // Only if any of these differ we would want to override the cookie.
+      if (oldCookie->Value().Equals(aCookie->Value()) &&
+          oldCookie->Expiry() == aCookie->Expiry() &&
+          oldCookie->IsSecure() == aCookie->IsSecure() &&
+          oldCookie->IsSession() == aCookie->IsSession() &&
+          oldCookie->IsHttpOnly() == aCookie->IsHttpOnly() &&
+          // We don't want to perform this optimization if the cookie is
+          // considered stale, since in this case we would need to update the
+          // database.
+          !oldCookie->IsStale()) {
+        // Update the last access time on the old cookie.
+        oldCookie->SetLastAccessed(aCookie->LastAccessed());
+        UpdateCookieOldestTime(mDBState, oldCookie);
         return;
       }
 
@@ -3451,22 +3483,22 @@ nsCookieService::CheckPrefs(nsIURI          *aHostURI,
   }
 
   // check default prefs
-  if (mCookieBehavior == BEHAVIOR_REJECT) {
+  if (mCookieBehavior == nsICookieService::BEHAVIOR_REJECT) {
     COOKIE_LOGFAILURE(aCookieHeader ? SET_COOKIE : GET_COOKIE, aHostURI, aCookieHeader, "cookies are disabled");
     return STATUS_REJECTED;
   }
 
   // check if cookie is foreign
   if (aIsForeign) {
-    if (mCookieBehavior == BEHAVIOR_ACCEPT && mThirdPartySession)
+    if (mCookieBehavior == nsICookieService::BEHAVIOR_ACCEPT && mThirdPartySession)
       return STATUS_ACCEPT_SESSION;
 
-    if (mCookieBehavior == BEHAVIOR_REJECTFOREIGN) {
+    if (mCookieBehavior == nsICookieService::BEHAVIOR_REJECT_FOREIGN) {
       COOKIE_LOGFAILURE(aCookieHeader ? SET_COOKIE : GET_COOKIE, aHostURI, aCookieHeader, "context is third party");
       return STATUS_REJECTED;
     }
 
-    if (mCookieBehavior == BEHAVIOR_LIMITFOREIGN) {
+    if (mCookieBehavior == nsICookieService::BEHAVIOR_LIMIT_FOREIGN) {
       uint32_t priorCookieCount = 0;
       nsAutoCString hostFromURI;
       aHostURI->GetHost(hostFromURI);
@@ -3990,7 +4022,7 @@ struct GetCookiesForAppStruct {
   {}
 };
 
-} // anonymous namespace
+} // namespace
 
 /* static */ PLDHashOperator
 nsCookieService::GetCookiesForApp(nsCookieEntry* entry, void* arg)
@@ -4232,6 +4264,15 @@ bindCookieParameters(mozIStorageBindingParamsArray *aParamsArray,
 }
 
 void
+nsCookieService::UpdateCookieOldestTime(DBState* aDBState,
+                                        nsCookie* aCookie)
+{
+  if (aCookie->LastAccessed() < aDBState->cookieOldestTime) {
+    aDBState->cookieOldestTime = aCookie->LastAccessed();
+  }
+}
+
+void
 nsCookieService::AddCookieToList(const nsCookieKey             &aKey,
                                  nsCookie                      *aCookie,
                                  DBState                       *aDBState,
@@ -4250,8 +4291,7 @@ nsCookieService::AddCookieToList(const nsCookieKey             &aKey,
   ++aDBState->cookieCount;
 
   // keep track of the oldest cookie, for when it comes time to purge
-  if (aCookie->LastAccessed() < aDBState->cookieOldestTime)
-    aDBState->cookieOldestTime = aCookie->LastAccessed();
+  UpdateCookieOldestTime(aDBState, aCookie);
 
   // if it's a non-session cookie and hasn't just been read from the db, write it out.
   if (aWriteToDB && !aCookie->IsSession() && aDBState->dbConn) {

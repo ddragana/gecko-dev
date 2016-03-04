@@ -40,10 +40,14 @@ const PREF_FHR_ENABLED = "datareporting.healthreport.service.enabled";
 const PREF_FHR_UPLOAD_ENABLED = "datareporting.healthreport.uploadEnabled";
 const PREF_SESSIONS_BRANCH = "datareporting.sessions.";
 const PREF_UNIFIED = PREF_BRANCH + "unified";
+const PREF_UNIFIED_OPTIN = PREF_BRANCH + "unifiedIsOptIn";
 
 // Whether the FHR/Telemetry unification features are enabled.
 // Changing this pref requires a restart.
 const IS_UNIFIED_TELEMETRY = Preferences.get(PREF_UNIFIED, false);
+// This preference allows to leave unified Telemetry behavior on only for people that
+// opted into Telemetry. Changing this pref requires a restart.
+const IS_UNIFIED_OPTIN = Preferences.get(PREF_UNIFIED_OPTIN, false);
 
 const PING_FORMAT_VERSION = 4;
 
@@ -122,6 +126,7 @@ function configureLogging() {
  */
 let Policy = {
   now: () => new Date(),
+  generatePingId: () => Utils.generateUUID(),
 }
 
 this.EXPORTED_SYMBOLS = ["TelemetryController"];
@@ -143,12 +148,7 @@ this.TelemetryController = Object.freeze({
    * Used only for testing purposes.
    */
   reset: function() {
-    Impl._clientID = null;
-    Impl._detachObservers();
-    TelemetryStorage.reset();
-    TelemetrySend.reset();
-
-    return this.setup();
+    return Impl.reset();
   },
   /**
    * Used only for testing purposes.
@@ -190,13 +190,14 @@ this.TelemetryController = Object.freeze({
    * @param {Boolean} [aOptions.addEnvironment=false] true if the ping should contain the
    *                  environment data.
    * @param {Object}  [aOptions.overrideEnvironment=null] set to override the environment data.
-   * @returns {Promise} A promise that resolves with the ping id once the ping is stored or sent.
+   * @returns {Promise} Test-only - a promise that resolves with the ping id once the ping is stored or sent.
    */
   submitExternalPing: function(aType, aPayload, aOptions = {}) {
     aOptions.addClientId = aOptions.addClientId || false;
     aOptions.addEnvironment = aOptions.addEnvironment || false;
 
-    return Impl.submitExternalPing(aType, aPayload, aOptions);
+    const testOnly = Impl.submitExternalPing(aType, aPayload, aOptions);
+    return testOnly;
   },
 
   /**
@@ -416,7 +417,7 @@ let Impl = {
     // Fill the common ping fields.
     let pingData = {
       type: aType,
-      id: Utils.generateUUID(),
+      id: Policy.generatePingId(),
       creationDate: (Policy.now()).toISOString(),
       version: PING_FORMAT_VERSION,
       application: this._getApplicationSection(),
@@ -456,7 +457,7 @@ let Impl = {
    * @param {Boolean} [aOptions.addEnvironment=false] true if the ping should contain the
    *                  environment data.
    * @param {Object}  [aOptions.overrideEnvironment=null] set to override the environment data.
-   * @returns {Promise} A promise that is resolved with the ping id once the ping is stored or sent.
+   * @returns {Promise} Test-only - a promise that is resolved with the ping id once the ping is stored or sent.
    */
   submitExternalPing: function send(aType, aPayload, aOptions) {
     this._log.trace("submitExternalPing - type: " + aType + ", aOptions: " + JSON.stringify(aOptions));
@@ -593,7 +594,7 @@ let Impl = {
     const enabled = Preferences.get(PREF_ENABLED, false);
 
     // Enable base Telemetry recording, if needed.
-    Telemetry.canRecordBase = enabled || IS_UNIFIED_TELEMETRY;
+    Telemetry.canRecordBase = enabled || (IS_UNIFIED_TELEMETRY && !IS_UNIFIED_OPTIN);
 
 #ifdef MOZILLA_OFFICIAL
     // Enable extended telemetry if:
@@ -806,6 +807,7 @@ let Impl = {
       haveDelayedInitTask: !!this._delayedInitTask,
       shutdownBarrier: this._shutdownBarrier.state,
       connectionsBarrier: this._connectionsBarrier.state,
+      sendModule: TelemetrySend.getShutdownState(),
     };
   },
 
@@ -860,4 +862,18 @@ let Impl = {
 
     return ping;
   },
+
+  reset: Task.async(function*() {
+    this._clientID = null;
+    this._detachObservers();
+
+    // We need to kick of the controller setup first for tests that check the
+    // cached client id.
+    let controllerSetup = this.setupTelemetry(true);
+
+    yield TelemetrySend.reset();
+    yield TelemetryStorage.reset();
+
+    yield controllerSetup;
+  }),
 };

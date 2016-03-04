@@ -33,6 +33,8 @@
 #include "nsISupportsPriority.h"
 #include "nsIWebNavigation.h"
 #include "nsNetUtil.h"
+#include "nsIProtocolHandler.h"
+#include "nsIInputStream.h"
 #include "nsPresContext.h"
 #include "nsPrintfCString.h"
 #include "nsStyleSet.h"
@@ -123,19 +125,14 @@ FontFaceSet::FontFaceSet(nsPIDOMWindow* aWindow, nsIDocument* aDocument)
   mUserFontSet = new UserFontSet(this);
 }
 
-static PLDHashOperator DestroyIterator(nsPtrHashKey<nsFontFaceLoader>* aKey,
-                                       void* aUserArg)
-{
-  aKey->GetKey()->Cancel();
-  return PL_DHASH_REMOVE;
-}
-
 FontFaceSet::~FontFaceSet()
 {
   MOZ_COUNT_DTOR(FontFaceSet);
 
   Disconnect();
-  mLoaders.EnumerateEntries(DestroyIterator, nullptr);
+  for (auto it = mLoaders.Iter(); !it.Done(); it.Next()) {
+    it.Get()->GetKey()->Cancel();
+  }
 }
 
 JSObject*
@@ -535,16 +532,18 @@ FontFaceSet::Size()
   return std::min<size_t>(total, INT32_MAX);
 }
 
-FontFaceSetIterator*
+already_AddRefed<FontFaceSetIterator>
 FontFaceSet::Entries()
 {
-  return new FontFaceSetIterator(this, true);
+  nsRefPtr<FontFaceSetIterator> it = new FontFaceSetIterator(this, true);
+  return it.forget();
 }
 
-FontFaceSetIterator*
+already_AddRefed<FontFaceSetIterator>
 FontFaceSet::Values()
 {
-  return new FontFaceSetIterator(this, false);
+  nsRefPtr<FontFaceSetIterator> it = new FontFaceSetIterator(this, false);
+  return it.forget();
 }
 
 void
@@ -1785,3 +1784,6 @@ FontFaceSet::UserFontSet::CreateUserFontEntry(
                         aFeatureSettings, aLanguageOverride, aUnicodeRanges);
   return entry.forget();
 }
+
+#undef LOG_ENABLED
+#undef LOG

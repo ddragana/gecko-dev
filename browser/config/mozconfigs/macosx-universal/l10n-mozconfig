@@ -1,4 +1,5 @@
 . "$topsrcdir/browser/config/mozconfigs/common"
+. "$topsrcdir/build/macosx/mozconfig.common"
 
 ac_add_options --with-l10n-base=../../../l10n
 ac_add_options --enable-update-channel=${MOZ_UPDATE_CHANNEL}
@@ -9,8 +10,7 @@ if test "${MOZ_UPDATE_CHANNEL}" = "nightly"; then
 ac_add_options --with-macbundlename-prefix=Firefox
 fi
 
-. "$topsrcdir/build/mozconfig.cache"
-
 export MOZILLA_OFFICIAL=1
 
 . "$topsrcdir/build/mozconfig.common.override"
+. "$topsrcdir/build/mozconfig.cache"

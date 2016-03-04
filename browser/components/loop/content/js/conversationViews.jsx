@@ -4,6 +4,7 @@
 
 var loop = loop || {};
 loop.conversationViews = (function(mozL10n) {
+  "use strict";
 
   var CALL_STATES = loop.store.CALL_STATES;
   var CALL_TYPES = loop.shared.utils.CALL_TYPES;
@@ -14,7 +15,6 @@ loop.conversationViews = (function(mozL10n) {
   var sharedUtils = loop.shared.utils;
   var sharedViews = loop.shared.views;
   var sharedMixins = loop.shared.mixins;
-  var sharedModels = loop.shared.models;
 
   // This duplicates a similar function in contacts.jsx that isn't used in the
   // conversation window. If we get too many of these, we might want to consider
@@ -459,7 +459,7 @@ loop.conversationViews = (function(mozL10n) {
     _onEmailLinkReceived: function() {
       var emailLink = this.getStoreState().emailLink;
       var contactEmail = _getPreferredEmail(this.props.contact).value;
-      sharedUtils.composeCallUrlEmail(emailLink, contactEmail);
+      sharedUtils.composeCallUrlEmail(emailLink, contactEmail, null, "callfailed");
       this.closeWindow();
     },
 
@@ -659,6 +659,7 @@ loop.conversationViews = (function(mozL10n) {
               <div className="video_wrapper remote_wrapper">
                 <div className="video_inner remote focus-stream">
                   <sharedViews.MediaView displayAvatar={!this.shouldRenderRemoteVideo()}
+                    isLoading={false}
                     mediaType="remote"
                     posterUrl={this.props.remotePosterUrl}
                     srcVideoObject={this.state.remoteSrcVideoObject} />
@@ -666,6 +667,7 @@ loop.conversationViews = (function(mozL10n) {
               </div>
               <div className={localStreamClasses}>
                 <sharedViews.MediaView displayAvatar={!this.props.video.enabled}
+                  isLoading={false}
                   mediaType="local"
                   posterUrl={this.props.localPosterUrl}
                   srcVideoObject={this.state.localSrcVideoObject} />
@@ -674,6 +676,7 @@ loop.conversationViews = (function(mozL10n) {
             <loop.shared.views.ConversationToolbar
               audio={this.props.audio}
               dispatcher={this.props.dispatcher}
+              edit={{ visible: false, enabled: false }}
               hangup={this.hangup}
               publishStream={this.publishStream}
               video={this.props.video} />
@@ -697,7 +700,8 @@ loop.conversationViews = (function(mozL10n) {
 
     propTypes: {
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
-      mozLoop: React.PropTypes.object.isRequired
+      mozLoop: React.PropTypes.object.isRequired,
+      onCallTerminated: React.PropTypes.func.isRequired
     },
 
     getInitialState: function() {
@@ -714,19 +718,6 @@ loop.conversationViews = (function(mozL10n) {
     _isCancellable: function() {
       return this.state.callState !== CALL_STATES.INIT &&
              this.state.callState !== CALL_STATES.GATHER;
-    },
-
-    /**
-     * Used to setup and render the feedback view.
-     */
-    _renderFeedbackView: function() {
-      this.setTitle(mozL10n.get("conversation_has_ended"));
-
-      return (
-        <sharedViews.FeedbackView
-          onAfterFeedbackReceived={this._closeWindow.bind(this)}
-        />
-      );
     },
 
     _renderViewFromCallType: function() {
@@ -754,6 +745,14 @@ loop.conversationViews = (function(mozL10n) {
       // Otherwise we're still gathering or connecting, so
       // don't display anything.
       return null;
+    },
+
+    componentDidUpdate: function(prevProps, prevState) {
+      // Handle timestamp and window closing only when the call has terminated.
+      if (prevState.callState === CALL_STATES.ONGOING &&
+          this.state.callState === CALL_STATES.FINISHED) {
+        this.props.onCallTerminated();
+      }
     },
 
     render: function() {
@@ -788,7 +787,10 @@ loop.conversationViews = (function(mozL10n) {
         }
         case CALL_STATES.FINISHED: {
           this.play("terminated");
-          return this._renderFeedbackView();
+
+          // When conversation ended we either display a feedback form or
+          // close the window. This is decided in the AppControllerView.
+          return null;
         }
         case CALL_STATES.INIT: {
           // We know what we are, but we haven't got the data yet.

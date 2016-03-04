@@ -407,7 +407,7 @@ BufferTextureHost::UpdatedInternal(const nsIntRegion* aRegion)
   // If the last frame wasn't uploaded yet, and we -don't- have a partial update,
   // we still need to update the full surface.
   if (aRegion && !mNeedsFullUpdate) {
-    mMaybeUpdatedRegion = mMaybeUpdatedRegion.Or(mMaybeUpdatedRegion, *aRegion);
+    mMaybeUpdatedRegion.OrWith(*aRegion);
   } else {
     mNeedsFullUpdate = true;
   }
@@ -870,5 +870,5 @@ TextureParent::RecvRecycleTexture(const TextureFlags& aTextureFlags)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-} // namespace
-} // namespace
+} // namespace layers
+} // namespace mozilla

@@ -23,6 +23,7 @@
 #include "mozilla/net/DNS.h"
 #include "nsASocketHandler.h"
 #include "ASpdySession.h"
+#include "mozilla/Telemetry.h"
 
 #include "prerror.h"
 #include "nsAutoPtr.h"
@@ -158,6 +159,13 @@ public:
 
     uint64_t ByteCountReceived() override { return mInput.ByteCount(); }
     uint64_t ByteCountSent() override { return mOutput.ByteCount(); }
+    static void CloseSocket(PRFileDesc *aFd, bool aTelemetryEnabled);
+    static void SendPRBlockingTelemetry(PRIntervalTime aStart,
+        mozilla::Telemetry::ID aIDNormal,
+        mozilla::Telemetry::ID aIDShutdown,
+        mozilla::Telemetry::ID aIDConnectivityChange,
+        mozilla::Telemetry::ID aIDLinkChange,
+        mozilla::Telemetry::ID aIDOffline);
 protected:
 
     virtual ~nsSocketTransport();

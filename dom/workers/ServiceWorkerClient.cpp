@@ -9,6 +9,7 @@
 #include "ServiceWorkerContainer.h"
 
 #include "mozilla/dom/MessageEvent.h"
+#include "mozilla/dom/Navigator.h"
 #include "nsGlobalWindow.h"
 #include "nsIDocument.h"
 #include "WorkerPrivate.h"
@@ -28,7 +29,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ServiceWorkerClient)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-ServiceWorkerClientInfo::ServiceWorkerClientInfo(nsIDocument* aDoc)
+ServiceWorkerClientInfo::ServiceWorkerClientInfo(nsIDocument* aDoc,
+                                                 nsPIDOMWindow* aWindow)
   : mWindowId(0)
 {
   MOZ_ASSERT(aDoc);
@@ -53,7 +55,7 @@ ServiceWorkerClientInfo::ServiceWorkerClientInfo(nsIDocument* aDoc)
     NS_WARNING("Failed to get focus information.");
   }
 
-  nsRefPtr<nsGlobalWindow> outerWindow = static_cast<nsGlobalWindow*>(aDoc->GetWindow());
+  nsRefPtr<nsGlobalWindow> outerWindow = static_cast<nsGlobalWindow*>(aWindow);
   MOZ_ASSERT(outerWindow);
   if (!outerWindow->IsTopLevelWindow()) {
     mFrameType = FrameType::Nested;
@@ -107,7 +109,9 @@ public:
 
     nsRefPtr<ServiceWorkerContainer> container = navigator->ServiceWorker();
     AutoJSAPI jsapi;
-    jsapi.Init(window);
+    if (NS_WARN_IF(!jsapi.Init(window))) {
+      return NS_ERROR_FAILURE;
+    }
     JSContext* cx = jsapi.cx();
 
     return DispatchDOMEvent(cx, container);
@@ -125,10 +129,11 @@ private:
     closure.mClonedObjects.SwapElements(mClosure.mClonedObjects);
     MOZ_ASSERT(mClosure.mMessagePorts.IsEmpty());
     closure.mMessagePortIdentifiers.SwapElements(mClosure.mMessagePortIdentifiers);
+    closure.mParentWindow = do_QueryInterface(aTargetContainer->GetParentObject());
 
     JS::Rooted<JS::Value> messageData(aCx);
     if (!mBuffer.read(aCx, &messageData,
-                      WorkerStructuredCloneCallbacks(true))) {
+                      WorkerStructuredCloneCallbacks(true), &closure)) {
       xpc::Throw(aCx, NS_ERROR_DOM_DATA_CLONE_ERR);
       return NS_ERROR_FAILURE;
     }
@@ -160,7 +165,7 @@ private:
   }
 };
 
-} // anonymous namespace
+} // namespace
 
 void
 ServiceWorkerClient::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,

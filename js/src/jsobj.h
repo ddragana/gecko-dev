@@ -29,7 +29,7 @@
 
 namespace JS {
 struct ClassInfo;
-}
+} // namespace JS
 
 namespace js {
 
@@ -39,7 +39,7 @@ class Nursery;
 
 namespace gc {
 class RelocationOverlay;
-}
+} // namespace gc
 
 inline JSObject*
 CastAsObject(GetterOp op)
@@ -310,9 +310,7 @@ class JSObject : public js::gc::Cell
     }
     static MOZ_ALWAYS_INLINE void readBarrier(JSObject* obj);
     static MOZ_ALWAYS_INLINE void writeBarrierPre(JSObject* obj);
-    static MOZ_ALWAYS_INLINE void writeBarrierPost(JSObject* obj, void* cellp);
-    static MOZ_ALWAYS_INLINE void writeBarrierPostRelocate(JSObject* obj, void* cellp);
-    static MOZ_ALWAYS_INLINE void writeBarrierPostRemove(JSObject* obj, void* cellp);
+    static MOZ_ALWAYS_INLINE void writeBarrierPost(void* cellp, JSObject* prev, JSObject* next);
 
     /* Return the allocKind we would use if we were to tenure this object. */
     js::gc::AllocKind allocKindForTenure(const js::Nursery& nursery) const;
@@ -630,36 +628,26 @@ JSObject::writeBarrierPre(JSObject* obj)
 }
 
 /* static */ MOZ_ALWAYS_INLINE void
-JSObject::writeBarrierPost(JSObject* obj, void* cellp)
+JSObject::writeBarrierPost(void* cellp, JSObject* prev, JSObject* next)
 {
     MOZ_ASSERT(cellp);
-    if (IsNullTaggedPointer(obj))
+
+    // If the target needs an entry, add it.
+    js::gc::StoreBuffer* buffer;
+    if (!IsNullTaggedPointer(next) && (buffer = next->storeBuffer())) {
+        // If we know that the prev has already inserted an entry, we can skip
+        // doing the lookup to add the new entry.
+        if (!IsNullTaggedPointer(prev) && prev->storeBuffer()) {
+            buffer->assertHasCellEdge(static_cast<js::gc::Cell**>(cellp));
+            return;
+        }
+        buffer->putCellFromAnyThread(static_cast<js::gc::Cell**>(cellp));
         return;
-    MOZ_ASSERT(obj == *static_cast<JSObject**>(cellp));
-    js::gc::StoreBuffer* storeBuffer = obj->storeBuffer();
-    if (storeBuffer)
-        storeBuffer->putCellFromAnyThread(static_cast<js::gc::Cell**>(cellp));
-}
+    }
 
-/* static */ MOZ_ALWAYS_INLINE void
-JSObject::writeBarrierPostRelocate(JSObject* obj, void* cellp)
-{
-    MOZ_ASSERT(cellp);
-    MOZ_ASSERT(obj);
-    MOZ_ASSERT(obj == *static_cast<JSObject**>(cellp));
-    js::gc::StoreBuffer* storeBuffer = obj->storeBuffer();
-    if (storeBuffer)
-        storeBuffer->putCellFromAnyThread(static_cast<js::gc::Cell**>(cellp));
-}
-
-/* static */ MOZ_ALWAYS_INLINE void
-JSObject::writeBarrierPostRemove(JSObject* obj, void* cellp)
-{
-    MOZ_ASSERT(cellp);
-    MOZ_ASSERT(obj);
-    MOZ_ASSERT(obj == *static_cast<JSObject**>(cellp));
-    obj->shadowRuntimeFromAnyThread()->gcStoreBufferPtr()->unputCellFromAnyThread(
-        static_cast<js::gc::Cell**>(cellp));
+    // Remove the prev entry if the new value does not need it.
+    if (!IsNullTaggedPointer(prev) && (buffer = prev->storeBuffer()))
+        buffer->unputCellFromAnyThread(static_cast<js::gc::Cell**>(cellp));
 }
 
 namespace js {
@@ -681,10 +669,10 @@ IsConstructor(const Value& v)
 
 class JSValueArray {
   public:
-    const jsval* array;
+    const js::Value* array;
     size_t length;
 
-    JSValueArray(const jsval* v, size_t c) : array(v), length(c) {}
+    JSValueArray(const js::Value* v, size_t c) : array(v), length(c) {}
 };
 
 class ValueArray {
@@ -1209,7 +1197,7 @@ extern bool
 LookupNameUnqualified(JSContext* cx, HandlePropertyName name, HandleObject scopeChain,
                       MutableHandleObject objp);
 
-}
+} // namespace js
 
 namespace js {
 
@@ -1282,8 +1270,21 @@ XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj);
 extern bool
 ReportGetterOnlyAssignment(JSContext* cx, bool strict);
 
-extern JSObject*
-NonNullObject(JSContext* cx, const Value& v);
+/*
+ * Report a TypeError: "so-and-so is not an object".
+ * Using NotNullObject is usually less code.
+ */
+extern void
+ReportNotObject(JSContext* cx, const Value& v);
+
+inline JSObject*
+NonNullObject(JSContext* cx, const Value& v)
+{
+    if (v.isObject())
+        return &v.toObject();
+    ReportNotObject(cx, v);
+    return nullptr;
+}
 
 extern const char*
 InformalValueTypeName(const Value& v);

@@ -38,8 +38,8 @@ class nsIntRegion;
 namespace mozilla {
 namespace layers {
 struct TileClient;
-}
-}
+} // namespace layers
+} // namespace mozilla
 //
 // nsTArray is a resizable array class, like std::vector.
 //
@@ -310,8 +310,8 @@ struct nsTArray_SafeElementAtHelper<nsRefPtr<E>, Derived>
 namespace mozilla {
 namespace dom {
 template<class T> class OwningNonNull;
-}
-}
+} // namespace dom
+} // namespace mozilla
 
 template<class E, class Derived>
 struct nsTArray_SafeElementAtHelper<mozilla::dom::OwningNonNull<E>, Derived>
@@ -882,7 +882,9 @@ public:
   // @param aOther The array object to copy.
   self_type& operator=(const self_type& aOther)
   {
-    ReplaceElementsAt(0, Length(), aOther.Elements(), aOther.Length());
+    if (this != &aOther) {
+      ReplaceElementsAt(0, Length(), aOther.Elements(), aOther.Length());
+    }
     return *this;
   }
 
@@ -891,8 +893,10 @@ public:
   // @param other  The array object to move from.
   self_type& operator=(self_type&& aOther)
   {
-    Clear();
-    SwapElements(aOther);
+    if (this != &aOther) {
+      Clear();
+      SwapElements(aOther);
+    }
     return *this;
   }
 
@@ -1175,6 +1179,31 @@ public:
   //
   // Mutation methods
   //
+
+  template<class Allocator, typename ActualAlloc = Alloc>
+  typename ActualAlloc::ResultType Assign(
+      const nsTArray_Impl<E, Allocator>& aOther)
+  {
+    return ActualAlloc::ConvertBoolToResultType(
+      !!ReplaceElementsAt<E, ActualAlloc>(0, Length(),
+                                          aOther.Elements(), aOther.Length()));
+  }
+
+  template<class Allocator>
+  /* MOZ_WARN_UNUSED_RESULT */
+  bool Assign(const nsTArray_Impl<E, Allocator>& aOther,
+              const mozilla::fallible_t&)
+  {
+    return Assign<Allocator, FallibleAlloc>(aOther);
+  }
+
+  template<class Allocator>
+  void Assign(nsTArray_Impl<E, Allocator>&& aOther)
+  {
+    Clear();
+    SwapElements(aOther);
+  }
+
   // This method call the destructor on each element of the array, empties it,
   // but does not shrink the array's capacity.
   // See also SetLengthAndRetainStorage.
@@ -2331,6 +2360,12 @@ public:
   {
     return *reinterpret_cast<const nsAutoTArray<E, N>*>(this);
   }
+};
+
+template<class E, size_t N>
+struct nsTArray_CopyChooser<nsAutoTArray<E, N>>
+{
+  typedef nsTArray_CopyWithConstructors<nsAutoTArray<E, N>> Type;
 };
 
 // Assert that nsAutoTArray doesn't have any extra padding inside.

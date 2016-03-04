@@ -47,6 +47,8 @@ namespace image {
 // Helper-class: SVGRootRenderingObserver
 class SVGRootRenderingObserver final : public nsSVGRenderingObserver {
 public:
+  NS_DECL_ISUPPORTS
+
   SVGRootRenderingObserver(SVGDocumentWrapper* aDocWrapper,
                            VectorImage*        aVectorImage)
     : nsSVGRenderingObserver()
@@ -65,10 +67,6 @@ public:
     mInObserverList = true;
   }
 
-  virtual ~SVGRootRenderingObserver()
-  {
-    StopListening();
-  }
 
   void ResumeHonoringInvalidations()
   {
@@ -76,6 +74,11 @@ public:
   }
 
 protected:
+  virtual ~SVGRootRenderingObserver()
+  {
+    StopListening();
+  }
+
   virtual Element* GetTarget() override
   {
     return mDocWrapper->GetRootSVGElem();
@@ -112,6 +115,8 @@ protected:
   VectorImage* const mVectorImage;   // Raw pointer because it owns me.
   bool mHonoringInvalidations;
 };
+
+NS_IMPL_ISUPPORTS(SVGRootRenderingObserver, nsIMutationObserver)
 
 class SVGParseCompleteListener final : public nsStubDocumentObserver {
 public:
@@ -1095,12 +1100,10 @@ VectorImage::OnStartRequest(nsIRequest* aRequest, nsISupports* aCtxt)
     return rv;
   }
 
-  // Sending StartDecode will block page load until the document's ready.  (We
-  // unblock it by sending StopDecode in OnSVGDocumentLoaded or
-  // OnSVGDocumentError.)
+  // Block page load until the document's ready.  (We unblock it in
+  // OnSVGDocumentLoaded or OnSVGDocumentError.)
   if (mProgressTracker) {
-    mProgressTracker->SyncNotifyProgress(FLAG_DECODE_STARTED |
-                                         FLAG_ONLOAD_BLOCKED);
+    mProgressTracker->SyncNotifyProgress(FLAG_ONLOAD_BLOCKED);
   }
 
   // Create a listener to wait until the SVG document is fully loaded, which

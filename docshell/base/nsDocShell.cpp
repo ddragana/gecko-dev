@@ -19,6 +19,7 @@
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/EventStateManager.h"
+#include "mozilla/LoadInfo.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/StartupTimeline.h"
@@ -38,6 +39,7 @@
 #include "nsCURILoader.h"
 #include "nsDocShellCID.h"
 #include "nsDOMCID.h"
+#include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "mozilla/net/ReferrerPolicy.h"
 #include "nsRect.h"
@@ -75,6 +77,7 @@
 #include "IHistory.h"
 #include "nsViewSourceHandler.h"
 #include "nsWhitespaceTokenizer.h"
+#include "nsICookieService.h"
 
 // we want to explore making the document own the load group
 // so we can associate the document URI with the load group.
@@ -182,13 +185,18 @@
 #include "nsIDOMNode.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIHttpChannel.h"
+#include "nsIIDNService.h"
+#include "nsIInputStreamChannel.h"
+#include "nsINestedURI.h"
 #include "nsISHContainer.h"
 #include "nsISHistory.h"
 #include "nsISecureBrowserUI.h"
+#include "nsISocketProvider.h"
 #include "nsIStringBundle.h"
 #include "nsISupportsArray.h"
 #include "nsIURIFixup.h"
 #include "nsIURILoader.h"
+#include "nsIURL.h"
 #include "nsIWebBrowserFind.h"
 #include "nsIWidget.h"
 #include "mozilla/dom/EncodingUtils.h"
@@ -200,10 +208,6 @@
 #endif
 
 #include "mozIThirdPartyUtil.h"
-// Values for the network.cookie.cookieBehavior pref are documented in
-// nsCookieService.cpp
-#define COOKIE_BEHAVIOR_ACCEPT 0 // Allow all cookies.
-#define COOKIE_BEHAVIOR_REJECT_FOREIGN 1 // Reject all third-party cookies.
 
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
@@ -824,7 +828,7 @@ IncreasePrivateDocShellCount()
 {
   gNumberOfPrivateDocShells++;
   if (gNumberOfPrivateDocShells > 1 ||
-      XRE_GetProcessType() != GeckoProcessType_Content) {
+      !XRE_IsContentProcess()) {
     return;
   }
 
@@ -838,7 +842,7 @@ DecreasePrivateDocShellCount()
   MOZ_ASSERT(gNumberOfPrivateDocShells > 0);
   gNumberOfPrivateDocShells--;
   if (!gNumberOfPrivateDocShells) {
-    if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    if (XRE_IsContentProcess()) {
       dom::ContentChild* cc = dom::ContentChild::GetSingleton();
       cc->SendPrivateDocShellsExist(false);
       return;
@@ -1600,12 +1604,20 @@ nsDocShell::LoadURI(nsIURI* aURI,
 
   if (owner && mItemType != typeChrome) {
     nsCOMPtr<nsIPrincipal> ownerPrincipal = do_QueryInterface(owner);
-    if (nsContentUtils::IsSystemOrExpandedPrincipal(ownerPrincipal)) {
+    if (nsContentUtils::IsSystemPrincipal(ownerPrincipal)) {
       if (ownerIsExplicit) {
         return NS_ERROR_DOM_SECURITY_ERR;
       }
       owner = nullptr;
       inheritOwner = true;
+    } else if (nsContentUtils::IsExpandedPrincipal(ownerPrincipal)) {
+      if (ownerIsExplicit) {
+        return NS_ERROR_DOM_SECURITY_ERR;
+      }
+      // Don't inherit from the current page.  Just do the safe thing
+      // and pretend that we were loaded by a nullprincipal.
+      owner = nsNullPrincipal::Create();
+      inheritOwner = false;
     }
   }
   if (!owner && !inheritOwner && !ownerIsExplicit) {
@@ -2797,16 +2809,16 @@ nsDocShell::GetBusyFlags(uint32_t* aBusyFlags)
 }
 
 NS_IMETHODIMP
-nsDocShell::TabToTreeOwner(bool aForward, bool* aTookFocus)
+nsDocShell::TabToTreeOwner(bool aForward, bool aForDocumentNavigation, bool* aTookFocus)
 {
   NS_ENSURE_ARG_POINTER(aTookFocus);
 
   nsCOMPtr<nsIWebBrowserChromeFocus> chromeFocus = do_GetInterface(mTreeOwner);
   if (chromeFocus) {
     if (aForward) {
-      *aTookFocus = NS_SUCCEEDED(chromeFocus->FocusNextElement());
+      *aTookFocus = NS_SUCCEEDED(chromeFocus->FocusNextElement(aForDocumentNavigation));
     } else {
-      *aTookFocus = NS_SUCCEEDED(chromeFocus->FocusPrevElement());
+      *aTookFocus = NS_SUCCEEDED(chromeFocus->FocusPrevElement(aForDocumentNavigation));
     }
   } else {
     *aTookFocus = false;
@@ -2914,29 +2926,17 @@ nsDocShell::HistoryTransactionRemoved(int32_t aIndex)
   return NS_OK;
 }
 
-unsigned long nsDocShell::gProfileTimelineRecordingsCount = 0;
-
-mozilla::LinkedList<nsDocShell::ObservedDocShell>* nsDocShell::gObservedDocShells = nullptr;
-
 NS_IMETHODIMP
 nsDocShell::SetRecordProfileTimelineMarkers(bool aValue)
 {
   bool currentValue = nsIDocShell::GetRecordProfileTimelineMarkers();
   if (currentValue != aValue) {
     if (aValue) {
-      ++gProfileTimelineRecordingsCount;
+      TimelineConsumers::AddConsumer(this, mObserved);
       UseEntryScriptProfiling();
-
-      MOZ_ASSERT(!mObserved);
-      mObserved.reset(new ObservedDocShell(this));
-      GetOrCreateObservedDocShells().insertFront(mObserved.get());
     } else {
-      --gProfileTimelineRecordingsCount;
+      TimelineConsumers::RemoveConsumer(this, mObserved);
       UnuseEntryScriptProfiling();
-
-      mObserved.reset(nullptr);
-
-      ClearProfileTimelineMarkers();
     }
   }
 
@@ -2967,13 +2967,23 @@ nsDocShell::PopProfileTimelineMarkers(
   SequenceRooter<mozilla::dom::ProfileTimelineMarker> rooter(
     aCx, &profileTimelineMarkers);
 
+  if (!IsObserved()) {
+    if (!ToJSValue(aCx, profileTimelineMarkers, aProfileTimelineMarkers)) {
+      JS_ClearPendingException(aCx);
+      return NS_ERROR_UNEXPECTED;
+    }
+    return NS_OK;
+  }
+
+  nsTArray<UniquePtr<TimelineMarker>>& markersStore = mObserved.get()->mTimelineMarkers;
+
   // If we see an unpaired START, we keep it around for the next call
   // to PopProfileTimelineMarkers.  We store the kept START objects in
   // this array.
   nsTArray<UniquePtr<TimelineMarker>> keptMarkers;
 
-  for (uint32_t i = 0; i < mProfileTimelineMarkers.Length(); ++i) {
-    UniquePtr<TimelineMarker>& startPayload = mProfileTimelineMarkers[i];
+  for (uint32_t i = 0; i < markersStore.Length(); ++i) {
+    UniquePtr<TimelineMarker>& startPayload = markersStore[i];
     const char* startMarkerName = startPayload->GetName();
 
     bool hasSeenPaintedLayer = false;
@@ -3009,8 +3019,8 @@ nsDocShell::PopProfileTimelineMarkers(
       // The assumption is that the devtools timeline flushes markers frequently
       // enough for the amount of markers to always be small enough that the
       // nested for loop isn't going to be a performance problem.
-      for (uint32_t j = i + 1; j < mProfileTimelineMarkers.Length(); ++j) {
-        UniquePtr<TimelineMarker>& endPayload = mProfileTimelineMarkers[j];
+      for (uint32_t j = i + 1; j < markersStore.Length(); ++j) {
+        UniquePtr<TimelineMarker>& endPayload = markersStore[j];
         const char* endMarkerName = endPayload->GetName();
 
         // Look for Layer markers to stream out paint markers.
@@ -3056,14 +3066,14 @@ nsDocShell::PopProfileTimelineMarkers(
 
       // If we did not see the corresponding END, keep the START.
       if (!hasSeenEnd) {
-        keptMarkers.AppendElement(Move(mProfileTimelineMarkers[i]));
-        mProfileTimelineMarkers.RemoveElementAt(i);
+        keptMarkers.AppendElement(Move(markersStore[i]));
+        markersStore.RemoveElementAt(i);
         --i;
       }
     }
   }
 
-  mProfileTimelineMarkers.SwapElements(keptMarkers);
+  markersStore.SwapElements(keptMarkers);
 
   if (!ToJSValue(aCx, profileTimelineMarkers, aProfileTimelineMarkers)) {
     JS_ClearPendingException(aCx);
@@ -3087,8 +3097,7 @@ nsDocShell::AddProfileTimelineMarker(const char* aName,
                                      TracingMetadata aMetaData)
 {
   if (IsObserved()) {
-    TimelineMarker* marker = new TimelineMarker(this, aName, aMetaData);
-    mProfileTimelineMarkers.AppendElement(marker);
+    mObserved->AddMarker(aName, aMetaData);
   }
 }
 
@@ -3096,7 +3105,7 @@ void
 nsDocShell::AddProfileTimelineMarker(UniquePtr<TimelineMarker>&& aMarker)
 {
   if (IsObserved()) {
-    mProfileTimelineMarkers.AppendElement(Move(aMarker));
+    mObserved->AddMarker(Move(aMarker));
   }
 }
 
@@ -3127,12 +3136,6 @@ nsDocShell::GetWindowDraggingAllowed(bool* aValue)
     *aValue = mWindowDraggingAllowed;
   }
   return NS_OK;
-}
-
-void
-nsDocShell::ClearProfileTimelineMarkers()
-{
-  mProfileTimelineMarkers.Clear();
 }
 
 nsIDOMStorageManager*
@@ -3704,12 +3707,10 @@ nsDocShell::CanAccessItem(nsIDocShellTreeItem* aTargetItem,
 static bool
 ItemIsActive(nsIDocShellTreeItem* aItem)
 {
-  nsCOMPtr<nsIDOMWindow> window = aItem->GetWindow();
-
-  if (window) {
-    bool isClosed;
-
-    if (NS_SUCCEEDED(window->GetClosed(&isClosed)) && !isClosed) {
+  if (nsCOMPtr<nsIDOMWindow> window = aItem->GetWindow()) {
+    auto* win = static_cast<nsGlobalWindow*>(window.get());
+    MOZ_ASSERT(win->IsOuterWindow());
+    if (!win->GetClosedOuter()) {
       return true;
     }
   }
@@ -5020,7 +5021,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
           mInPrivateBrowsing ? nsISocketProvider::NO_PERMANENT_STORAGE : 0;
         bool isStsHost = false;
         bool isPinnedHost = false;
-        if (XRE_GetProcessType() == GeckoProcessType_Default) {
+        if (XRE_IsParentProcess()) {
           nsCOMPtr<nsISiteSecurityService> sss =
             do_GetService(NS_SSSERVICE_CONTRACTID, &rv);
           NS_ENSURE_SUCCESS(rv, rv);
@@ -5189,6 +5190,17 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
         break;
       case NS_ERROR_CORRUPTED_CONTENT:
         // Broken Content Detected. e.g. Content-MD5 check failure.
+        error.AssignLiteral("corruptedContentError");
+        break;
+      case NS_ERROR_INTERCEPTION_FAILED:
+      case NS_ERROR_OPAQUE_INTERCEPTION_DISABLED:
+      case NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE:
+      case NS_ERROR_INTERCEPTED_ERROR_RESPONSE:
+      case NS_ERROR_INTERCEPTED_USED_RESPONSE:
+      case NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION:
+        // ServiceWorker intercepted request, but something went wrong.
+        nsContentUtils::MaybeReportInterceptionErrorToConsole(GetDocument(),
+                                                              aError);
         error.AssignLiteral("corruptedContentError");
         break;
       default:
@@ -6462,7 +6474,9 @@ nsDocShell::GetCurScrollPos(int32_t aScrollOrientation, int32_t* aCurPos)
   NS_ENSURE_ARG_POINTER(aCurPos);
 
   nsIScrollableFrame* sf = GetRootScrollFrame();
-  NS_ENSURE_TRUE(sf, NS_ERROR_FAILURE);
+  if (!sf) {
+    return NS_ERROR_FAILURE;
+  }
 
   nsPoint pt = sf->GetScrollPosition();
 
@@ -7818,6 +7832,12 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
                aStatus == NS_ERROR_UNSAFE_CONTENT_TYPE ||
                aStatus == NS_ERROR_REMOTE_XUL ||
                aStatus == NS_ERROR_OFFLINE ||
+               aStatus == NS_ERROR_INTERCEPTION_FAILED ||
+               aStatus == NS_ERROR_OPAQUE_INTERCEPTION_DISABLED ||
+               aStatus == NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE ||
+               aStatus == NS_ERROR_INTERCEPTED_ERROR_RESPONSE ||
+               aStatus == NS_ERROR_INTERCEPTED_USED_RESPONSE ||
+               aStatus == NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION ||
                NS_ERROR_GET_MODULE(aStatus) == NS_ERROR_MODULE_SECURITY) {
       // Errors to be shown for any frame
       DisplayLoadError(aStatus, url, nullptr, aChannel);
@@ -8413,7 +8433,8 @@ private:
     mRestorePresentationEvent;
   nsRefPtr<nsDocShell::RestorePresentationEvent> mEvent;
 };
-}
+
+} // namespace
 
 nsresult
 nsDocShell::RestoreFromHistory()
@@ -9441,14 +9462,14 @@ private:
 NS_IMPL_ISUPPORTS(nsCopyFaviconCallback, nsIFaviconDataCallback)
 #endif
 
-} // anonymous namespace
+} // namespace
 
 void
 nsDocShell::CopyFavicon(nsIURI* aOldURI,
                         nsIURI* aNewURI,
                         bool aInPrivateBrowsing)
 {
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+  if (XRE_IsContentProcess()) {
     dom::ContentChild* contentChild = dom::ContentChild::GetSingleton();
     if (contentChild) {
       mozilla::ipc::URIParams oldURI, newURI;
@@ -9684,7 +9705,8 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   }
   if (IsFrame() && !isNewDocShell && !isTargetTopLevelDocShell) {
     NS_ASSERTION(requestingElement, "A frame but no DOM element!?");
-    contentType = nsIContentPolicy::TYPE_SUBDOCUMENT;
+    contentType = requestingElement->IsHTMLElement(nsGkAtoms::iframe) ?
+      nsIContentPolicy::TYPE_INTERNAL_IFRAME : nsIContentPolicy::TYPE_INTERNAL_FRAME;
   } else {
     contentType = nsIContentPolicy::TYPE_DOCUMENT;
   }
@@ -9805,13 +9827,9 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       if (aURI) {
         aURI->GetSpec(spec);
       }
-      nsAutoString features;
-      if (mInPrivateBrowsing) {
-        features.AssignLiteral("private");
-      }
       rv = win->OpenNoNavigate(NS_ConvertUTF8toUTF16(spec),
                                name,  // window name
-                               features,
+                               EmptyString(), // Features
                                getter_AddRefs(newWin));
 
       // In some cases the Open call doesn't actually result in a new
@@ -11744,19 +11762,9 @@ nsDocShell::ShouldAddToSessionHistory(nsIURI* aURI)
       return false;
     }
 
-    if (buf.EqualsLiteral("blank")) {
+    if (buf.EqualsLiteral("blank") || buf.EqualsLiteral("newtab")) {
       return false;
     }
-  }
-
-  // Check if the webbrowser chrome wants us to proceed - by default it ensures
-  // aURI is not the newtab URI.
-  nsCOMPtr<nsIWebBrowserChrome3> browserChrome3 = do_GetInterface(mTreeOwner);
-  if (browserChrome3) {
-    bool shouldAdd;
-    rv = browserChrome3->ShouldAddToSessionHistory(this, aURI, &shouldAdd);
-    NS_ENSURE_SUCCESS(rv, true);
-    return shouldAdd;
   }
 
   return true;
@@ -13502,6 +13510,16 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
   nsCOMPtr<nsIURI> referer = refererDoc->GetDocumentURI();
   uint32_t refererPolicy = refererDoc->GetReferrerPolicy();
 
+  // get referrer attribute from clicked link and parse it
+  // if per element referrer is enabled, the element referrer overrules
+  // the document wide referrer
+  if (IsElementAnchor(aContent)) {
+    net::ReferrerPolicy refPolEnum = aContent->AsElement()->GetReferrerPolicy();
+    if (refPolEnum != net::RP_Unset) {
+      refererPolicy = refPolEnum;
+    }
+  }
+
   // referer could be null here in some odd cases, but that's ok,
   // we'll just load the link w/o sending a referer in those cases.
 
@@ -13991,7 +14009,7 @@ nsDocShell::MaybeNotifyKeywordSearchLoading(const nsString& aProvider,
     return;
   }
 
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+  if (XRE_IsContentProcess()) {
     dom::ContentChild* contentChild = dom::ContentChild::GetSingleton();
     if (contentChild) {
       contentChild->SendNotifyKeywordSearchLoading(aProvider, aKeyword);
@@ -14061,8 +14079,8 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNavigate,
       NS_ENSURE_SUCCESS(result, result);
       if (isThirdPartyURI &&
           (Preferences::GetInt("network.cookie.cookieBehavior",
-                               COOKIE_BEHAVIOR_ACCEPT) ==
-                               COOKIE_BEHAVIOR_REJECT_FOREIGN)) {
+                               nsICookieService::BEHAVIOR_ACCEPT) ==
+                               nsICookieService::BEHAVIOR_REJECT_FOREIGN)) {
         return NS_OK;
       }
     }
@@ -14093,7 +14111,7 @@ nsDocShell::ChannelIntercepted(nsIInterceptedChannel* aChannel)
 {
   nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   if (!swm) {
-    aChannel->Cancel();
+    aChannel->Cancel(NS_ERROR_INTERCEPTION_FAILED);
     return NS_OK;
   }
 

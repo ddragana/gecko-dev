@@ -6,7 +6,6 @@
 
 #include "nsFilePickerProxy.h"
 #include "nsComponentManagerUtils.h"
-#include "nsNetUtil.h"
 #include "nsIFile.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/TabChild.h"
@@ -231,7 +230,7 @@ private:
 
 NS_IMPL_ISUPPORTS(SimpleEnumerator, nsISimpleEnumerator)
 
-} // anonymous namespace
+} // namespace
 
 NS_IMETHODIMP
 nsFilePickerProxy::GetDomfiles(nsISimpleEnumerator** aDomfiles)

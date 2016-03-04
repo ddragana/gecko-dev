@@ -80,6 +80,7 @@ enum DeviceFamily {
   IntelGMA3150,
   IntelGMAX3000,
   IntelGMAX4500HD,
+  IntelHDGraphicsToIvyBridge,
   IntelHD3000,
   IntelMobileHDGraphics,
   NvidiaBlockD3D9Layers,
@@ -275,7 +276,7 @@ ParseDriverVersion(const nsAString& aVersion, uint64_t *aNumericVersion)
 #endif
 }
 
-}
-}
+} // namespace widget
+} // namespace mozilla
 
 #endif /*__mozilla_widget_GfxDriverInfo_h__ */

@@ -5,10 +5,12 @@
 
 #include "nsAnimationManager.h"
 #include "nsTransitionManager.h"
+#include "mozilla/dom/CSSAnimationBinding.h"
 
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/StyleAnimationValue.h"
+#include "mozilla/dom/DocumentTimeline.h"
 #include "mozilla/dom/KeyframeEffect.h"
 
 #include "nsPresContext.h"
@@ -27,7 +29,13 @@ using namespace mozilla::css;
 using mozilla::dom::Animation;
 using mozilla::dom::AnimationPlayState;
 using mozilla::dom::KeyframeEffectReadOnly;
-using mozilla::CSSAnimation;
+using mozilla::dom::CSSAnimation;
+
+JSObject*
+CSSAnimation::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
+{
+  return dom::CSSAnimationBinding::Wrap(aCx, this, aGivenProto);
+}
 
 mozilla::dom::Promise*
 CSSAnimation::GetReady(ErrorResult& aRv)
@@ -105,6 +113,50 @@ CSSAnimation::PauseFromStyle()
   }
 }
 
+bool
+CSSAnimation::HasLowerCompositeOrderThan(const Animation& aOther) const
+{
+  // 0. Object-equality case
+  if (&aOther == this) {
+    return false;
+  }
+
+  // 1. Transitions sort lower
+  //
+  // FIXME: We need to differentiate between transitions and generic Animations.
+  // Generic animations don't exist yet (that's bug 1096773) so for now we're
+  // ok.
+  const CSSAnimation* otherAnimation = aOther.AsCSSAnimation();
+  if (!otherAnimation) {
+    MOZ_ASSERT(aOther.AsCSSTransition(),
+               "Animation being compared is a CSS transition");
+    return false;
+  }
+
+  // 2. CSS animations using custom composite ordering (i.e. those that
+  //    correspond to an animation-name property) sort lower than other CSS
+  //    animations (e.g. those created or kept-alive by script).
+  if (!IsUsingCustomCompositeOrder()) {
+    return !aOther.IsUsingCustomCompositeOrder() ?
+           Animation::HasLowerCompositeOrderThan(aOther) :
+           false;
+  }
+  if (!aOther.IsUsingCustomCompositeOrder()) {
+    return true;
+  }
+
+  // 3. Sort by document order
+  MOZ_ASSERT(mOwningElement.IsSet() && otherAnimation->OwningElement().IsSet(),
+             "Animations using custom composite order should have an "
+             "owning element");
+  if (!mOwningElement.Equals(otherAnimation->OwningElement())) {
+    return mOwningElement.LessThan(otherAnimation->OwningElement());
+  }
+
+  // 4. (Same element and pseudo): Sort by position in animation-name
+  return mSequenceNum < otherAnimation->mSequenceNum;
+}
+
 void
 CSSAnimation::QueueEvents(EventArray& aEventsToDispatch)
 {
@@ -166,7 +218,7 @@ CSSAnimation::QueueEvents(EventArray& aEventsToDispatch)
     StickyTimeDuration elapsedTime =
       std::min(StickyTimeDuration(mEffect->InitialAdvance()),
                computedTiming.mActiveDuration);
-    AnimationEventInfo ei(target, Name(), NS_ANIMATION_START,
+    AnimationEventInfo ei(target, mAnimationName, NS_ANIMATION_START,
                           elapsedTime,
                           PseudoTypeAsString(targetPseudoType));
     aEventsToDispatch.AppendElement(ei);
@@ -189,7 +241,7 @@ CSSAnimation::QueueEvents(EventArray& aEventsToDispatch)
     elapsedTime = computedTiming.mActiveDuration;
   }
 
-  AnimationEventInfo ei(target, Name(), message, elapsedTime,
+  AnimationEventInfo ei(target, mAnimationName, message, elapsedTime,
                         PseudoTypeAsString(targetPseudoType));
   aEventsToDispatch.AppendElement(ei);
 }
@@ -366,7 +418,8 @@ nsAnimationManager::CheckAnimationRule(nsStyleContext* aStyleContext,
           CSSAnimation* a = collection->mAnimations[oldIdx]->AsCSSAnimation();
           MOZ_ASSERT(a, "All animations in the CSS Animation collection should"
                         " be CSSAnimation objects");
-          if (a->Name() == newAnim->Name()) {
+          if (a->AnimationName() ==
+              newAnim->AsCSSAnimation()->AnimationName()) {
             oldAnim = a;
             break;
           }
@@ -411,6 +464,8 @@ nsAnimationManager::CheckAnimationRule(nsStyleContext* aStyleContext,
             animationChanged = true;
           }
         }
+
+        oldAnim->CopyAnimationIndex(*newAnim->AsCSSAnimation());
 
         if (animationChanged) {
           nsNodeUtils::AnimationChanged(oldAnim);
@@ -515,7 +570,7 @@ ResolvedStyleCache::Get(nsPresContext *aPresContext,
 void
 nsAnimationManager::BuildAnimations(nsStyleContext* aStyleContext,
                                     dom::Element* aTarget,
-                                    dom::DocumentTimeline* aTimeline,
+                                    dom::AnimationTimeline* aTimeline,
                                     AnimationPtrArray& aAnimations)
 {
   MOZ_ASSERT(aAnimations.IsEmpty(), "expect empty array");
@@ -543,7 +598,13 @@ nsAnimationManager::BuildAnimations(nsStyleContext* aStyleContext,
       continue;
     }
 
-    nsRefPtr<CSSAnimation> dest = new CSSAnimation(aTimeline);
+    nsRefPtr<CSSAnimation> dest =
+      new CSSAnimation(mPresContext->Document()->GetScopeObject(),
+                       src.GetName());
+    dest->SetOwningElement(
+      OwningElementRef(*aTarget, aStyleContext->GetPseudoType()));
+    dest->SetTimeline(aTimeline);
+    dest->SetAnimationIndex(static_cast<uint64_t>(animIdx));
     aAnimations.AppendElement(dest);
 
     AnimationTiming timing;
@@ -556,8 +617,7 @@ nsAnimationManager::BuildAnimations(nsStyleContext* aStyleContext,
 
     nsRefPtr<KeyframeEffectReadOnly> destEffect =
       new KeyframeEffectReadOnly(mPresContext->Document(), aTarget,
-                                 aStyleContext->GetPseudoType(), timing,
-                                 src.GetName());
+                                 aStyleContext->GetPseudoType(), timing);
     dest->SetEffect(destEffect);
 
     if (src.GetPlayState() == NS_STYLE_ANIMATION_PLAY_STATE_PAUSED) {

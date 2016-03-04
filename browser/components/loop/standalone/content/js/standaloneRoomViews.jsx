@@ -14,24 +14,80 @@ loop.standaloneRoomViews = (function(mozL10n) {
   var sharedUtils = loop.shared.utils;
   var sharedViews = loop.shared.views;
 
+  /**
+   * Handles display of failures, determining the correct messages and
+   * displaying the retry button at appropriate times.
+   */
+  var StandaloneRoomFailureView = React.createClass({
+    propTypes: {
+      dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
+      // One of FAILURE_DETAILS.
+      failureReason: React.PropTypes.string
+    },
+
+    /**
+     * Handles when the retry button is pressed.
+     */
+    handleRetryButton: function() {
+      this.props.dispatcher.dispatch(new sharedActions.RetryAfterRoomFailure());
+    },
+
+    /**
+     * @return String An appropriate string according to the failureReason.
+     */
+    getFailureString: function() {
+      switch(this.props.failureReason) {
+        case FAILURE_DETAILS.MEDIA_DENIED:
+        // XXX Bug 1166824 should provide a better string for this.
+        case FAILURE_DETAILS.NO_MEDIA:
+          return mozL10n.get("rooms_media_denied_message");
+        case FAILURE_DETAILS.EXPIRED_OR_INVALID:
+          return mozL10n.get("rooms_unavailable_notification_message");
+        default:
+          return mozL10n.get("status_error");
+      }
+    },
+
+    /**
+     * This renders a retry button if one is necessary.
+     */
+    renderRetryButton: function() {
+      if (this.props.failureReason === FAILURE_DETAILS.EXPIRED_OR_INVALID) {
+        return null;
+      }
+
+      return (
+        <button className="btn btn-join btn-info"
+                onClick={this.handleRetryButton}>
+          {mozL10n.get("retry_call_button")}
+        </button>
+      );
+    },
+
+    render: function() {
+      return (
+        <div className="room-inner-info-area">
+          <p className="failed-room-message">
+            {this.getFailureString()}
+          </p>
+          {this.renderRetryButton()}
+        </div>
+      );
+    }
+  });
+
   var StandaloneRoomInfoArea = React.createClass({
     propTypes: {
       activeRoomStore: React.PropTypes.oneOfType([
         React.PropTypes.instanceOf(loop.store.ActiveRoomStore),
         React.PropTypes.instanceOf(loop.store.FxOSActiveRoomStore)
       ]).isRequired,
+      dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
       failureReason: React.PropTypes.string,
       isFirefox: React.PropTypes.bool.isRequired,
       joinRoom: React.PropTypes.func.isRequired,
       roomState: React.PropTypes.string.isRequired,
       roomUsed: React.PropTypes.bool.isRequired
-    },
-
-    onFeedbackSent: function() {
-      // We pass a tick to prevent React warnings regarding nested updates.
-      setTimeout(function() {
-        this.props.activeRoomStore.dispatchAction(new sharedActions.FeedbackComplete());
-      }.bind(this));
     },
 
     _renderCallToActionLink: function() {
@@ -53,27 +109,10 @@ loop.standaloneRoomViews = (function(mozL10n) {
       );
     },
 
-    /**
-     * @return String An appropriate string according to the failureReason.
-     */
-    _getFailureString: function() {
-      switch(this.props.failureReason) {
-        case FAILURE_DETAILS.MEDIA_DENIED:
-        // XXX Bug 1166824 should provide a better string for this.
-        case FAILURE_DETAILS.NO_MEDIA:
-          return mozL10n.get("rooms_media_denied_message");
-        case FAILURE_DETAILS.EXPIRED_OR_INVALID:
-          return mozL10n.get("rooms_unavailable_notification_message");
-        default:
-          return mozL10n.get("status_error");
-      }
-    },
-
     render: function() {
       switch(this.props.roomState) {
-        case ROOM_STATES.INIT:
+        case ROOM_STATES.ENDED:
         case ROOM_STATES.READY: {
-          // XXX: In ENDED state, we should rather display the feedback form.
           return (
             <div className="room-inner-info-area">
               <button className="btn btn-join btn-info"
@@ -126,35 +165,15 @@ loop.standaloneRoomViews = (function(mozL10n) {
             </div>
           );
         }
-        case ROOM_STATES.ENDED: {
-          if (this.props.roomUsed) {
-            return (
-              <div className="ended-conversation">
-                <sharedViews.FeedbackView
-                  noCloseText={true}
-                  onAfterFeedbackReceived={this.onFeedbackSent} />
-              </div>
-            );
-          }
-
-          // In case the room was not used (no one was here), we
-          // bypass the feedback form.
-          this.onFeedbackSent();
-          return null;
-        }
         case ROOM_STATES.FAILED: {
           return (
-            <div className="room-inner-info-area">
-              <p className="failed-room-message">
-                {this._getFailureString()}
-              </p>
-              <button className="btn btn-join btn-info"
-                      onClick={this.props.joinRoom}>
-                {mozL10n.get("retry_call_button")}
-              </button>
-            </div>
+            <StandaloneRoomFailureView
+              dispatcher={this.props.dispatcher}
+              failureReason={this.props.failureReason} />
           );
         }
+        case ROOM_STATES.INIT:
+        case ROOM_STATES.GATHER:
         default: {
           return null;
         }
@@ -362,6 +381,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
           // the other party to connect
           return true;
 
+        case ROOM_STATES.FAILED:
         case ROOM_STATES.CLOSING:
           // the other person has shown up, so we don't want to show an avatar
           return true;
@@ -381,7 +401,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
      * @returns {boolean}
      * @private
      */
-    _shouldRenderLocalLoading: function () {
+    _isLocalLoading: function () {
       return this.state.roomState === ROOM_STATES.MEDIA_WAIT &&
              !this.state.localSrcVideoObject;
     },
@@ -393,10 +413,10 @@ loop.standaloneRoomViews = (function(mozL10n) {
      * @returns {boolean}
      * @private
      */
-    _shouldRenderRemoteLoading: function() {
-      return this.state.roomState === ROOM_STATES.HAS_PARTICIPANTS &&
-             !this.state.remoteSrcVideoObject &&
-             !this.state.mediaConnected;
+    _isRemoteLoading: function() {
+      return !!(this.state.roomState === ROOM_STATES.HAS_PARTICIPANTS &&
+                !this.state.remoteSrcVideoObject &&
+                !this.state.mediaConnected);
     },
 
     /**
@@ -406,84 +426,53 @@ loop.standaloneRoomViews = (function(mozL10n) {
      * @returns {boolean}
      * @private
      */
-    _shouldRenderScreenShareLoading: function() {
+    _isScreenShareLoading: function() {
       return this.state.receivingScreenShare &&
              !this.state.screenShareVideoObject;
     },
 
     render: function() {
-      var displayScreenShare = this.state.receivingScreenShare ||
-        this.props.screenSharePosterUrl;
-
-      var remoteStreamClasses = React.addons.classSet({
-        "remote": true,
-        "focus-stream": !displayScreenShare
-      });
-
-      var screenShareStreamClasses = React.addons.classSet({
-        "screen": true,
-        "focus-stream": displayScreenShare
-      });
-
-      var mediaWrapperClasses = React.addons.classSet({
-        "media-wrapper": true,
-        "receiving-screen-share": displayScreenShare,
-        "showing-local-streams": this.state.localSrcVideoObject ||
-          this.props.localPosterUrl
-      });
+      var displayScreenShare = !!(this.state.receivingScreenShare ||
+        this.props.screenSharePosterUrl);
 
       return (
-        <div className="room-conversation-wrapper">
+        <div className="room-conversation-wrapper standalone-room-wrapper">
           <div className="beta-logo" />
           <StandaloneRoomHeader dispatcher={this.props.dispatcher} />
           <StandaloneRoomInfoArea activeRoomStore={this.props.activeRoomStore}
+                                  dispatcher={this.props.dispatcher}
                                   failureReason={this.state.failureReason}
                                   isFirefox={this.props.isFirefox}
                                   joinRoom={this.joinRoom}
                                   roomState={this.state.roomState}
                                   roomUsed={this.state.used} />
-          <div className="media-layout">
-            <div className={mediaWrapperClasses}>
-              <span className="self-view-hidden-message">
-                {mozL10n.get("self_view_hidden_message")}
-              </span>
-              <div className={remoteStreamClasses}>
-                <sharedViews.MediaView displayAvatar={!this.shouldRenderRemoteVideo()}
-                  isLoading={this._shouldRenderRemoteLoading()}
-                  mediaType="remote"
-                  posterUrl={this.props.remotePosterUrl}
-                  srcVideoObject={this.state.remoteSrcVideoObject} />
-              </div>
-              <div className={screenShareStreamClasses}>
-                <sharedViews.MediaView displayAvatar={false}
-                  isLoading={this._shouldRenderScreenShareLoading()}
-                  mediaType="screen-share"
-                  posterUrl={this.props.screenSharePosterUrl}
-                  srcVideoObject={this.state.screenShareVideoObject} />
-              </div>
-              <sharedViews.chat.TextChatView
-                dispatcher={this.props.dispatcher}
-                showAlways={true}
-                showRoomName={true} />
-              <div className="local">
-                <sharedViews.MediaView displayAvatar={this.state.videoMuted}
-                  isLoading={this._shouldRenderLocalLoading()}
-                  mediaType="local"
-                  posterUrl={this.props.localPosterUrl}
-                  srcVideoObject={this.state.localSrcVideoObject} />
-              </div>
-            </div>
-            <sharedViews.ConversationToolbar
-              audio={{enabled: !this.state.audioMuted,
-                      visible: this._roomIsActive()}}
-              dispatcher={this.props.dispatcher}
-              enableHangup={this._roomIsActive()}
-              hangup={this.leaveRoom}
-              hangupButtonLabel={mozL10n.get("rooms_leave_button_label")}
-              publishStream={this.publishStream}
-              video={{enabled: !this.state.videoMuted,
-                      visible: this._roomIsActive()}} />
-          </div>
+          <sharedViews.MediaLayoutView
+            dispatcher={this.props.dispatcher}
+            displayScreenShare={displayScreenShare}
+            isLocalLoading={this._isLocalLoading()}
+            isRemoteLoading={this._isRemoteLoading()}
+            isScreenShareLoading={this._isScreenShareLoading()}
+            localPosterUrl={this.props.localPosterUrl}
+            localSrcVideoObject={this.state.localSrcVideoObject}
+            localVideoMuted={this.state.videoMuted}
+            remotePosterUrl={this.props.remotePosterUrl}
+            remoteSrcVideoObject={this.state.remoteSrcVideoObject}
+            renderRemoteVideo={this.shouldRenderRemoteVideo()}
+            screenSharePosterUrl={this.props.screenSharePosterUrl}
+            screenShareVideoObject={this.state.screenShareVideoObject}
+            showContextRoomName={true}
+            useDesktopPaths={false} />
+          <sharedViews.ConversationToolbar
+            audio={{enabled: !this.state.audioMuted,
+                    visible: this._roomIsActive()}}
+            dispatcher={this.props.dispatcher}
+            edit={{ visible: false, enabled: false }}
+            enableHangup={this._roomIsActive()}
+            hangup={this.leaveRoom}
+            hangupButtonLabel={mozL10n.get("rooms_leave_button_label")}
+            publishStream={this.publishStream}
+            video={{enabled: !this.state.videoMuted,
+                    visible: this._roomIsActive()}} />
           <loop.fxOSMarketplaceViews.FxOSHiddenMarketplaceView
             marketplaceSrc={this.state.marketplaceSrc}
             onMarketplaceMessage={this.state.onMarketplaceMessage} />

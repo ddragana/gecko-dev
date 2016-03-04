@@ -30,6 +30,7 @@
 #include "nsINetworkPredictor.h"
 #include "nsINetworkPredictorVerifier.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "nsNetUtil.h"
 
 using mozilla::dom::TCPSocketChild;
 using mozilla::dom::TCPServerSocketChild;
@@ -385,5 +386,6 @@ NeckoChild::RecvAppOfflineStatus(const uint32_t& aId, const bool& aOffline)
   return true;
 }
 
-}} // mozilla::net
+} // namespace net
+} // namespace mozilla
 

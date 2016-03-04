@@ -25,6 +25,7 @@
 #include "mozIStorageRow.h"
 #include "mozIStorageCompletionCallback.h"
 #include "mozIStorageStatementCallback.h"
+#include "nsIFile.h"
 
 #include "mozilla/MemoryReporting.h"
 
@@ -46,8 +47,8 @@ struct nsListIter;
 namespace mozilla {
 namespace net {
 class CookieServiceParent;
-}
-}
+} // namespace net
+} // namespace mozilla
 
 // hash key class
 class nsCookieKey : public PLDHashEntryHdr
@@ -313,6 +314,7 @@ class nsCookieService final : public nsICookieService
     void                          NotifyChanged(nsISupports *aSubject, const char16_t *aData);
     void                          NotifyPurged(nsICookie2* aCookie);
     already_AddRefed<nsIArray>    CreatePurgeList(nsICookie2* aCookie);
+    void                          UpdateCookieOldestTime(DBState* aDBState, nsCookie* aCookie);
 
     /**
      * This method is used to iterate the cookie hash table and select the ones
@@ -331,7 +333,6 @@ class nsCookieService final : public nsICookieService
 
   protected:
     // cached members.
-    nsCOMPtr<nsIObserverService>     mObserverService;
     nsCOMPtr<nsICookiePermission>    mPermissionService;
     nsCOMPtr<mozIThirdPartyUtil>     mThirdPartyUtil;
     nsCOMPtr<nsIEffectiveTLDService> mTLDService;

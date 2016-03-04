@@ -162,13 +162,14 @@ public:
 
   /**
    * enumerate entries in the hashtable, without allowing changes
+   * WARNING: this function is deprecated. Please use Iterator instead.
    * @param aEnumFunc enumeration callback
    * @param aUserArg passed unchanged to the EnumReadFunction
    */
   uint32_t EnumerateRead(EnumReadFunction aEnumFunc, void* aUserArg) const
   {
     uint32_t n = 0;
-    for (auto iter = this->mTable.Iter(); !iter.Done(); iter.Next()) {
+    for (auto iter = this->mTable.ConstIter(); !iter.Done(); iter.Next()) {
       auto entry = static_cast<EntryType*>(iter.Get());
       PLDHashOperator op = aEnumFunc(entry->GetKey(), entry->mData, aUserArg);
       n++;
@@ -196,15 +197,16 @@ public:
                                           void* aUserArg);
 
   /**
-   * enumerate entries in the hashtable, allowing changes. This
-   * functions write-locks the hashtable.
+   * enumerate entries in the hashtable, allowing changes.
+   * WARNING: this function is deprecated. Please use Iterator and/or
+   * MutatingIterator instead.
    * @param aEnumFunc enumeration callback
    * @param aUserArg passed unchanged to the EnumFunction
    */
   uint32_t Enumerate(EnumFunction aEnumFunc, void* aUserArg)
   {
     uint32_t n = 0;
-    for (auto iter = this->mTable.RemovingIter(); !iter.Done(); iter.Next()) {
+    for (auto iter = this->mTable.Iter(); !iter.Done(); iter.Next()) {
       auto entry = static_cast<EntryType*>(iter.Get());
       PLDHashOperator op = aEnumFunc(entry->GetKey(), entry->mData, aUserArg);
       n++;
@@ -216,6 +218,47 @@ public:
       }
     }
     return n;
+  }
+
+  // This is an iterator that also allows entry removal. Example usage:
+  //
+  //   for (auto iter = table.Iter(); !iter.Done(); iter.Next()) {
+  //     const KeyType key = iter.Key();
+  //     const UserDataType data = iter.UserData();
+  //     // or
+  //     const DataType& data = iter.Data();
+  //     // ... do stuff with |key| and/or |data| ...
+  //     // ... possibly call iter.Remove() once ...
+  //   }
+  //
+  class Iterator : public PLDHashTable::Iterator
+  {
+  public:
+    typedef PLDHashTable::Iterator Base;
+
+    explicit Iterator(nsBaseHashtable* aTable) : Base(&aTable->mTable) {}
+    Iterator(Iterator&& aOther) : Base(aOther.mTable) {}
+    ~Iterator() {}
+
+    KeyType Key() const { return static_cast<EntryType*>(Get())->GetKey(); }
+    UserDataType UserData() const
+    {
+      return static_cast<EntryType*>(Get())->mData;
+    }
+    DataType& Data() const { return static_cast<EntryType*>(Get())->mData; }
+
+  private:
+    Iterator() = delete;
+    Iterator(const Iterator&) = delete;
+    Iterator& operator=(const Iterator&) = delete;
+    Iterator& operator=(const Iterator&&) = delete;
+  };
+
+  Iterator Iter() { return Iterator(this); }
+
+  Iterator ConstIter() const
+  {
+    return Iterator(const_cast<nsBaseHashtable*>(this));
   }
 
   /**

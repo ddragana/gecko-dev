@@ -58,6 +58,7 @@
         screenX="4" screenY="4"
         fullscreenbutton="true"
         sizemode="normal"
+        retargetdocumentfocus="urlbar"
         persist="screenX screenY width height sizemode">
 
 # All JS files which are not content (only) dependent that browser.xul
@@ -145,7 +146,12 @@
     <panel type="autocomplete" id="PopupSearchAutoComplete" noautofocus="true" hidden="true"/>
 
     <!-- for url bar autocomplete -->
-    <panel type="autocomplete-richlistbox" id="PopupAutoCompleteRichResult" noautofocus="true" hidden="true"/>
+    <panel type="autocomplete-richlistbox" id="PopupAutoCompleteRichResult" noautofocus="true" hidden="true">
+      <hbox id="urlbar-search-footer" flex="1" align="stretch" pack="end">
+        <button id="urlbar-search-settings" label="&changeSearchSettings.button;"
+                oncommand="BrowserUITelemetry.countSearchSettingsEvent('urlbar'); openPreferences('paneSearch')"/>
+      </hbox>
+    </panel>
 
     <!-- for select dropdowns. The menupopup is what shows the list of options,
          and the popuponly menulist makes things like the menuactive attributes
@@ -710,6 +716,7 @@
                      autocompletesearchparam="enable-actions"
                      autocompletepopup="PopupAutoCompleteRichResult"
                      completeselectedindex="true"
+                     shrinkdelay="250"
                      tabscrolling="true"
                      showcommentcolumn="true"
                      showimagecolumn="true"
@@ -756,6 +763,7 @@
                    onclick="gIdentityHandler.handleIdentityButtonEvent(event);"
                    onkeypress="gIdentityHandler.handleIdentityButtonEvent(event);"
                    ondragstart="gIdentityHandler.onDragStart(event);">
+                <image id="tracking-protection-icon"/>
                 <image id="page-proxy-favicon"
                        consumeanchor="identity-box"
                        onclick="PageProxyClickHandler(event);"
@@ -1188,26 +1196,6 @@
       <vbox id="full-screen-warning-message" align="center">
         <description id="full-screen-domain-text"/>
         <description class="full-screen-description" value="&fullscreenExitHint2.value;"/>
-        <vbox id="full-screen-approval-pane" align="center">
-          <hbox>
-#ifdef XP_UNIX
-            <button label="&fullscreenExitButton.label;"
-                    oncommand="FullScreen.setFullscreenAllowed(false);"
-                    class="full-screen-approval-button"/>
-            <button label="&fullscreenAllowButton.label;"
-                    oncommand="FullScreen.setFullscreenAllowed(true);"
-                    class="full-screen-approval-button"/>
-#else
-            <button label="&fullscreenAllowButton.label;"
-                    oncommand="FullScreen.setFullscreenAllowed(true);"
-                    class="full-screen-approval-button"/>
-            <button label="&fullscreenExitButton.label;"
-                    oncommand="FullScreen.setFullscreenAllowed(false);"
-                    class="full-screen-approval-button"/>
-#endif
-          </hbox>
-          <checkbox id="full-screen-remember-decision"/>
-        </vbox>
       </vbox>
     </hbox>
   </hbox>

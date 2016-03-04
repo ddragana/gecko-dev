@@ -19,7 +19,7 @@ class SourceBufferResource;
 class ContainerParser {
 public:
   explicit ContainerParser(const nsACString& aType);
-  virtual ~ContainerParser() {}
+  virtual ~ContainerParser() = default;
 
   // Return true if aData starts with an initialization segment.
   // The base implementation exists only for debug logging and is expected
@@ -75,4 +75,5 @@ protected:
 };
 
 } // namespace mozilla
+
 #endif /* MOZILLA_CONTAINERPARSER_H_ */

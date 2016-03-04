@@ -984,6 +984,12 @@ PresShell::Init(nsIDocument* aDocument,
   if (mPresContext->IsRootContentDocument()) {
     mZoomConstraintsClient = new ZoomConstraintsClient();
     mZoomConstraintsClient->Init(this, mDocument);
+#ifndef MOZ_WIDGET_ANDROID
+    // Fennec will need some work to use this code; see bug 1180267.
+    if (gfxPrefs::MetaViewportEnabled()) {
+      mMobileViewportManager = new MobileViewportManager(this, mDocument);
+    }
+#endif
   }
 }
 
@@ -1101,6 +1107,10 @@ PresShell::Destroy()
   if (mZoomConstraintsClient) {
     mZoomConstraintsClient->Destroy();
     mZoomConstraintsClient = nullptr;
+  }
+  if (mMobileViewportManager) {
+    mMobileViewportManager->Destroy();
+    mMobileViewportManager = nullptr;
   }
 
 #ifdef ACCESSIBILITY
@@ -1752,6 +1762,19 @@ nsresult
 PresShell::ResizeReflowOverride(nscoord aWidth, nscoord aHeight)
 {
   mViewportOverridden = true;
+
+  if (mMobileViewportManager) {
+    // Once the viewport is explicitly overridden, we don't need the
+    // MobileViewportManager any more (in this presShell at least). Destroying
+    // it simplifies things because then it can maintain an invariant that any
+    // time it gets a meta-viewport change (for example) it knows it must
+    // recompute the CSS viewport and do a reflow. If we didn't destroy it here
+    // then there would be times where a meta-viewport change would have no
+    // effect.
+    mMobileViewportManager->Destroy();
+    mMobileViewportManager = nullptr;
+  }
+
   return ResizeReflowIgnoreOverride(aWidth, aHeight);
 }
 
@@ -1763,6 +1786,15 @@ PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight)
     // didn't ask to ignore the override.  Pretend it didn't happen.
     return NS_OK;
   }
+
+  if (mMobileViewportManager) {
+    // If we have a mobile viewport manager, request a reflow from it. It can
+    // recompute the final CSS viewport and trigger a call to
+    // ResizeReflowIgnoreOverride if it changed.
+    mMobileViewportManager->RequestReflow();
+    return NS_OK;
+  }
+
   return ResizeReflowIgnoreOverride(aWidth, aHeight);
 }
 
@@ -4677,7 +4709,7 @@ PresShell::RenderDocument(const nsRect& aRect, uint32_t aFlags,
       // taking snapshots.
       if (layerManager &&
           (!layerManager->AsClientLayerManager() ||
-           XRE_GetProcessType() == GeckoProcessType_Default)) {
+           XRE_IsParentProcess())) {
         flags |= nsLayoutUtils::PAINT_WIDGET_LAYERS;
       }
     }
@@ -4919,7 +4951,8 @@ PresShell::PaintRangePaintInfo(nsTArray<nsAutoPtr<RangePaintInfo> >* aItems,
                                nsIntRegion* aRegion,
                                nsRect aArea,
                                nsIntPoint& aPoint,
-                               nsIntRect* aScreenRect)
+                               nsIntRect* aScreenRect,
+                               uint32_t aFlags)
 {
   nsPresContext* pc = GetPresContext();
   if (!pc || aArea.width == 0 || aArea.height == 0)
@@ -4940,7 +4973,8 @@ PresShell::PaintRangePaintInfo(nsTArray<nsAutoPtr<RangePaintInfo> >* aItems,
   pc->DeviceContext()->GetClientRect(maxSize);
   nscoord maxWidth = pc->AppUnitsToDevPixels(maxSize.width >> 1);
   nscoord maxHeight = pc->AppUnitsToDevPixels(maxSize.height >> 1);
-  bool resize = (pixelArea.width > maxWidth || pixelArea.height > maxHeight);
+  bool resize = (aFlags & RENDER_AUTO_SCALE) &&
+                (pixelArea.width > maxWidth || pixelArea.height > maxHeight);
   if (resize) {
     scale = 1.0;
     // divide the maximum size by the image size in both directions. Whichever
@@ -5042,7 +5076,8 @@ already_AddRefed<SourceSurface>
 PresShell::RenderNode(nsIDOMNode* aNode,
                       nsIntRegion* aRegion,
                       nsIntPoint& aPoint,
-                      nsIntRect* aScreenRect)
+                      nsIntRect* aScreenRect,
+                      uint32_t aFlags)
 {
   // area will hold the size of the surface needed to draw the node, measured
   // from the root frame.
@@ -5081,13 +5116,14 @@ PresShell::RenderNode(nsIDOMNode* aNode,
   }
 
   return PaintRangePaintInfo(&rangeItems, nullptr, aRegion, area, aPoint,
-                             aScreenRect);
+                             aScreenRect, aFlags);
 }
 
 already_AddRefed<SourceSurface>
 PresShell::RenderSelection(nsISelection* aSelection,
                            nsIntPoint& aPoint,
-                           nsIntRect* aScreenRect)
+                           nsIntRect* aScreenRect,
+                           uint32_t aFlags)
 {
   // area will hold the size of the surface needed to draw the selection,
   // measured from the root frame.
@@ -5114,7 +5150,7 @@ PresShell::RenderSelection(nsISelection* aSelection,
   }
 
   return PaintRangePaintInfo(&rangeItems, aSelection, nullptr, area, aPoint,
-                             aScreenRect);
+                             aScreenRect, aFlags);
 }
 
 void
@@ -5250,7 +5286,7 @@ void PresShell::UpdateCanvasBackground()
   if (!FrameConstructor()->GetRootElementFrame()) {
     mCanvasBackgroundColor = GetDefaultBackgroundColorToDraw();
   }
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+  if (XRE_IsContentProcess()) {
     if (TabChild* tabChild = TabChild::GetFrom(this)) {
       tabChild->SetBackgroundColor(mCanvasBackgroundColor);
     }
@@ -5581,12 +5617,13 @@ PresShell::MarkImagesInListVisible(const nsDisplayList& aList)
   }
 }
 
-static PLDHashOperator
-DecrementVisibleCount(nsRefPtrHashKey<nsIImageLoadingContent>* aEntry, void*)
+static void
+DecrementVisibleCount(nsTHashtable<nsRefPtrHashKey<nsIImageLoadingContent>>& aImages,
+                      uint32_t aNonvisibleAction)
 {
-  aEntry->GetKey()->DecrementVisibleCount(
-    nsIImageLoadingContent::ON_NONVISIBLE_NO_ACTION);
-  return PL_DHASH_NEXT;
+  for (auto iter = aImages.Iter(); !iter.Done(); iter.Next()) {
+    iter.Get()->GetKey()->DecrementVisibleCount(aNonvisibleAction);
+  }
 }
 
 void
@@ -5599,7 +5636,8 @@ PresShell::RebuildImageVisibilityDisplayList(const nsDisplayList& aList)
   nsTHashtable< nsRefPtrHashKey<nsIImageLoadingContent> > oldVisibleImages;
   mVisibleImages.SwapElements(oldVisibleImages);
   MarkImagesInListVisible(aList);
-  oldVisibleImages.EnumerateEntries(DecrementVisibleCount, nullptr);
+  DecrementVisibleCount(oldVisibleImages,
+                        nsIImageLoadingContent::ON_NONVISIBLE_NO_ACTION);
 }
 
 /* static */ void
@@ -5619,23 +5657,10 @@ PresShell::ClearImageVisibilityVisited(nsView* aView, bool aClear)
   }
 }
 
-static PLDHashOperator
-DecrementVisibleCountAndDiscard(nsRefPtrHashKey<nsIImageLoadingContent>* aEntry,
-                                void*)
-{
-  aEntry->GetKey()->DecrementVisibleCount(
-    nsIImageLoadingContent::ON_NONVISIBLE_REQUEST_DISCARD);
-  return PL_DHASH_NEXT;
-}
-
 void
 PresShell::ClearVisibleImagesList(uint32_t aNonvisibleAction)
 {
-  auto enumerator
-    = aNonvisibleAction == nsIImageLoadingContent::ON_NONVISIBLE_REQUEST_DISCARD
-    ? DecrementVisibleCountAndDiscard
-    : DecrementVisibleCount;
-  mVisibleImages.EnumerateEntries(enumerator, nullptr);
+  DecrementVisibleCount(mVisibleImages, aNonvisibleAction);
   mVisibleImages.Clear();
 }
 
@@ -5746,7 +5771,8 @@ PresShell::RebuildImageVisibility(nsRect* aRect)
   }
   MarkImagesInSubtreeVisible(rootFrame, vis);
 
-  oldVisibleImages.EnumerateEntries(DecrementVisibleCount, nullptr);
+  DecrementVisibleCount(oldVisibleImages,
+                        nsIImageLoadingContent::ON_NONVISIBLE_NO_ACTION);
 }
 
 void
@@ -5955,7 +5981,7 @@ public:
   }
   ~AutoUpdateHitRegion()
   {
-    if (XRE_GetProcessType() != GeckoProcessType_Content ||
+    if (!XRE_IsContentProcess() ||
         !mFrame || !mShell) {
       return;
     }
@@ -7597,10 +7623,12 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         // retarget the event back at the keydown target. This prevents a
         // content area from grabbing the focus from chrome in-between key
         // events.
-        if (eventTarget &&
-            nsContentUtils::IsChromeDoc(gKeyDownTarget->GetComposedDoc()) !=
-            nsContentUtils::IsChromeDoc(eventTarget->GetComposedDoc())) {
-          eventTarget = gKeyDownTarget;
+        if (eventTarget) {
+          bool keyDownIsChrome = nsContentUtils::IsChromeDoc(gKeyDownTarget->GetComposedDoc());
+          if (keyDownIsChrome != nsContentUtils::IsChromeDoc(eventTarget->GetComposedDoc()) ||
+              (keyDownIsChrome && TabParent::GetFrom(eventTarget))) {
+            eventTarget = gKeyDownTarget;
+          }
         }
 
         if (aEvent->message == NS_KEY_UP) {
@@ -7734,7 +7762,7 @@ PresShell::HandlePositionedEvent(nsIFrame* aTargetFrame,
       // We use weak pointers because during this tight loop, the node
       // will *not* go away.  And this happens on every mousemove.
       while (targetElement && !targetElement->IsElement()) {
-        targetElement = targetElement->GetParent();
+        targetElement = targetElement->GetFlattenedTreeParent();
       }
 
       // If we found an element, target it.  Otherwise, target *nothing*.
@@ -7815,7 +7843,7 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent, nsEventStatus* aStatus)
               // ESC key released while in DOM fullscreen mode.
               // Fully exit all browser windows and documents from
               // fullscreen mode.
-              nsIDocument::ExitFullscreen(nullptr, /* async */ true);
+              nsIDocument::AsyncExitFullscreen(nullptr);
             }
           }
           nsCOMPtr<nsIDocument> pointerLockedDoc =
@@ -8869,22 +8897,6 @@ PresShell::GetPerformanceNow()
   return now;
 }
 
-static PLDHashOperator
-MarkFramesDirtyToRoot(nsPtrHashKey<nsIFrame>* p, void* closure)
-{
-  nsIFrame* target = static_cast<nsIFrame*>(closure);
-  for (nsIFrame* f = p->GetKey(); f && !NS_SUBTREE_DIRTY(f);
-       f = f->GetParent()) {
-    f->AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
-
-    if (f == target) {
-      break;
-    }
-  }
-
-  return PL_DHASH_NEXT;
-}
-
 void
 PresShell::sReflowContinueCallback(nsITimer* aTimer, void* aPresShell)
 {
@@ -9079,7 +9091,20 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
   bool interrupted = mPresContext->HasPendingInterrupt();
   if (interrupted) {
     // Make sure target gets reflowed again.
-    mFramesToDirty.EnumerateEntries(&MarkFramesDirtyToRoot, target);
+    for (auto iter = mFramesToDirty.Iter(); !iter.Done(); iter.Next()) {
+      // Mark frames dirty until target frame.
+      nsPtrHashKey<nsIFrame>* p = iter.Get();
+      for (nsIFrame* f = p->GetKey();
+           f && !NS_SUBTREE_DIRTY(f);
+           f = f->GetParent()) {
+        f->AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
+
+        if (f == target) {
+          break;
+        }
+      }
+    }
+
     NS_ASSERTION(NS_SUBTREE_DIRTY(target), "Why is the target not dirty?");
     mDirtyRoots.AppendElement(target);
     mDocument->SetNeedLayoutFlush();
@@ -10791,7 +10816,7 @@ nsIPresShell::RecomputeFontSizeInflationEnabled()
         mFontSizeInflationEnabled = false;
         return;
       }
-    } else if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    } else if (XRE_IsParentProcess()) {
       // We're in the master process.  Cancel inflation if it's been
       // explicitly disabled.
       if (FontSizeInflationDisabledInMasterProcess()) {
@@ -10893,4 +10918,28 @@ nsIPresShell::SyncWindowProperties(nsView* aView)
     nsRenderingContext rcx(CreateReferenceRenderingContext());
     nsContainerFrame::SyncWindowProperties(mPresContext, frame, aView, &rcx, 0);
   }
+}
+
+nsresult
+nsIPresShell::HasRuleProcessorUsedByMultipleStyleSets(uint32_t aSheetType,
+                                                      bool* aRetVal)
+{
+  nsStyleSet::sheetType type;
+  switch (aSheetType) {
+    case nsIStyleSheetService::AGENT_SHEET:
+      type = nsStyleSet::eAgentSheet;
+      break;
+    case nsIStyleSheetService::USER_SHEET:
+      type = nsStyleSet::eUserSheet;
+      break;
+    case nsIStyleSheetService::AUTHOR_SHEET:
+      type = nsStyleSet::eDocSheet;
+      break;
+    default:
+      MOZ_ASSERT(false, "unexpected aSheetType value");
+      return NS_ERROR_ILLEGAL_VALUE;
+  }
+
+  *aRetVal = mStyleSet->HasRuleProcessorUsedByMultipleStyleSets(type);
+  return NS_OK;
 }

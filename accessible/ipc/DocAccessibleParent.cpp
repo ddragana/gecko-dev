@@ -30,16 +30,16 @@ DocAccessibleParent::RecvShowEvent(const ShowEventData& aData)
   // required show events.
   if (!parent) {
     NS_ERROR("adding child to unknown accessible");
-    return false;
+    return true;
   }
 
   uint32_t newChildIdx = aData.Idx();
   if (newChildIdx > parent->ChildrenCount()) {
     NS_ERROR("invalid index to add child at");
-    return false;
+    return true;
   }
 
-  uint32_t consumed = AddSubtree(parent, aData.NewTree(), 0, newChildIdx);
+  DebugOnly<uint32_t> consumed = AddSubtree(parent, aData.NewTree(), 0, newChildIdx);
   MOZ_ASSERT(consumed == aData.NewTree().Length());
 #ifdef DEBUG
   for (uint32_t i = 0; i < consumed; i++) {
@@ -48,7 +48,7 @@ DocAccessibleParent::RecvShowEvent(const ShowEventData& aData)
   }
 #endif
 
-  return consumed != 0;
+  return true;
 }
 
 uint32_t
@@ -64,6 +64,11 @@ DocAccessibleParent::AddSubtree(ProxyAccessible* aParent,
   const AccessibleData& newChild = aNewTree[aIdx];
   if (newChild.Role() > roles::LAST_ROLE) {
     NS_ERROR("invalid role");
+    return 0;
+  }
+
+  if (mAccessibles.Contains(newChild.ID())) {
+    NS_ERROR("ID already in use");
     return 0;
   }
 
@@ -94,6 +99,8 @@ DocAccessibleParent::RecvHideEvent(const uint64_t& aRootID)
 {
   if (mShutdown)
     return true;
+
+  CheckDocTree();
 
   ProxyEntry* rootEntry = mAccessibles.GetEntry(aRootID);
   if (!rootEntry) {
@@ -133,8 +140,10 @@ DocAccessibleParent::RecvStateChangeEvent(const uint64_t& aID,
                                           const bool& aEnabled)
 {
   ProxyAccessible* target = GetAccessible(aID);
-  if (!target)
-    return false;
+  if (!target) {
+    NS_ERROR("we don't know about the target of a state change event!");
+    return true;
+  }
 
   ProxyStateChangeEvent(target, aState, aEnabled);
   return true;
@@ -144,29 +153,61 @@ bool
 DocAccessibleParent::RecvCaretMoveEvent(const uint64_t& aID, const int32_t& aOffset)
 {
   ProxyAccessible* proxy = GetAccessible(aID);
-  if (!proxy)
-    return false;
+  if (!proxy) {
+    NS_ERROR("unknown caret move event target!");
+    return true;
+  }
 
   ProxyCaretMoveEvent(proxy, aOffset);
   return true;
 }
 
 bool
+DocAccessibleParent::RecvTextChangeEvent(const uint64_t& aID,
+                                         const nsString& aStr,
+                                         const int32_t& aStart,
+                                         const uint32_t& aLen,
+                                         const bool& aIsInsert,
+                                         const bool& aFromUser)
+{
+  ProxyAccessible* target = GetAccessible(aID);
+  if (!target) {
+    NS_ERROR("text change event target is unknown!");
+    return true;
+  }
+
+  ProxyTextChangeEvent(target, aStr, aStart, aLen, aIsInsert, aFromUser);
+
+  return true;
+}
+
+bool
 DocAccessibleParent::RecvBindChildDoc(PDocAccessibleParent* aChildDoc, const uint64_t& aID)
 {
+  // One document should never directly be the child of another.
+  // We should always have at least an outer doc accessible in between.
+  MOZ_ASSERT(aID);
+  if (!aID)
+    return false;
+
   auto childDoc = static_cast<DocAccessibleParent*>(aChildDoc);
-  DebugOnly<bool> result = AddChildDoc(childDoc, aID, false);
+  bool result = AddChildDoc(childDoc, aID, false);
   MOZ_ASSERT(result);
-  return true;
+  return result;
 }
 
 bool
 DocAccessibleParent::AddChildDoc(DocAccessibleParent* aChildDoc,
                                  uint64_t aParentID, bool aCreating)
 {
-  ProxyAccessible* outerDoc = mAccessibles.GetEntry(aParentID)->mProxy;
-  if (!outerDoc)
+  // We do not use GetAccessible here because we want to be sure to not get the
+  // document it self.
+  ProxyEntry* e = mAccessibles.GetEntry(aParentID);
+  if (!e)
     return false;
+
+  ProxyAccessible* outerDoc = e->mProxy;
+  MOZ_ASSERT(outerDoc);
 
   aChildDoc->mParent = outerDoc;
   outerDoc->SetChildDoc(aChildDoc);
@@ -217,6 +258,18 @@ DocAccessibleParent::Destroy()
     mParentDoc->RemoveChildDoc(this);
   else if (IsTopLevel())
     GetAccService()->RemoteDocShutdown(this);
+}
+
+void
+DocAccessibleParent::CheckDocTree() const
+{
+  size_t childDocs = mChildDocs.Length();
+  for (size_t i = 0; i < childDocs; i++) {
+    if (!mChildDocs[i] || mChildDocs[i]->mParentDoc != this)
+      MOZ_CRASH("document tree is broken!");
+
+    mChildDocs[i]->CheckDocTree();
+  }
 }
 
 } // a11y

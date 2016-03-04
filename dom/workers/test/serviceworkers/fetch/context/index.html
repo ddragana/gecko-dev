@@ -128,8 +128,7 @@
       document.documentElement.appendChild(embed);
       navigator.serviceWorker.addEventListener("message", function onMessage(e) {
         if (e.data.data == "embed") {
-          // FIXME: Bug 1148030: This should be "embed".
-          is(e.data.context, "object", "Expected the object context on an embed");
+          is(e.data.context, "embed", "Expected the object context on an embed");
           navigator.serviceWorker.removeEventListener("message", onMessage);
           resolve();
         }
@@ -413,37 +412,8 @@
     });
   }
 
-  Promise.all([
-    testFetch(),
-    testImage(),
-    testImageSrcSet(),
-    testPicture(),
-    testAudio(),
-    testVideo(),
-    testBeacon(),
-    testCSPReport(),
-    testEmbed(),
-    testObject(),
-    testFont(),
-    testIFrame(),
-    testFrame(),
-    testInternal(),
-    testPing(),
-    testPlugin(),
-    testScript(),
-    testStyle(),
-    testTrack(),
-    testXHR(),
-    testXSLT(),
-    testWorker(),
-    testNestedWorker(),
-    testSharedWorker(),
-    testNestedWorkerInSharedWorker(),
-
-    // Also, test to see if the type of the request can be persisted in the database.
-    testCache(),
-  ])
-  .then(function() {
+  var testName = location.search.substr(1);
+  window[testName]().then(function() {
     finish();
   }, function(e) {
     ok(false, "A promise was rejected: " + e);

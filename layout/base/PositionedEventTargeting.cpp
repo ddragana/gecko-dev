@@ -173,7 +173,22 @@ HasTouchListener(nsIContent* aContent)
 }
 
 static bool
-IsElementClickable(nsIFrame* aFrame, nsIAtom* stopAt = nullptr)
+IsDescendant(nsIFrame* aFrame, nsIContent* aAncestor, nsAutoString* aLabelTargetId)
+{
+  for (nsIContent* content = aFrame->GetContent(); content;
+       content = content->GetFlattenedTreeParent()) {
+    if (aLabelTargetId && content->IsHTMLElement(nsGkAtoms::label)) {
+      content->GetAttr(kNameSpaceID_None, nsGkAtoms::_for, *aLabelTargetId);
+    }
+    if (content == aAncestor) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool
+IsElementClickable(nsIFrame* aFrame, nsIAtom* stopAt = nullptr, nsAutoString* aLabelTargetId = nullptr)
 {
   // Input events propagate up the content tree so we'll follow the content
   // ancestors to look for elements accepting the click.
@@ -188,8 +203,13 @@ IsElementClickable(nsIFrame* aFrame, nsIAtom* stopAt = nullptr)
     if (content->IsAnyOfHTMLElements(nsGkAtoms::button,
                                      nsGkAtoms::input,
                                      nsGkAtoms::select,
-                                     nsGkAtoms::textarea,
-                                     nsGkAtoms::label)) {
+                                     nsGkAtoms::textarea)) {
+      return true;
+    }
+    if (content->IsHTMLElement(nsGkAtoms::label)) {
+      if (aLabelTargetId) {
+        content->GetAttr(kNameSpaceID_None, nsGkAtoms::_for, *aLabelTargetId);
+      }
       return true;
     }
 
@@ -320,11 +340,27 @@ SubtractFromExposedRegion(nsRegion* aExposedRegion, const nsRegion& aRegion)
   }
 }
 
+// Search in the list of frames aCandidates if the element with the id "aLabelTargetId"
+// is present.
+static bool IsElementPresent(nsTArray<nsIFrame*>& aCandidates, const nsAutoString& aLabelTargetId)
+{
+  for (uint32_t i = 0; i < aCandidates.Length(); ++i) {
+    nsIFrame* f = aCandidates[i];
+    nsIContent* aContent = f->GetContent();
+    if (aContent && aContent->IsElement()) {
+      if (aContent->GetID() && aLabelTargetId == nsAtomString(aContent->GetID())) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 static nsIFrame*
 GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
            const nsRect& aTargetRect, const EventRadiusPrefs* aPrefs,
-           nsIFrame* aRestrictToDescendants, nsTArray<nsIFrame*>& aCandidates,
-           int32_t* aElementsInCluster)
+           nsIFrame* aRestrictToDescendants, nsIContent* aClickableAncestor,
+           nsTArray<nsIFrame*>& aCandidates, int32_t* aElementsInCluster)
 {
   nsIFrame* bestTarget = nullptr;
   // Lower is better; distance is in appunits
@@ -351,7 +387,13 @@ GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
       SubtractFromExposedRegion(&exposedRegion, region);
     }
 
-    if (!IsElementClickable(f, nsGkAtoms::body)) {
+    nsAutoString labelTargetId;
+    if (aClickableAncestor) {
+      if (!IsDescendant(f, aClickableAncestor, &labelTargetId)) {
+        PET_LOG("  candidate %p is not a descendant of required ancestor\n", f);
+        continue;
+      }
+    } else if (!IsElementClickable(f, nsGkAtoms::body, &labelTargetId)) {
       PET_LOG("  candidate %p was not clickable\n", f);
       continue;
     }
@@ -366,7 +408,13 @@ GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
       continue;
     }
 
-    (*aElementsInCluster)++;
+    // If the first clickable ancestor of f is a label element
+    // and "for" attribute is present in label element, search the frame list for the "for" element
+    // If this element is present in the current list, do not count the frame in
+    // the cluster elements counter
+    if (labelTargetId.IsEmpty() || !IsElementPresent(aCandidates, labelTargetId)) {
+      (*aElementsInCluster)++;
+    }
 
     // distance is in appunits
     float distance = ComputeDistanceFromRegion(aPointRelativeToRootFrame, region);
@@ -475,12 +523,13 @@ FindFrameTargetedByInputEvent(WidgetGUIEvent* aEvent,
     PET_LOG("Retargeting disabled\n");
     return target;
   }
+  nsIContent* clickableAncestor = nullptr;
   if (target && IsElementClickable(target, nsGkAtoms::body)) {
     if (!IsElementClickableAndReadable(target, aEvent, prefs)) {
       aEvent->AsMouseEventBase()->hitCluster = true;
     }
     PET_LOG("Target %p is clickable\n", target);
-    return target;
+    clickableAncestor = target->GetContent();
   }
 
   // Do not modify targeting for actual mouse hardware; only for mouse
@@ -515,7 +564,8 @@ FindFrameTargetedByInputEvent(WidgetGUIEvent* aEvent,
 
   nsIFrame* closestClickable =
     GetClosest(aRootFrame, aPointRelativeToRootFrame, targetRect, prefs,
-               restrictToDescendants, candidates, &elementsInCluster);
+               restrictToDescendants, clickableAncestor, candidates,
+               &elementsInCluster);
   if (closestClickable) {
     if ((!prefs->mTouchClusterDetectionDisabled && elementsInCluster > 1) ||
         (!IsElementClickableAndReadable(closestClickable, aEvent, prefs))) {
@@ -563,4 +613,4 @@ FindFrameTargetedByInputEvent(WidgetGUIEvent* aEvent,
   return target;
 }
 
-}
+} // namespace mozilla

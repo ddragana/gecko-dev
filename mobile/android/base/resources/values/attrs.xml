@@ -38,8 +38,6 @@
         <attr name="topSitesGridItemViewStyle" format="reference" />
 
         <!-- Styles for dynamic panel grid views -->
-        <attr name="panelGridViewStyle" format="reference" />
-        <attr name="panelIconGridViewStyle" format="reference" />
         <attr name="panelIconViewStyle" format="reference" />
 
         <!-- Style for the TabsGridLayout -->
@@ -171,6 +169,7 @@
 
     <declare-styleable name="TabMenuStrip">
         <attr name="strip" format="reference"/>
+        <attr name="tabContentStart" format="dimension" />
     </declare-styleable>
 
     <declare-styleable name="TabPanelBackButton">

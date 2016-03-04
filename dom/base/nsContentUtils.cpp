@@ -26,6 +26,7 @@
 #include "MediaDecoder.h"
 // nsNPAPIPluginInstance must be included before nsIDocument.h, which is included in mozAutoDocUpdate.h.
 #include "nsNPAPIPluginInstance.h"
+#include "gfxPrefs.h"
 #include "mozAutoDocUpdate.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
@@ -134,6 +135,7 @@
 #include "nsILoadContext.h"
 #include "nsILoadGroup.h"
 #include "nsIMemoryReporter.h"
+#include "nsIMIMEHeaderParam.h"
 #include "nsIMIMEService.h"
 #include "nsINode.h"
 #include "mozilla/dom/NodeInfo.h"
@@ -152,8 +154,10 @@
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIScriptSecurityManager.h"
+#include "nsIStreamConverterService.h"
 #include "nsIStringBundle.h"
 #include "nsIURI.h"
+#include "nsIURIWithPrincipal.h"
 #include "nsIURL.h"
 #include "nsIWebNavigation.h"
 #include "nsIWordBreaker.h"
@@ -439,7 +443,7 @@ private:
   nsCString mCharset;
 };
 
-} // anonymous namespace
+} // namespace
 
 /* static */
 TimeDuration
@@ -2023,9 +2027,9 @@ namespace dom {
 namespace workers {
 extern bool IsCurrentThreadRunningChromeWorker();
 extern JSContext* GetCurrentThreadJSContext();
-}
-}
-}
+} // namespace workers
+} // namespace dom
+} // namespace mozilla
 
 bool
 nsContentUtils::ThreadsafeIsCallerChrome()
@@ -3411,6 +3415,36 @@ nsContentUtils::ReportToConsole(uint32_t aErrorFlags,
   return ReportToConsoleNonLocalized(errorText, aErrorFlags, aCategory,
                                      aDocument, aURI, aSourceLine,
                                      aLineNumber, aColumnNumber);
+}
+
+/* static */ nsresult
+nsContentUtils::MaybeReportInterceptionErrorToConsole(nsIDocument* aDocument,
+                                                      nsresult aError)
+{
+  const char* messageName = nullptr;
+  if (aError == NS_ERROR_INTERCEPTION_FAILED) {
+    messageName = "InterceptionFailed";
+  } else if (aError == NS_ERROR_OPAQUE_INTERCEPTION_DISABLED) {
+    messageName = "OpaqueInterceptionDisabled";
+  } else if (aError == NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE) {
+    messageName = "BadOpaqueInterceptionRequestMode";
+  } else if (aError == NS_ERROR_INTERCEPTED_ERROR_RESPONSE) {
+    messageName = "InterceptedErrorResponse";
+  } else if (aError == NS_ERROR_INTERCEPTED_USED_RESPONSE) {
+    messageName = "InterceptedUsedResponse";
+  } else if (aError == NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION) {
+    messageName = "ClientRequestOpaqueInterception";
+  }
+
+  if (messageName) {
+    return ReportToConsole(nsIScriptError::warningFlag,
+                           NS_LITERAL_CSTRING("Service Worker Interception"),
+                           aDocument,
+                           nsContentUtils::eDOM_PROPERTIES,
+                           messageName);
+  }
+
+  return NS_OK;
 }
 
 
@@ -6500,6 +6534,19 @@ nsContentUtils::AllowXULXBLForPrincipal(nsIPrincipal* aPrincipal)
           IsSitePermAllow(aPrincipal, "allowXULXBL"));
 }
 
+bool
+nsContentUtils::IsPDFJSEnabled()
+{
+   nsCOMPtr<nsIStreamConverterService> convServ =
+     do_GetService("@mozilla.org/streamConverters;1");
+   nsresult rv = NS_ERROR_FAILURE;
+   bool canConvert = false;
+   if (convServ) {
+     rv = convServ->CanConvert("application/pdf", "text/html", &canConvert);
+   }
+   return NS_SUCCEEDED(rv) && canConvert;
+}
+
 already_AddRefed<nsIDocumentLoaderFactory>
 nsContentUtils::FindInternalContentViewer(const nsACString& aType,
                                           ContentViewerType* aLoaderType)
@@ -7417,8 +7464,11 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
           if (file) {
             blobImpl = new BlobImplFile(file, false);
             ErrorResult rv;
+            // Ensure that file data is cached no that the content process
+            // has this data available to it when passed over:
             blobImpl->GetSize(rv);
             blobImpl->GetLastModified(rv);
+            blobImpl->LookupAndCacheIsDirectory();
           } else {
             blobImpl = do_QueryInterface(data);
           }

@@ -373,6 +373,10 @@ struct RenderTargetPixel {
  * generally be represented in ScreenPixel units.
  */
 struct ScreenPixel {
+  static nsIntSize ToUntyped(const ScreenIntSize& aSize) {
+    return nsIntSize(aSize.width, aSize.height);
+  }
+
   static ScreenIntPoint FromUntyped(const nsIntPoint& aPoint) {
     return ScreenIntPoint(aPoint.x, aPoint.y);
   }
@@ -591,6 +595,6 @@ gfx::ScaleFactor<src, dst> MinScaleRatio(const gfx::SizeTyped<dst>& aDestSize, c
                                              aDestSize.height / aSrcSize.height));
 }
 
-}
+} // namespace mozilla
 
 #endif

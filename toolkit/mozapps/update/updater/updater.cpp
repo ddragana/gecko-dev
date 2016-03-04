@@ -64,7 +64,12 @@
 #define PROGRESS_FINISH_SIZE   5.0f
 
 // Amount of time in ms to wait for the parent process to close
-#define PARENT_WAIT 5000
+#ifdef DEBUG
+// Use a large value for debug builds since the xpcshell tests take a long time.
+#define PARENT_WAIT 30000
+#else
+#define PARENT_WAIT 10000
+#endif
 
 #if defined(XP_MACOSX)
 // These functions are defined in launchchild_osx.mm
@@ -115,7 +120,8 @@ static bool sUseHardLinks = true;
 # define MAYBE_USE_HARD_LINKS 0
 #endif
 
-#if defined(MOZ_VERIFY_MAR_SIGNATURE) && !defined(XP_WIN) && !defined(XP_MACOSX)
+#if defined(MOZ_VERIFY_MAR_SIGNATURE) && !defined(XP_WIN) && \
+    !defined(XP_MACOSX) && !defined(MOZ_WIDGET_GONK)
 #include "nss.h"
 #include "prerror.h"
 #endif
@@ -1843,20 +1849,42 @@ LaunchCallbackApp(const NS_tchar *workingDir,
 static bool
 WriteStatusFile(const char* aStatus)
 {
-  NS_tchar filename[MAXPATHLEN];
+  NS_tchar filename[MAXPATHLEN] = {NS_T('\0')};
+#if defined(XP_WIN)
+  // The temp file is not removed on failure since there is client code that
+  // will remove it.
+  GetTempFileNameW(gPatchDirPath, L"sta", 0, filename);
+#else
   NS_tsnprintf(filename, sizeof(filename)/sizeof(filename[0]),
                NS_T("%s/update.status"), gPatchDirPath);
+#endif
 
   // Make sure that the directory for the update status file exists
-  if (ensure_parent_dir(filename))
+  if (ensure_parent_dir(filename)) {
     return false;
+  }
 
-  AutoFile file(NS_tfopen(filename, NS_T("wb+")));
-  if (file == nullptr)
-    return false;
+  // This is scoped to make the AutoFile close the file so it is possible to
+  // move the temp file to the update.status file on Windows.
+  {
+    AutoFile file(NS_tfopen(filename, NS_T("wb+")));
+    if (file == nullptr) {
+      return false;
+    }
 
-  if (fwrite(aStatus, strlen(aStatus), 1, file) != 1)
+    if (fwrite(aStatus, strlen(aStatus), 1, file) != 1) {
+      return false;
+    }
+  }
+
+#if defined(XP_WIN)
+  NS_tchar dstfilename[MAXPATHLEN] = {NS_T('\0')};
+  NS_tsnprintf(dstfilename, sizeof(dstfilename)/sizeof(dstfilename[0]),
+               NS_T("%s\\update.status"), gPatchDirPath);
+  if (MoveFileExW(filename, dstfilename, MOVEFILE_REPLACE_EXISTING) == 0) {
     return false;
+  }
+#endif
 
   return true;
 }
@@ -2349,7 +2377,8 @@ int NS_main(int argc, NS_tchar **argv)
   }
 #endif
 
-#if defined(MOZ_VERIFY_MAR_SIGNATURE) && !defined(XP_WIN) && !defined(XP_MACOSX)
+#if defined(MOZ_VERIFY_MAR_SIGNATURE) && !defined(XP_WIN) && \
+    !defined(XP_MACOSX) && !defined(MOZ_WIDGET_GONK)
   // On Windows and Mac we rely on native APIs to do verifications so we don't
   // need to initialize NSS at all there.
   // Otherwise, minimize the amount of NSS we depend on by avoiding all the NSS
@@ -2777,14 +2806,14 @@ int NS_main(int argc, NS_tchar **argv)
         }
       }
 
-      // If the service can't be used when staging and update, make sure that
+      // If the service can't be used when staging an update, make sure that
       // the UAC prompt is not shown! In this case, just set the status to
       // pending and the update will be applied during the next startup.
       if (!useService && sStagedUpdate) {
         if (updateLockFileHandle != INVALID_HANDLE_VALUE) {
           CloseHandle(updateLockFileHandle);
         }
-        WriteStatusPending(gPatchDirPath);
+        WriteStatusFile("pending");
         return 0;
       }
 
@@ -2851,7 +2880,7 @@ int NS_main(int argc, NS_tchar **argv)
         // The elevated updater.exe is responsible for writing out the
         // update.status file.
         return 0;
-      } else if(useService) {
+      } else if (useService) {
         // The service command was launched. The service is responsible for
         // writing out the update.status file.
         if (updateLockFileHandle != INVALID_HANDLE_VALUE) {
@@ -3217,6 +3246,7 @@ int NS_main(int argc, NS_tchar **argv)
       LaunchMacPostProcess(gInstallDirPath);
     }
 #endif /* XP_MACOSX */
+
     LaunchCallbackApp(argv[5],
                       argc - callbackIndex,
                       argv + callbackIndex,

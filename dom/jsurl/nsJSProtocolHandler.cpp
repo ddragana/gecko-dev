@@ -16,6 +16,7 @@
 #include "nsStringStream.h"
 #include "nsNetUtil.h"
 
+#include "nsIStreamListener.h"
 #include "nsIComponentManager.h"
 #include "nsIServiceManager.h"
 #include "nsIURI.h"
@@ -49,6 +50,7 @@
 #include "nsSandboxFlags.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsILoadInfo.h"
+#include "nsContentSecurityManager.h"
 
 #include "mozilla/ipc/URIUtils.h"
 
@@ -249,6 +251,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
 
     // New script entry point required, due to the "Create a script" step of
     // http://www.whatwg.org/specs/web-apps/current-work/#javascript-protocol
+    nsAutoMicroTask mt;
     AutoEntryScript entryScript(innerGlobal, "javascript: URI", true,
                                 scriptContext->GetNativeContext());
     // We want to make sure we report any exceptions that happen before we
@@ -551,6 +554,15 @@ nsJSChannel::Open(nsIInputStream **aResult)
 }
 
 NS_IMETHODIMP
+nsJSChannel::Open2(nsIInputStream** aStream)
+{
+    nsCOMPtr<nsIStreamListener> listener;
+    nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
+    NS_ENSURE_SUCCESS(rv, rv);
+    return Open(aStream);
+}
+
+NS_IMETHODIMP
 nsJSChannel::AsyncOpen(nsIStreamListener *aListener, nsISupports *aContext)
 {
     NS_ENSURE_ARG(aListener);
@@ -659,6 +671,15 @@ nsJSChannel::AsyncOpen(nsIStreamListener *aListener, nsISupports *aContext)
         CleanupStrongRefs();
     }
     return rv;
+}
+
+NS_IMETHODIMP
+nsJSChannel::AsyncOpen2(nsIStreamListener *aListener)
+{
+  nsCOMPtr<nsIStreamListener> listener = aListener;
+  nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return AsyncOpen(listener, nullptr);
 }
 
 void
@@ -1219,6 +1240,7 @@ nsJSProtocolHandler::NewChannel2(nsIURI* uri,
     }
 
     rv = channel->Init(uri);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     // set the loadInfo on the new channel
     rv = channel->SetLoadInfo(aLoadInfo);

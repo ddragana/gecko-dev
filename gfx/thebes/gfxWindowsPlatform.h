@@ -20,6 +20,7 @@
 #include "gfxDWriteFonts.h"
 #endif
 #include "gfxPlatform.h"
+#include "gfxTelemetry.h"
 #include "gfxTypes.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Atomics.h"
@@ -115,8 +116,8 @@ public:
     virtual gfxPlatformFontList* CreatePlatformFontList();
 
     virtual already_AddRefed<gfxASurface>
-      CreateOffscreenSurface(const IntSize& size,
-                             gfxContentType contentType) override;
+      CreateOffscreenSurface(const IntSize& aSize,
+                             gfxImageFormat aFormat) override;
 
     virtual already_AddRefed<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);
@@ -240,10 +241,7 @@ public:
     void OnDeviceManagerDestroy(mozilla::layers::DeviceManagerD3D9* aDeviceManager);
     mozilla::layers::DeviceManagerD3D9* GetD3D9DeviceManager();
     IDirect3DDevice9* GetD3D9Device();
-#ifdef CAIRO_HAS_D2D_SURFACE
-    cairo_device_t *GetD2DDevice() { return mD2DDevice; }
-    ID3D10Device1 *GetD3D10Device() { return mD2DDevice ? cairo_d2d_device_get_device(mD2DDevice) : nullptr; }
-#endif
+    ID3D10Device1 *GetD3D10Device() { return mD3D10Device; }
     ID3D11Device *GetD3D11Device();
     ID3D11Device *GetD3D11ContentDevice();
     // Device to be used on the ImageBridge thread
@@ -264,11 +262,29 @@ public:
     }
     bool SupportsApzTouchInput() const override;
 
+    // Return the diagnostic status of DirectX initialization. If
+    // initialization has not been attempted, this returns
+    // FeatureStatus::Unused.
+    mozilla::gfx::FeatureStatus GetD3D11Status() const {
+      return mD3D11Status;
+    }
+    mozilla::gfx::FeatureStatus GetD2DStatus() const {
+      return mD2DStatus;
+    }
+    unsigned GetD3D11Version();
+    mozilla::gfx::FeatureStatus GetD2D1Status();
+
     virtual already_AddRefed<mozilla::gfx::VsyncSource> CreateHardwareVsyncSource() override;
     static mozilla::Atomic<size_t> sD3D11MemoryUsed;
     static mozilla::Atomic<size_t> sD3D9MemoryUsed;
     static mozilla::Atomic<size_t> sD3D9SurfaceImageUsed;
     static mozilla::Atomic<size_t> sD3D9SharedTextureUsed;
+
+protected:
+    bool AccelerateLayersByDefault() override {
+      return true;
+    }
+    void GetAcceleratedCompositorBackends(nsTArray<mozilla::layers::LayersBackend>& aBackends);
 
 protected:
     RenderMode mRenderMode;
@@ -278,7 +294,26 @@ protected:
 
 private:
     void Init();
+
     void InitD3D11Devices();
+
+    // Used by InitD3D11Devices().
+    enum class D3D11Status {
+      Ok,
+      TryWARP,
+      ForceWARP,
+      Blocked
+    };
+    D3D11Status CheckD3D11Support();
+    bool AttemptD3D11DeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+    bool AttemptWARPDeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+    bool AttemptD3D11ImageBridgeDeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+    bool AttemptD3D11ContentDeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+
+    // Used by UpdateRenderMode().
+    mozilla::gfx::FeatureStatus InitD2DSupport();
+    void InitDWriteSupport();
+
     IDXGIAdapter1 *GetDXGIAdapter();
     bool IsDeviceReset(HRESULT hr, DeviceResetReason* aReason);
 
@@ -291,11 +326,9 @@ private:
     nsRefPtr<IDWriteRenderingParams> mRenderingParams[TEXT_RENDERING_COUNT];
     DWRITE_MEASURING_MODE mMeasuringMode;
 #endif
-#ifdef CAIRO_HAS_D2D_SURFACE
-    cairo_device_t *mD2DDevice;
-#endif
     mozilla::RefPtr<IDXGIAdapter1> mAdapter;
     nsRefPtr<mozilla::layers::DeviceManagerD3D9> mDeviceManager;
+    mozilla::RefPtr<ID3D10Device1> mD3D10Device;
     mozilla::RefPtr<ID3D11Device> mD3D11Device;
     mozilla::RefPtr<ID3D11Device> mD3D11ContentDevice;
     mozilla::RefPtr<ID3D11Device> mD3D11ImageBridgeDevice;
@@ -305,6 +338,9 @@ private:
     bool mHasDeviceReset;
     bool mDoesD3D11TextureSharingWork;
     DeviceResetReason mDeviceResetReason;
+
+    mozilla::gfx::FeatureStatus mD3D11Status;
+    mozilla::gfx::FeatureStatus mD2DStatus;
 
     virtual void GetPlatformCMSOutputProfile(void* &mem, size_t &size);
 };

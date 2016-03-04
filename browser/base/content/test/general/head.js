@@ -177,7 +177,7 @@ function clearAllPermissionsByPrefix(aPrefix) {
   while (perms.hasMoreElements()) {
     let perm = perms.getNext();
     if (perm.type.startsWith(aPrefix)) {
-      Services.perms.remove(perm.host, perm.type);
+      Services.perms.removePermission(perm);
     }
   }
 }
@@ -658,55 +658,6 @@ function promiseIndicatorWindow() {
     return Promise.resolve();
 
   return promiseWindow("chrome://browser/content/webrtcIndicator.xul");
-}
-
-/**
- * Add some entries to a test tracking protection database, and reset
- * back to the default database after the test ends.
- */
-function updateTrackingProtectionDatabase() {
-  let TABLE = "urlclassifier.trackingTable";
-  Services.prefs.setCharPref(TABLE, "test-track-simple");
-
-  registerCleanupFunction(function() {
-    Services.prefs.clearUserPref(TABLE);
-  });
-
-  // Add some URLs to the tracking database (to be blocked)
-  let testData = "tracking.example.com/";
-  let testUpdate =
-    "n:1000\ni:test-track-simple\nad:1\n" +
-    "a:524:32:" + testData.length + "\n" +
-    testData;
-
-  return new Promise((resolve, reject) => {
-    let dbService = Cc["@mozilla.org/url-classifier/dbservice;1"]
-                    .getService(Ci.nsIUrlClassifierDBService);
-    let listener = {
-      QueryInterface: iid => {
-        if (iid.equals(Ci.nsISupports) ||
-            iid.equals(Ci.nsIUrlClassifierUpdateObserver))
-          return listener;
-
-        throw Cr.NS_ERROR_NO_INTERFACE;
-      },
-      updateUrlRequested: url => { },
-      streamFinished: status => { },
-      updateError: errorCode => {
-        ok(false, "Couldn't update classifier.");
-        resolve();
-      },
-      updateSuccess: requestedTimeout => {
-        resolve();
-      }
-    };
-
-    dbService.beginUpdate(listener, "test-track-simple", "");
-    dbService.beginStream("", "");
-    dbService.updateStream(testUpdate);
-    dbService.finishStream();
-    dbService.finishUpdate();
-  });
 }
 
 function assertWebRTCIndicatorStatus(expected) {

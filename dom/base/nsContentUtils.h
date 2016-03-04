@@ -842,6 +842,9 @@ public:
                                   uint32_t aLineNumber = 0,
                                   uint32_t aColumnNumber = 0);
 
+  static nsresult
+  MaybeReportInterceptionErrorToConsole(nsIDocument* aDocument, nsresult aError);
+
   static void LogMessageToConsole(const char* aMsg, ...);
   
   /**
@@ -2069,6 +2072,11 @@ public:
    * Perform cleanup that's appropriate for XPCOM shutdown.
    */
   static void XPCOMShutdown();
+
+  /**
+   * Checks if internal PDF viewer is enabled.
+   */
+  static bool IsPDFJSEnabled();
 
   enum ContentViewerType
   {

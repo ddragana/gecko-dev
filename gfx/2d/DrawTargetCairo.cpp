@@ -659,9 +659,6 @@ DrawTargetCairo::GetType() const
     case CAIRO_SURFACE_TYPE_RECORDING:
     case CAIRO_SURFACE_TYPE_DRM:
     case CAIRO_SURFACE_TYPE_SUBSURFACE:
-#ifdef CAIRO_HAS_D2D_SURFACE
-    case CAIRO_SURFACE_TYPE_D2D:
-#endif
     case CAIRO_SURFACE_TYPE_TEE: // included to silence warning about unhandled enum value
       return DrawTargetType::SOFTWARE_RASTER;
     default:
@@ -676,6 +673,23 @@ IntSize
 DrawTargetCairo::GetSize()
 {
   return mSize;
+}
+
+SurfaceFormat
+GfxFormatForCairoSurface(cairo_surface_t* surface)
+{
+  cairo_surface_type_t type = cairo_surface_get_type(surface);
+  if (type == CAIRO_SURFACE_TYPE_IMAGE) {
+    return CairoFormatToGfxFormat(cairo_image_surface_get_format(surface));
+  }
+#ifdef CAIRO_HAS_XLIB_SURFACE
+  // xlib is currently the only Cairo backend that creates 16bpp surfaces
+  if (type == CAIRO_SURFACE_TYPE_XLIB &&
+      cairo_xlib_surface_get_depth(surface) == 16) {
+    return SurfaceFormat::R5G6B5;
+  }
+#endif
+  return CairoContentToGfxFormat(cairo_surface_get_content(surface));
 }
 
 already_AddRefed<SourceSurface>
@@ -1562,7 +1576,7 @@ DrawTargetCairo::CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFo
     }
   }
 
-  gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(aSize))) << "Failed to create similar cairo surface! Size: " << aSize << " Status: " << cairo_surface_status(similar);
+  gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(aSize))) << "Failed to create similar cairo surface! Size: " << aSize << " Status: " << cairo_surface_status(similar) << " format " << (int)aFormat;
 
   return nullptr;
 }
@@ -1810,5 +1824,5 @@ BorrowedXlibDrawable::Finish()
 }
 #endif
 
-}
-}
+} // namespace gfx
+} // namespace mozilla

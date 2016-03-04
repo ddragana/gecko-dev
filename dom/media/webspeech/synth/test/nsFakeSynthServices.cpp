@@ -311,7 +311,9 @@ nsFakeSynthServices::Observe(nsISupports* aSubject, const char* aTopic,
                              const char16_t* aData)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  NS_ENSURE_TRUE(!strcmp(aTopic, "profile-after-change"), NS_ERROR_UNEXPECTED);
+  if(NS_WARN_IF(!(!strcmp(aTopic, "profile-after-change")))) {
+    return NS_ERROR_UNEXPECTED;
+  }
 
   if (Preferences::GetBool("media.webspeech.synth.test")) {
     Init();
@@ -326,7 +328,7 @@ nsFakeSynthServices*
 nsFakeSynthServices::GetInstance()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+  if (!XRE_IsParentProcess()) {
     MOZ_ASSERT(false, "nsFakeSynthServices can only be started on main gecko process");
     return nullptr;
   }

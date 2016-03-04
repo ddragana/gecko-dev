@@ -415,6 +415,7 @@ loop.shared.actions = (function() {
      * XXX: should move to some roomActions module - refs bug 1079284
      */
     CopyRoomUrl: Action.define("copyRoomUrl", {
+      from: String,
       roomUrl: String
     }),
 
@@ -423,6 +424,7 @@ loop.shared.actions = (function() {
      * XXX: should move to some roomActions module - refs bug 1079284
      */
     EmailRoomUrl: Action.define("emailRoomUrl", {
+      from: String,
       roomUrl: String
       // roomDescription: String, Optional.
     }),
@@ -499,6 +501,13 @@ loop.shared.actions = (function() {
     }),
 
     /**
+     * Starts the process for the user to join the room.
+     * XXX: should move to some roomActions module - refs bug 1079284
+     */
+    RetryAfterRoomFailure: Action.define("retryAfterRoomFailure", {
+    }),
+
+    /**
      * Signals the user has successfully joined the room on the loop-server.
      * XXX: should move to some roomActions module - refs bug 1079284
      *
@@ -512,16 +521,15 @@ loop.shared.actions = (function() {
     }),
 
     /**
-     * Used to indicate that the feedback cycle is completed and the countdown
-     * finished.
-     */
-    FeedbackComplete: Action.define("feedbackComplete", {
-    }),
-
-    /**
      * Used to indicate the user wishes to leave the room.
      */
     LeaveRoom: Action.define("leaveRoom", {
+    }),
+
+    /**
+     * Signals that the feedback view should be rendered.
+     */
+    ShowFeedbackForm: Action.define("showFeedbackForm", {
     }),
 
     /**
@@ -533,28 +541,6 @@ loop.shared.actions = (function() {
       // record what users are clicking, just the information about the fact
       // they clicked the link in that spot (e.g. "Shared URL").
       linkInfo: String
-    }),
-
-    /**
-     * Requires detailed information on sad feedback.
-     */
-    RequireFeedbackDetails: Action.define("requireFeedbackDetails", {
-    }),
-
-    /**
-     * Send feedback data.
-     */
-    SendFeedback: Action.define("sendFeedback", {
-      happy: Boolean,
-      category: String,
-      description: String
-    }),
-
-    /**
-     * Reacts on feedback submission error.
-     */
-    SendFeedbackError: Action.define("sendFeedbackError", {
-      error: Error
     }),
 
     /**

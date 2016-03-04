@@ -434,7 +434,10 @@ CreateBoxShadow(DrawTarget& aDT, SourceSurface* aBlurMask, const gfxRGBA& aShado
   gfxPlatform* platform = gfxPlatform::GetPlatform();
   RefPtr<DrawTarget> boxShadowDT =
     platform->CreateOffscreenContentDrawTarget(blurredSize, SurfaceFormat::B8G8R8A8);
-  MOZ_ASSERT(boxShadowDT->GetType() == aDT.GetType());
+
+  if (!boxShadowDT) {
+    return nullptr;
+  }
 
   ColorPattern shadowColor(ToDeviceColor(aShadowColor));
   boxShadowDT->MaskSurface(shadowColor, aBlurMask, Point(0, 0));
@@ -475,6 +478,10 @@ GetBlur(DrawTarget& aDT,
   }
 
   RefPtr<SourceSurface> boxShadow = CreateBoxShadow(aDT, blurMask, aShadowColor);
+  if (!boxShadow) {
+    return nullptr;
+  }
+
   CacheBlur(aDT, minSize, aBlurRadius, aCornerRadii, aShadowColor, aExtendDestBy, boxShadow);
   return boxShadow;
 }

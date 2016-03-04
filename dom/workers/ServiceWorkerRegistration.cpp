@@ -6,21 +6,26 @@
 
 #include "ServiceWorkerRegistration.h"
 
+#include "mozilla/dom/Notification.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseWorkerProxy.h"
 #include "mozilla/dom/ServiceWorkerRegistrationBinding.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
 #include "ServiceWorker.h"
+#include "ServiceWorkerManager.h"
 
 #include "nsIDocument.h"
 #include "nsIServiceWorkerManager.h"
 #include "nsISupportsPrimitives.h"
 #include "nsPIDOMWindow.h"
 
+#include "WorkerPrivate.h"
 #include "Workers.h"
+#include "WorkerScope.h"
 
 #ifndef MOZ_SIMPLEPUSH
 #include "mozilla/dom/PushManagerBinding.h"
@@ -318,7 +323,10 @@ public:
       return false;
     }
 
-    NS_SUCCEEDED(NS_DispatchToMainThread(this));
+    nsCOMPtr<nsIRunnable> that(this);
+    if (NS_WARN_IF(NS_FAILED(NS_DispatchToMainThread(this)))) {
+      NS_ASSERTION(false, "Failed to dispatch update back to MainThread in ServiceWorker");
+    }
     return true;
   }
 
@@ -514,7 +522,7 @@ public:
     return NS_OK;
   }
 };
-} // anonymous namespace
+} // namespace
 
 void
 ServiceWorkerRegistrationMainThread::Update()
@@ -586,6 +594,52 @@ ServiceWorkerRegistrationMainThread::Unregister(ErrorResult& aRv)
   }
 
   return promise.forget();
+}
+
+// Notification API extension.
+already_AddRefed<Promise>
+ServiceWorkerRegistrationMainThread::ShowNotification(JSContext* aCx,
+                                                      const nsAString& aTitle,
+                                                      const NotificationOptions& aOptions,
+                                                      ErrorResult& aRv)
+{
+  AssertIsOnMainThread();
+  MOZ_ASSERT(GetOwner());
+  nsCOMPtr<nsPIDOMWindow> window = GetOwner();
+  if (NS_WARN_IF(!window)) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+  if (NS_WARN_IF(!doc)) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  nsRefPtr<workers::ServiceWorker> worker = GetActive();
+  if (!worker) {
+    aRv.ThrowTypeError(MSG_NO_ACTIVE_WORKER);
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(window);
+  nsRefPtr<Promise> p =
+    Notification::ShowPersistentNotification(global,
+                                             mScope, aTitle, aOptions, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  return p.forget();
+}
+
+already_AddRefed<Promise>
+ServiceWorkerRegistrationMainThread::GetNotifications(const GetNotificationOptions& aOptions, ErrorResult& aRv)
+{
+  AssertIsOnMainThread();
+  nsCOMPtr<nsPIDOMWindow> window = GetOwner();
+  return Notification::Get(window, aOptions, mScope, aRv);
 }
 
 already_AddRefed<PushManager>
@@ -808,6 +862,8 @@ ServiceWorkerRegistrationWorkerThread::Update()
   MOZ_ASSERT(worker);
   worker->AssertIsOnWorkerThread();
 
+  // XXX: this pattern guarantees we won't know which thread UpdateRunnable
+  // will die on (here or MainThread)
   nsRefPtr<UpdateRunnable> r = new UpdateRunnable(worker, mScope);
   r->Dispatch();
 }
@@ -991,5 +1047,33 @@ WorkerListener::UpdateFound()
     }
   }
 }
+
+// Notification API extension.
+already_AddRefed<Promise>
+ServiceWorkerRegistrationWorkerThread::ShowNotification(JSContext* aCx,
+                                                        const nsAString& aTitle,
+                                                        const NotificationOptions& aOptions,
+                                                        ErrorResult& aRv)
+{
+  // Until Bug 1131324 exposes ServiceWorkerContainer on workers,
+  // ShowPersistentNotification() checks for valid active worker while it is
+  // also verifying scope so that we block the worker on the main thread only
+  // once.
+  nsRefPtr<Promise> p =
+    Notification::ShowPersistentNotification(mWorkerPrivate->GlobalScope(),
+                                             mScope, aTitle, aOptions, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  return p.forget();
+}
+
+already_AddRefed<Promise>
+ServiceWorkerRegistrationWorkerThread::GetNotifications(const GetNotificationOptions& aOptions, ErrorResult& aRv)
+{
+  return Notification::WorkerGet(mWorkerPrivate, aOptions, mScope, aRv);
+}
+
 } // dom namespace
 } // mozilla namespace

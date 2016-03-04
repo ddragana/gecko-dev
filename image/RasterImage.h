@@ -26,6 +26,7 @@
 #include "LookupResult.h"
 #include "nsThreadUtils.h"
 #include "DecodePool.h"
+#include "DecoderFactory.h"
 #include "Orientation.h"
 #include "nsIObserver.h"
 #include "mozilla/Attributes.h"
@@ -125,7 +126,7 @@ namespace mozilla {
 namespace layers {
 class ImageContainer;
 class Image;
-}
+} // namespace layers
 
 namespace image {
 
@@ -206,7 +207,10 @@ public:
   void     SetLoopCount(int32_t aLoopCount);
 
   /// Notification that the entire image has been decoded.
-  void OnDecodingComplete();
+  void OnDecodingComplete(bool aIsAnimated);
+
+  /// Helper method for OnDecodingComplete.
+  void MarkAnimationDecoded();
 
   /**
    * Sends the provided progress notifications to ProgressTracker.
@@ -246,7 +250,6 @@ public:
                                        bool aLastPart) override;
 
   void NotifyForLoadEvent(Progress aProgress);
-  void NotifyForDecodeOnlyOnDraw();
 
   /**
    * A hint of the number of bytes of source data that the image contains. If
@@ -337,19 +340,23 @@ private:
 
   /**
    * Creates and runs a decoder, either synchronously or asynchronously
-   * according to @aFlags. Passes the provided target size @aSize and decode
-   * flags @aFlags to CreateDecoder. If a size decode is desired, pass Nothing
-   * for @aSize.
+   * according to @aFlags. Decodes at the provided target size @aSize, using
+   * decode flags @aFlags.
+   *
+   * It's an error to call Decode() before this image's intrinsic size is
+   * available. A metadata decode must successfully complete first.
+   *
+   * If downscale-during-decode is not enabled for this image (i.e., if
+   * mDownscaleDuringDecode is false), it is an error to pass an @aSize value
+   * different from this image's intrinsic size.
    */
-  NS_IMETHOD Decode(const Maybe<nsIntSize>& aSize, uint32_t aFlags);
+  NS_IMETHOD Decode(const gfx::IntSize& aSize, uint32_t aFlags);
 
   /**
-   * Creates a new decoder with a target size of @aSize and decode flags
-   * specified by @aFlags. If a size decode is desired, pass Nothing() for
-   * @aSize.
+   * Creates and runs a metadata decoder, either synchronously or
+   * asynchronously according to @aFlags.
    */
-  already_AddRefed<Decoder> CreateDecoder(const Maybe<nsIntSize>& aSize,
-                                          uint32_t aFlags);
+  NS_IMETHOD DecodeMetadata(uint32_t aFlags);
 
   /**
    * In catastrophic circumstances like a GPU driver crash, we may lose our
@@ -373,8 +380,8 @@ private: // data
   // Image locking.
   uint32_t                   mLockCount;
 
-  // Source data members
-  nsCString                  mSourceDataMimeType;
+  // The type of decoder this image needs. Computed from the MIME type in Init().
+  DecoderType                mDecoderType;
 
   // How many times we've decoded this image.
   // This is currently only used for statistics
@@ -405,12 +412,8 @@ private: // data
   // The number of frames this image has.
   uint32_t                   mFrameCount;
 
-  // The number of times we've retried decoding this image.
-  uint8_t                    mRetryCount;
-
   // Boolean flags (clustered together to conserve space):
   bool                       mHasSize:1;       // Has SetSize() been called?
-  bool                       mDecodeOnlyOnDraw:1; // Decoding only on draw?
   bool                       mTransient:1;     // Is the image short-lived?
   bool                       mSyncLoad:1;      // Are we loading synchronously?
   bool                       mDiscardable:1;   // Is container discardable?
@@ -427,8 +430,8 @@ private: // data
   // of frames, or no more owning request
   bool                       mAnimationFinished:1;
 
-  // Whether, once we are done doing a size decode, we should immediately kick
-  // off a full decode.
+  // Whether, once we are done doing a metadata decode, we should immediately
+  // kick off a full decode.
   bool                       mWantFullDecode:1;
 
   TimeStamp mDrawStartTime;

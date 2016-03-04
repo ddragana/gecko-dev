@@ -121,6 +121,11 @@ class StoreBuffer
             stores_.remove(v);
         }
 
+        bool has(StoreBuffer* owner, const T& v) {
+            sinkStores(owner);
+            return stores_.has(v);
+        }
+
         /* Trace the source of all edges in the store buffer. */
         void trace(StoreBuffer* owner, TenuringTracer& mover);
 
@@ -183,6 +188,10 @@ class StoreBuffer
 
         size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {
             return storage_ ? storage_->sizeOfIncludingThis(mallocSizeOf) : 0;
+        }
+
+        bool isEmpty() {
+            return !storage_ || storage_->isEmpty();
         }
 
       private:
@@ -433,6 +442,19 @@ class StoreBuffer
         putFromAnyThread(bufferGeneric, CallbackRef<Key>(callback, key, data));
     }
 
+    void assertHasCellEdge(Cell** cellp) {
+        CellPtrEdge cpe(cellp);
+
+        MOZ_ASSERT(bufferCell.has(this, CellPtrEdge(cellp)) ||
+                   !CellPtrEdge(cellp).maybeInRememberedSet(nursery_));
+
+    }
+
+    void assertHasValueEdge(Value* vp) {
+        MOZ_ASSERT(bufferVal.has(this, ValueEdge(vp)) ||
+                   !ValueEdge(vp).maybeInRememberedSet(nursery_));
+    }
+
     void setShouldCancelIonCompilations() {
         cancelIonCompilations_ = true;
     }
@@ -446,6 +468,10 @@ class StoreBuffer
 
     /* For use by our owned buffers and for testing. */
     void setAboutToOverflow();
+
+    bool hasPostBarrierCallbacks() {
+        return !bufferGeneric.isEmpty();
+    }
 
     void addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::GCSizes* sizes);
 };

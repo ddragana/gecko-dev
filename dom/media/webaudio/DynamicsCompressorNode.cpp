@@ -37,7 +37,7 @@ public:
                                         AudioDestinationNode* aDestination)
     : AudioNodeEngine(aNode)
     , mSource(nullptr)
-    , mDestination(static_cast<AudioNodeStream*> (aDestination->Stream()))
+    , mDestination(aDestination->Stream())
     // Keep the default value in sync with the default value in
     // DynamicsCompressorNode::DynamicsCompressorNode.
     , mThreshold(-24.f)
@@ -162,15 +162,9 @@ private:
 
       NS_IMETHOD Run() override
       {
-        nsRefPtr<DynamicsCompressorNode> node;
-        {
-          // No need to keep holding the lock for the whole duration of this
-          // function, since we're holding a strong reference to it, so if
-          // we can obtain the reference, we will hold the node alive in
-          // this function.
-          MutexAutoLock lock(mStream->Engine()->NodeMutex());
-          node = static_cast<DynamicsCompressorNode*>(mStream->Engine()->Node());
-        }
+        nsRefPtr<DynamicsCompressorNode> node =
+          static_cast<DynamicsCompressorNode*>
+            (mStream->Engine()->NodeMainThread());
         if (node) {
           node->SetReduction(mReduction);
         }
@@ -210,7 +204,7 @@ DynamicsCompressorNode::DynamicsCompressorNode(AudioContext* aContext)
 {
   DynamicsCompressorNodeEngine* engine = new DynamicsCompressorNodeEngine(this, aContext->Destination());
   mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
-  engine->SetSourceStream(static_cast<AudioNodeStream*> (mStream.get()));
+  engine->SetSourceStream(mStream);
 }
 
 DynamicsCompressorNode::~DynamicsCompressorNode()
@@ -276,5 +270,5 @@ DynamicsCompressorNode::SendReleaseToStream(AudioNode* aNode)
   SendTimelineParameterToStream(This, DynamicsCompressorNodeEngine::RELEASE, *This->mRelease);
 }
 
-}
-}
+} // namespace dom
+} // namespace mozilla

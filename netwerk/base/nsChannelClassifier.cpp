@@ -8,7 +8,6 @@
 
 #include "mozIThirdPartyUtil.h"
 #include "nsContentUtils.h"
-#include "nsNetUtil.h"
 #include "nsICacheEntry.h"
 #include "nsICachingChannel.h"
 #include "nsIChannel.h"
@@ -25,6 +24,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsISecureBrowserUI.h"
 #include "nsISecurityEventSink.h"
+#include "nsIURL.h"
 #include "nsIWebProgressListener.h"
 #include "nsPIDOMWindow.h"
 #include "nsXULAppAPI.h"
@@ -59,7 +59,7 @@ nsChannelClassifier::ShouldEnableTrackingProtection(nsIChannel *aChannel,
                                                     bool *result)
 {
     // Should only be called in the parent process.
-    MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+    MOZ_ASSERT(XRE_IsParentProcess());
 
     NS_ENSURE_ARG(result);
     *result = false;
@@ -237,12 +237,9 @@ nsChannelClassifier::NotifyTrackingProtectionDisabled(nsIChannel *aChannel)
 }
 
 void
-nsChannelClassifier::Start(nsIChannel *aChannel, bool aContinueBeginConnect)
+nsChannelClassifier::Start(nsIChannel *aChannel)
 {
   mChannel = aChannel;
-  if (aContinueBeginConnect) {
-    mChannelInternal = do_QueryInterface(aChannel);
-  }
 
   nsresult rv = StartInternal();
   if (NS_FAILED(rv)) {
@@ -256,7 +253,7 @@ nsresult
 nsChannelClassifier::StartInternal()
 {
     // Should only be called in the parent process.
-    MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+    MOZ_ASSERT(XRE_IsParentProcess());
 
     // Don't bother to run the classifier on a load that has already failed.
     // (this might happen after a redirect)
@@ -369,7 +366,7 @@ void
 nsChannelClassifier::MarkEntryClassified(nsresult status)
 {
     // Should only be called in the parent process.
-    MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+    MOZ_ASSERT(XRE_IsParentProcess());
 
     // Don't cache tracking classifications because we support allowlisting.
     if (status == NS_ERROR_TRACKING_URI || mIsAllowListed) {
@@ -401,7 +398,7 @@ bool
 nsChannelClassifier::HasBeenClassified(nsIChannel *aChannel)
 {
     // Should only be called in the parent process.
-    MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+    MOZ_ASSERT(XRE_IsParentProcess());
 
     nsCOMPtr<nsICachingChannel> cachingChannel =
         do_QueryInterface(aChannel);
@@ -499,7 +496,7 @@ NS_IMETHODIMP
 nsChannelClassifier::OnClassifyComplete(nsresult aErrorCode)
 {
     // Should only be called in the parent process.
-    MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+    MOZ_ASSERT(XRE_IsParentProcess());
 
     LOG(("nsChannelClassifier[%p]:OnClassifyComplete %d", this, aErrorCode));
     if (mSuspendedChannel) {
@@ -530,13 +527,7 @@ nsChannelClassifier::OnClassifyComplete(nsresult aErrorCode)
         mChannel->Resume();
     }
 
-    // Even if we have cancelled the channel, we may need to call
-    // ContinueBeginConnect so that we abort appropriately.
-    if (mChannelInternal) {
-        mChannelInternal->ContinueBeginConnect();
-    }
     mChannel = nullptr;
-    mChannelInternal = nullptr;
 
     return NS_OK;
 }

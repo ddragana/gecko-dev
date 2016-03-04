@@ -4,7 +4,7 @@
 
 var loop = loop || {};
 loop.shared = loop.shared || {};
-loop.shared.views = (function(_, l10n) {
+loop.shared.views = (function(_, mozL10n) {
   "use strict";
 
   var sharedActions = loop.shared.actions;
@@ -26,6 +26,7 @@ loop.shared.views = (function(_, l10n) {
       action: React.PropTypes.func.isRequired,
       enabled: React.PropTypes.bool.isRequired,
       scope: React.PropTypes.string.isRequired,
+      title: React.PropTypes.string,
       type: React.PropTypes.string.isRequired,
       visible: React.PropTypes.bool.isRequired
     },
@@ -54,10 +55,14 @@ loop.shared.views = (function(_, l10n) {
     },
 
     _getTitle: function(enabled) {
+      if (this.props.title) {
+        return this.props.title;
+      }
+
       var prefix = this.props.enabled ? "mute" : "unmute";
       var suffix = "button_title";
       var msgId = [prefix, this.props.scope, this.props.type, suffix].join("_");
-      return l10n.get(msgId);
+      return mozL10n.get(msgId);
     },
 
     render: function() {
@@ -125,7 +130,7 @@ loop.shared.views = (function(_, l10n) {
       var prefix = this.props.state === SCREEN_SHARE_STATES.ACTIVE ?
         "active" : "inactive";
 
-      return l10n.get(prefix + "_screenshare_button_title");
+      return mozL10n.get(prefix + "_screenshare_button_title");
     },
 
     render: function() {
@@ -164,10 +169,10 @@ loop.shared.views = (function(_, l10n) {
           ), 
           React.createElement("ul", {className: dropdownMenuClasses, ref: "menu"}, 
             React.createElement("li", {onClick: this._handleShareTabs}, 
-              l10n.get("share_tabs_button_title2")
+              mozL10n.get("share_tabs_button_title2")
             ), 
             React.createElement("li", {className: windowSharingClasses, onClick: this._handleShareWindows}, 
-              l10n.get("share_windows_button_title")
+              mozL10n.get("share_windows_button_title")
             )
           )
         )
@@ -183,6 +188,7 @@ loop.shared.views = (function(_, l10n) {
       return {
         video: {enabled: true, visible: true},
         audio: {enabled: true, visible: true},
+        edit: {enabled: false, visible: false},
         screenShare: {state: SCREEN_SHARE_STATES.INACTIVE, visible: false},
         enableHangup: true
       };
@@ -191,9 +197,11 @@ loop.shared.views = (function(_, l10n) {
     propTypes: {
       audio: React.PropTypes.object.isRequired,
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
+      edit: React.PropTypes.object.isRequired,
       enableHangup: React.PropTypes.bool,
       hangup: React.PropTypes.func.isRequired,
       hangupButtonLabel: React.PropTypes.string,
+      onEditClick: React.PropTypes.func,
       publishStream: React.PropTypes.func.isRequired,
       screenShare: React.PropTypes.object,
       video: React.PropTypes.object.isRequired
@@ -211,8 +219,14 @@ loop.shared.views = (function(_, l10n) {
       this.props.publishStream("audio", !this.props.audio.enabled);
     },
 
+    handleToggleEdit: function() {
+      if (this.props.onEditClick) {
+        this.props.onEditClick(!this.props.edit.enabled);
+      }
+    },
+
     _getHangupButtonLabel: function() {
-      return this.props.hangupButtonLabel || l10n.get("hangup_button_caption2");
+      return this.props.hangupButtonLabel || mozL10n.get("hangup_button_caption2");
     },
 
     render: function() {
@@ -222,7 +236,7 @@ loop.shared.views = (function(_, l10n) {
             React.createElement("button", {className: "btn btn-hangup", 
                     disabled: !this.props.enableHangup, 
                     onClick: this.handleClickHangup, 
-                    title: l10n.get("hangup_button_title")}, 
+                    title: mozL10n.get("hangup_button_title")}, 
               this._getHangupButtonLabel()
             )
           ), 
@@ -238,10 +252,19 @@ loop.shared.views = (function(_, l10n) {
                                 scope: "local", type: "audio", 
                                 visible: this.props.audio.visible})
           ), 
-          React.createElement("li", {className: "conversation-toolbar-btn-box btn-screen-share-entry"}, 
+          React.createElement("li", {className: "conversation-toolbar-btn-box"}, 
             React.createElement(ScreenShareControlButton, {dispatcher: this.props.dispatcher, 
                                       state: this.props.screenShare.state, 
                                       visible: this.props.screenShare.visible})
+          ), 
+          React.createElement("li", {className: "conversation-toolbar-btn-box btn-edit-entry"}, 
+            React.createElement(MediaControlButton, {action: this.handleToggleEdit, 
+                                enabled: this.props.edit.enabled, 
+                                scope: "local", 
+                                title: mozL10n.get(this.props.edit.enabled ?
+                                  "context_edit_tooltip" : "context_hide_tooltip"), 
+                                type: "edit", 
+                                visible: this.props.edit.visible})
           )
         )
       );
@@ -260,6 +283,7 @@ loop.shared.views = (function(_, l10n) {
 
     propTypes: {
       audio: React.PropTypes.object,
+      dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
       initiate: React.PropTypes.bool,
       isDesktop: React.PropTypes.bool,
       model: React.PropTypes.object.isRequired,
@@ -300,7 +324,7 @@ loop.shared.views = (function(_, l10n) {
           };
         }
 
-        this.listenTo(this.props.sdk, "exception", this._handleSdkException.bind(this));
+        this.listenTo(this.props.sdk, "exception", this._handleSdkException);
 
         this.listenTo(this.props.model, "session:connected",
                                         this._onSessionConnected);
@@ -402,14 +426,14 @@ loop.shared.views = (function(_, l10n) {
           audio: {enabled: ev.stream.hasAudio},
           video: {enabled: ev.stream.hasVideo}
         });
-      }.bind(this));
+      });
 
       this.listenTo(this.publisher, "streamDestroyed", function() {
         this.setState({
           audio: {enabled: false},
           video: {enabled: false}
         });
-      }.bind(this));
+      });
 
       this.props.model.publish(this.publisher);
     },
@@ -459,6 +483,7 @@ loop.shared.views = (function(_, l10n) {
             ), 
             React.createElement(ConversationToolbar, {
               audio: this.state.audio, 
+              dispatcher: this.props.dispatcher, 
               hangup: this.hangup, 
               publishStream: this.publishStream, 
               video: this.state.video})
@@ -475,7 +500,6 @@ loop.shared.views = (function(_, l10n) {
     mixins: [Backbone.Events],
 
     propTypes: {
-      key: React.PropTypes.number.isRequired,
       notification: React.PropTypes.object.isRequired
     },
 
@@ -483,8 +507,7 @@ loop.shared.views = (function(_, l10n) {
       var notification = this.props.notification;
       return (
         React.createElement("div", {className: "notificationContainer"}, 
-          React.createElement("div", {className: "alert alert-" + notification.get("level"), 
-            key: this.props.key}, 
+          React.createElement("div", {className: "alert alert-" + notification.get("level")}, 
             React.createElement("span", {className: "message"}, notification.get("message"))
           ), 
           React.createElement("div", {className: "detailsBar details-" + notification.get("level"), 
@@ -519,7 +542,7 @@ loop.shared.views = (function(_, l10n) {
     componentDidMount: function() {
       this.listenTo(this.props.notifications, "reset add remove", function() {
         this.forceUpdate();
-      }.bind(this));
+      });
     },
 
     componentWillUnmount: function() {
@@ -548,7 +571,6 @@ loop.shared.views = (function(_, l10n) {
           this.props.notifications.map(function(notification, key) {
             return React.createElement(NotificationView, {key: key, notification: notification});
           })
-        
         )
       );
     }
@@ -771,7 +793,7 @@ loop.shared.views = (function(_, l10n) {
         return null;
       }
 
-      return React.createElement("p", null, l10n.get("context_inroom_label"));
+      return React.createElement("p", null, mozL10n.get("context_inroom_label"));
     },
 
     render: function() {
@@ -922,6 +944,81 @@ loop.shared.views = (function(_, l10n) {
     }
   });
 
+  var MediaLayoutView = React.createClass({displayName: "MediaLayoutView",
+    propTypes: {
+      dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
+      displayScreenShare: React.PropTypes.bool.isRequired,
+      isLocalLoading: React.PropTypes.bool.isRequired,
+      isRemoteLoading: React.PropTypes.bool.isRequired,
+      isScreenShareLoading: React.PropTypes.bool.isRequired,
+      // The poster URLs are for UI-showcase testing and development.
+      localPosterUrl: React.PropTypes.string,
+      localSrcVideoObject: React.PropTypes.object,
+      localVideoMuted: React.PropTypes.bool.isRequired,
+      remotePosterUrl: React.PropTypes.string,
+      remoteSrcVideoObject: React.PropTypes.object,
+      renderRemoteVideo: React.PropTypes.bool.isRequired,
+      screenSharePosterUrl: React.PropTypes.string,
+      screenShareVideoObject: React.PropTypes.object,
+      showContextRoomName: React.PropTypes.bool.isRequired,
+      useDesktopPaths: React.PropTypes.bool.isRequired
+    },
+
+    render: function() {
+      var remoteStreamClasses = React.addons.classSet({
+        "remote": true,
+        "focus-stream": !this.props.displayScreenShare
+      });
+
+      var screenShareStreamClasses = React.addons.classSet({
+        "screen": true,
+        "focus-stream": this.props.displayScreenShare
+      });
+
+      var mediaWrapperClasses = React.addons.classSet({
+        "media-wrapper": true,
+        "receiving-screen-share": this.props.displayScreenShare,
+        "showing-local-streams": this.props.localSrcVideoObject ||
+          this.props.localPosterUrl
+      });
+
+      return (
+        React.createElement("div", {className: "media-layout"}, 
+          React.createElement("div", {className: mediaWrapperClasses}, 
+            React.createElement("span", {className: "self-view-hidden-message"}, 
+              mozL10n.get("self_view_hidden_message")
+            ), 
+            React.createElement("div", {className: remoteStreamClasses}, 
+              React.createElement(MediaView, {displayAvatar: !this.props.renderRemoteVideo, 
+                isLoading: this.props.isRemoteLoading, 
+                mediaType: "remote", 
+                posterUrl: this.props.remotePosterUrl, 
+                srcVideoObject: this.props.remoteSrcVideoObject})
+            ), 
+            React.createElement("div", {className: screenShareStreamClasses}, 
+              React.createElement(MediaView, {displayAvatar: false, 
+                isLoading: this.props.isScreenShareLoading, 
+                mediaType: "screen-share", 
+                posterUrl: this.props.screenSharePosterUrl, 
+                srcVideoObject: this.props.screenShareVideoObject})
+            ), 
+            React.createElement(loop.shared.views.chat.TextChatView, {
+              dispatcher: this.props.dispatcher, 
+              showRoomName: this.props.showContextRoomName, 
+              useDesktopPaths: false}), 
+            React.createElement("div", {className: "local"}, 
+              React.createElement(MediaView, {displayAvatar: this.props.localVideoMuted, 
+                isLoading: this.props.isLocalLoading, 
+                mediaType: "local", 
+                posterUrl: this.props.localPosterUrl, 
+                srcVideoObject: this.props.localSrcVideoObject})
+            )
+          )
+        )
+      );
+    }
+  });
+
   return {
     AvatarView: AvatarView,
     Button: Button,
@@ -931,6 +1028,7 @@ loop.shared.views = (function(_, l10n) {
     ConversationView: ConversationView,
     ConversationToolbar: ConversationToolbar,
     MediaControlButton: MediaControlButton,
+    MediaLayoutView: MediaLayoutView,
     MediaView: MediaView,
     LoadingView: LoadingView,
     ScreenShareControlButton: ScreenShareControlButton,
