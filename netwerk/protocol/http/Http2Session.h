@@ -235,6 +235,9 @@ public:
   // overload of nsAHttpTransaction
   nsresult ReadSegmentsAgain(nsAHttpSegmentReader *, uint32_t, uint32_t *, bool *) override final;
   nsresult WriteSegmentsAgain(nsAHttpSegmentWriter *, uint32_t , uint32_t *, bool *) override final;
+  nsresult ReadSegments0RTT(nsAHttpSegmentReader *, uint32_t, uint32_t *) override final;
+  nsresult Finished0RTTStart(bool) override final;
+  bool CanPeekMoreDataFor0RTT() override final;
 
 private:
 
@@ -490,6 +493,11 @@ private:
   bool mGoAwayOnPush;
 
   bool mUseH2Deps;
+
+  // If 0RTT connection setup is used, we keep data in the queue until the
+  // connection is established. This variable keeps track of the amount of data
+  // that has been sent.
+  uint32_t mCountRead0RTT;
 
 private:
 /// connect tunnels

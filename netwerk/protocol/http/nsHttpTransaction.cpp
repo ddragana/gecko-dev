@@ -29,6 +29,7 @@
 #include "nsServiceManagerUtils.h"   // do_GetService
 #include "nsIHttpActivityObserver.h"
 #include "nsSocketTransportService2.h"
+#include "nsIBufferedStreams.h"
 #include "nsICancelable.h"
 #include "nsIEventTarget.h"
 #include "nsIHttpChannelInternal.h"
@@ -376,8 +377,11 @@ nsHttpTransaction::Init(uint32_t caps,
                                        nsIOService::gDefaultSegmentSize);
         if (NS_FAILED(rv)) return rv;
     }
-    else
-        mRequestStream = headers;
+    else {
+        rv = NS_NewBufferedInputStream(getter_AddRefs(mRequestStream), headers,
+                                       nsIOService::gDefaultSegmentSize);
+        if (NS_FAILED(rv)) return rv;
+    }
 
     uint64_t size_u64;
     rv = mRequestStream->Available(&size_u64);
@@ -738,6 +742,47 @@ nsHttpTransaction::ReadSegments(nsAHttpSegmentReader *reader,
     }
 
     return rv;
+}
+
+nsresult
+nsHttpTransaction::ReadSegments0RTT(nsAHttpSegmentReader *reader,
+                                    uint32_t count, uint32_t *countRead)
+{
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+
+    MOZ_ASSERT(!mTransactionDone);
+
+    *countRead = 0;
+    nsresult rv = NS_OK;
+    mDeferredSendProgress = false;
+    mReader = reader;
+    nsCOMPtr<nsIBufferedInputStream> stream = do_QueryInterface(mRequestStream);
+    if (stream) {
+        rv = stream->PeekSegments(ReadRequestSegment, this, count, countRead);
+    }
+    mReader = nullptr;
+    mDeferredSendProgress = false;
+
+    return rv;
+}
+
+bool
+nsHttpTransaction::CanPeekMoreDataFor0RTT()
+{
+    // If buffer is full we cannot read more data.
+    nsCOMPtr<nsIBufferedInputStream> stream = do_QueryInterface(mRequestStream);
+    if (stream) {
+        bool canPeekMore;
+        stream->MoreDataToPeek(&canPeekMore);
+        return canPeekMore;
+    }
+    return false;
+}
+
+nsresult
+nsHttpTransaction::Finished0RTTStart(bool aSuccess)
+{
+  return NS_OK;
 }
 
 NS_METHOD

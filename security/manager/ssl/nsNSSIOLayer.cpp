@@ -58,6 +58,8 @@ using namespace mozilla::psm;
 
 namespace {
 
+#define MAX_ALPN_LENGTH 255
+
 void
 getSiteKey(const nsACString& hostName, uint16_t port,
            /*out*/ nsCSubstring& key)
@@ -87,6 +89,7 @@ nsNSSSocketInfo::nsNSSSocketInfo(SharedSSLState& aState, uint32_t providerFlags)
     mRememberClientAuthCertificate(false),
     mPreliminaryHandshakeDone(false),
     mNPNCompleted(false),
+    mEarlyDataAccepted(false),
     mFalseStartCallbackCalled(false),
     mFalseStarted(false),
     mIsFullHandshake(false),
@@ -305,6 +308,38 @@ nsNSSSocketInfo::GetNegotiatedNPN(nsACString& aNegotiatedNPN)
 
   aNegotiatedNPN = mNegotiatedNPN;
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::GetAlpnEarlySelection(nsACString& aAlpnSelected)
+{
+  SSLNextProtoState alpnState;
+  char chosenAlpn[MAX_ALPN_LENGTH];
+  unsigned int chosenAlpnLen;
+  SECStatus rv = SSL_GetNextProto(mFd, &alpnState,
+                                  reinterpret_cast<unsigned char*>(chosenAlpn),
+                                  &chosenAlpnLen, sizeof(chosenAlpn));
+
+  if ((rv == SECSuccess) &&
+      (alpnState == SSL_NEXT_PROTO_EARLY_VALUE) &&
+      chosenAlpnLen) {
+    aAlpnSelected.Assign(chosenAlpn, chosenAlpnLen);
+  }
+
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::GetEarlyDataAccepted(bool* aAccepted)
+{
+  *aAccepted = mEarlyDataAccepted;
+  return NS_OK;
+}
+
+void
+nsNSSSocketInfo::SetEarlyDataAccepted(bool aAccepted)
+{
+  mEarlyDataAccepted = aAccepted;
 }
 
 NS_IMETHODIMP

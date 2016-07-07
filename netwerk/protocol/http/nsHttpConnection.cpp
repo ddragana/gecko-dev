@@ -79,6 +79,8 @@ nsHttpConnection::nsHttpConnection()
     , mResponseTimeoutEnabled(false)
     , mTCPKeepaliveConfig(kTCPKeepaliveDisabled)
     , mForceSendPending(false)
+    , m0RTTChecked(false)
+    , mWaitingFor0RTTResponse(false)
 {
     LOG(("Creating nsHttpConnection @%p\n", this));
 
@@ -271,7 +273,7 @@ nsHttpConnection::StartSpdy(uint8_t spdyVersion)
 }
 
 bool
-nsHttpConnection::EnsureNPNComplete()
+nsHttpConnection::EnsureNPNComplete(nsresult &aRv, uint32_t &aTransactionBytes)
 {
     // If for some reason the components to check on NPN aren't available,
     // this function will just return true to continue on and disable SPDY
@@ -303,14 +305,69 @@ nsHttpConnection::EnsureNPNComplete()
 
     rv = ssl->GetNegotiatedNPN(negotiatedNPN);
     if (rv == NS_ERROR_NOT_CONNECTED) {
-        // By writing 0 bytes to the socket the SSL handshake machine is
-        // pushed forward.
-        uint32_t count = 0;
-        rv = mSocketOut->Write("", 0, &count);
-        if (NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK) {
-            goto npnComplete;
+
+        // Check if we have early selected alpn.
+        // TODO: we probably do not need check from couple of lines below, need to see when we fix PR_PEEK problem.
+        if (!m0RTTChecked) {
+            nsAutoCString earlyNegotiatedNPN;
+            if (ssl->GetAlpnEarlySelection(earlyNegotiatedNPN) == NS_ERROR_NOT_AVAILABLE) {
+                LOG(("nsHttpConnection::EnsureNPNComplete %p - "
+                     "early selected alpn not available"));
+                // Let's do PR_Write and try again.
+            } else {
+                LOG(("nsHttpConnection::EnsureNPNComplete %p -"
+                     "early selected alpn: %s\n", earlyNegotiatedNPN.get()));
+                uint32_t infoIndex;
+                const SpdyInformation *info = gHttpHandler->SpdyInfo();
+                if (NS_SUCCEEDED(info->GetNPNIndex(earlyNegotiatedNPN, &infoIndex))) {
+                    return false;
+                }
+                m0RTTChecked = true;
+                mWaitingFor0RTTResponse = true;
+            }
         }
 
+        // In case we are not in 0RTT or we have no more data to write data.
+        if (!mWaitingFor0RTTResponse ||
+            !mTransaction->CanPeekMoreDataFor0RTT()) {
+            // By writing 0 bytes to the socket the SSL handshake machine is
+            // pushed forward.
+            uint32_t count = 0;
+            rv = mSocketOut->Write("", 0, &count);
+            if (NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK) {
+                goto npnComplete;
+            }
+
+           if (!m0RTTChecked) {
+                m0RTTChecked = true;
+                nsAutoCString earlyNegotiatedNPN;
+                rv = ssl->GetAlpnEarlySelection(earlyNegotiatedNPN);
+                if (rv == NS_ERROR_NOT_AVAILABLE) {
+                    LOG(("nsHttpConnection::EnsureNPNComplete %p - "
+                         "early selected alpn not available"));
+                    return false;
+                }
+
+                LOG(("nsHttpConnection::EnsureNPNComplete %p -"
+                     "early selected alpn: %s\n", earlyNegotiatedNPN.get()));
+                uint32_t infoIndex;
+                const SpdyInformation *info = gHttpHandler->SpdyInfo();
+                if (NS_SUCCEEDED(info->GetNPNIndex(negotiatedNPN, &infoIndex))) {
+                    return false;
+                }
+                mWaitingFor0RTTResponse = true;
+            }
+        }
+
+        if (mWaitingFor0RTTResponse &&
+            mTransaction->CanPeekMoreDataFor0RTT()) {
+            aRv = mTransaction->ReadSegments0RTT(this,
+                                                 nsIOService::gDefaultSegmentSize,
+                                                 &aTransactionBytes);
+            if (NS_FAILED(aRv) && aRv != NS_BASE_STREAM_WOULD_BLOCK) {
+                goto npnComplete;
+            }
+        }
         return false;
     }
 
@@ -319,10 +376,22 @@ nsHttpConnection::EnsureNPNComplete()
              this, mConnInfo->HashKey().get(), negotiatedNPN.get(),
              mTLSFilter ? " [Double Tunnel]" : ""));
 
-        uint32_t infoIndex;
-        const SpdyInformation *info = gHttpHandler->SpdyInfo();
-        if (NS_SUCCEEDED(info->GetNPNIndex(negotiatedNPN, &infoIndex))) {
-            StartSpdy(info->Version[infoIndex]);
+        if (mWaitingFor0RTTResponse) {
+            mWaitingFor0RTTResponse = false;
+            bool earlyDataAccepted;
+            rv = ssl->GetEarlyDataAccepted(&earlyDataAccepted);
+            if (!earlyDataAccepted) {
+                mTransaction->Finished0RTTStart(false);
+                //TODO clean up for H2.
+            } else {
+                mTransaction->Finished0RTTStart(true);
+            }
+        } else {
+            uint32_t infoIndex;
+            const SpdyInformation *info = gHttpHandler->SpdyInfo();
+            if (NS_SUCCEEDED(info->GetNPNIndex(negotiatedNPN, &infoIndex))) {
+                StartSpdy(info->Version[infoIndex]);
+            }
         }
 
         Telemetry::Accumulate(Telemetry::SPDY_NPN_CONNECT, UsingSpdy());
@@ -331,6 +400,10 @@ nsHttpConnection::EnsureNPNComplete()
 npnComplete:
     LOG(("nsHttpConnection::EnsureNPNComplete setting complete to true"));
     mNPNComplete = true;
+    if (mWaitingFor0RTTResponse) {
+        mWaitingFor0RTTResponse = false;
+        mTransaction->Finished0RTTStart(false);
+    }
     return true;
 }
 
@@ -1586,8 +1659,10 @@ nsHttpConnection::OnSocketWritable()
         // request differently for http/1, http/2, spdy, etc.. and that is
         // negotiated with NPN/ALPN in the SSL handshake.
 
-        if (mConnInfo->UsingHttpsProxy() && !EnsureNPNComplete()) {
-            mSocketOutCondition = NS_BASE_STREAM_WOULD_BLOCK;
+        if (mConnInfo->UsingHttpsProxy() && !EnsureNPNComplete(rv, transactionBytes)) {
+            if (NS_SUCCEEDED(rv) && !transactionBytes) {
+                mSocketOutCondition = NS_BASE_STREAM_WOULD_BLOCK;
+            }
         } else if (mProxyConnectStream) {
             // If we're need an HTTP/1 CONNECT tunnel through a proxy
             // send it before doing the SSL handshake
@@ -1595,8 +1670,11 @@ nsHttpConnection::OnSocketWritable()
             rv = mProxyConnectStream->ReadSegments(ReadFromStream, this,
                                                    nsIOService::gDefaultSegmentSize,
                                                    &transactionBytes);
-        } else if (!EnsureNPNComplete()) {
-            mSocketOutCondition = NS_BASE_STREAM_WOULD_BLOCK;
+        } else if (!EnsureNPNComplete(rv, transactionBytes)) {
+            // TODO check if I need to check mSocketOutCondition as well.
+            if (NS_SUCCEEDED(rv) && !transactionBytes) {
+                mSocketOutCondition = NS_BASE_STREAM_WOULD_BLOCK;
+            }
         } else {
 
             // for non spdy sessions let the connection manager know
@@ -1644,7 +1722,7 @@ nsHttpConnection::OnSocketWritable()
         } else if (!transactionBytes) {
             rv = NS_OK;
 
-            if (mTransaction) { // in case the ReadSegments stack called CloseTransaction()
+            if (mTransaction && !mWaitingFor0RTTResponse) { // in case the ReadSegments stack called CloseTransaction()
                 //
                 // at this point we've written out the entire transaction, and now we
                 // must wait for the server's response.  we manufacture a status message
