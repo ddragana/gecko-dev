@@ -782,7 +782,11 @@ nsHttpTransaction::CanPeekMoreDataFor0RTT()
 nsresult
 nsHttpTransaction::Finished0RTTStart(bool aSuccess)
 {
-  return NS_OK;
+    nsCOMPtr<nsIBufferedInputStream> stream = do_QueryInterface(mRequestStream);
+    if (stream) {
+        stream->AdvanceForgetPeekedSegments(aSuccess);
+    }
+    return NS_OK;
 }
 
 NS_METHOD
