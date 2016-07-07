@@ -422,6 +422,7 @@ nsBufferedInputStream::AdvanceForgetPeekedSegments(bool aAdvance)
         mCursor += mPeeked;
     }
 
+    mPeeked = 0;
     return NS_OK;
 }
 
