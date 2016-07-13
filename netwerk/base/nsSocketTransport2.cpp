@@ -1218,7 +1218,13 @@ nsSocketTransport::BuildSocket(PRFileDesc *&fd, bool &proxyTransparent, bool &us
                     // speaks SDT is to send it a DTLS handshake packet so
                     // we need to setup ALPN here.
                     nsTArray<nsCString> protocolArray;
-                    protocolArray.AppendElement(NS_LITERAL_CSTRING("h2s"));
+                    for (uint32_t index = SpdyInformation::kCount; index > 0; --index) {
+                        if (mSpdyInfo.IsMozSDT[index - 1] &&
+                            mSpdyInfo.ProtocolEnabled(index - 1) &&
+                            mSpdyInfo.ALPNCallbacks[index - 1](secCtrl)) {
+                            protocolArray.AppendElement(mSpdyInfo.VersionString[index - 1]);
+                        }
+                    }
                     rv = secCtrl->SetNPNList(protocolArray);
                     if (NS_FAILED(rv)) {
                         break;
