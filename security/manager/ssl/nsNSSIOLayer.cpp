@@ -34,6 +34,7 @@
 #include "nsNSSComponent.h"
 #include "nsPrintfCString.h"
 #include "nsServiceManagerUtils.h"
+#include "nsNetCID.h"
 #include "pkix/pkixtypes.h"
 #include "prmem.h"
 #include "prnetdb.h"

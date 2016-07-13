@@ -6,7 +6,7 @@
 
 #include "nsASocketHandler.h"
 #include "nsSocketTransportService2.h"
-#include "nsRefPtr.h"
+#include "mozilla/RefPtr.h"
 #include "sdt.h"
 
 namespace mozilla {
@@ -43,7 +43,7 @@ private:
 
   PRFileDesc *mFd;
   bool mIsLocal;
-  nsRefPtr<nsSocketTransportService> mSocketTransportService;
+  RefPtr<nsSocketTransportService> mSocketTransportService;
   bool mAttached;
   bool mUpperFDDetached;
   uint64_t   mByteReadCount;

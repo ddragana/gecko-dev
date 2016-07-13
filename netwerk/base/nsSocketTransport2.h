@@ -22,7 +22,6 @@
 #include "nsIClassInfo.h"
 #include "mozilla/net/DNS.h"
 #include "nsASocketHandler.h"
-#include "ASpdySession.h"
 #include "mozilla/Telemetry.h"
 
 #include "prerror.h"
@@ -457,9 +456,6 @@ private:
     int32_t mKeepaliveProbeCount;
 
     bool mMozSdt;
-    // TODO make SDT only list. We can not use gHttpHandler->GetSpdyInfo because
-    // it does not compile(maybe it does just I did not have time to fix it now).
-    mozilla::net::SpdyInformation    mSpdyInfo;
 };
 
 } // namespace net
