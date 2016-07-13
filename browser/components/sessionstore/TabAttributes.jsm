@@ -6,6 +6,14 @@
 
 this.EXPORTED_SYMBOLS = ["TabAttributes"];
 
+// We never want to directly read or write these attributes.
+// 'image' should not be accessed directly but handled by using the
+//         gBrowser.getIcon()/setIcon() methods.
+// 'muted' should not be accessed directly but handled by using the
+//         tab.linkedBrowser.audioMuted/toggleMuteAudio methods.
+// 'pending' is used internal by sessionstore and managed accordingly.
+const ATTRIBUTES_TO_SKIP = new Set(["image", "muted", "pending"]);
+
 // A set of tab attributes to persist. We will read a given list of tab
 // attributes when collecting tab data and will re-set those attributes when
 // the given tab data is restored to a new tab.
@@ -23,17 +31,11 @@ this.TabAttributes = Object.freeze({
   }
 });
 
-let TabAttributesInternal = {
+var TabAttributesInternal = {
   _attrs: new Set(),
 
-  // We never want to directly read or write those attributes.
-  // 'image' should not be accessed directly but handled by using the
-  //         gBrowser.getIcon()/setIcon() methods.
-  // 'pending' is used internal by sessionstore and managed accordingly.
-  _skipAttrs: new Set(["image", "pending"]),
-
   persist: function (name) {
-    if (this._attrs.has(name) || this._skipAttrs.has(name)) {
+    if (this._attrs.has(name) || ATTRIBUTES_TO_SKIP.has(name)) {
       return false;
     }
 
@@ -61,7 +63,7 @@ let TabAttributesInternal = {
 
     // Set attributes.
     for (let name in data) {
-      if (!this._skipAttrs.has(name)) {
+      if (!ATTRIBUTES_TO_SKIP.has(name)) {
         tab.setAttribute(name, data[name]);
       }
     }

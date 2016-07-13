@@ -20,7 +20,8 @@ VideoFrameContainer::VideoFrameContainer(dom::HTMLMediaElement* aElement,
   : mElement(aElement),
     mImageContainer(aContainer), mMutex("nsVideoFrameContainer"),
     mFrameID(0),
-    mIntrinsicSizeChanged(false), mImageSizeChanged(false)
+    mIntrinsicSizeChanged(false), mImageSizeChanged(false),
+    mPendingPrincipalHandle(PRINCIPAL_HANDLE_NONE), mFrameIDForPendingPrincipalHandle(0)
 {
   NS_ASSERTION(aElement, "aElement must not be null");
   NS_ASSERTION(mImageContainer, "aContainer must not be null");
@@ -29,13 +30,30 @@ VideoFrameContainer::VideoFrameContainer(dom::HTMLMediaElement* aElement,
 VideoFrameContainer::~VideoFrameContainer()
 {}
 
-void VideoFrameContainer::SetCurrentFrame(const gfxIntSize& aIntrinsicSize,
+PrincipalHandle VideoFrameContainer::GetLastPrincipalHandle()
+{
+  MutexAutoLock lock(mMutex);
+  return mLastPrincipalHandle;
+}
+
+void VideoFrameContainer::UpdatePrincipalHandleForFrameID(const PrincipalHandle& aPrincipalHandle,
+                                                          const ImageContainer::FrameID& aFrameID)
+{
+  MutexAutoLock lock(mMutex);
+  if (mPendingPrincipalHandle == aPrincipalHandle) {
+    return;
+  }
+  mPendingPrincipalHandle = aPrincipalHandle;
+  mFrameIDForPendingPrincipalHandle = aFrameID;
+}
+
+void VideoFrameContainer::SetCurrentFrame(const gfx::IntSize& aIntrinsicSize,
                                           Image* aImage,
                                           const TimeStamp& aTargetTime)
 {
   if (aImage) {
     MutexAutoLock lock(mMutex);
-    nsAutoTArray<ImageContainer::NonOwningImage,1> imageList;
+    AutoTArray<ImageContainer::NonOwningImage,1> imageList;
     imageList.AppendElement(
         ImageContainer::NonOwningImage(aImage, aTargetTime, ++mFrameID));
     SetCurrentFramesLocked(aIntrinsicSize, imageList);
@@ -44,14 +62,14 @@ void VideoFrameContainer::SetCurrentFrame(const gfxIntSize& aIntrinsicSize,
   }
 }
 
-void VideoFrameContainer::SetCurrentFrames(const gfxIntSize& aIntrinsicSize,
+void VideoFrameContainer::SetCurrentFrames(const gfx::IntSize& aIntrinsicSize,
                                            const nsTArray<ImageContainer::NonOwningImage>& aImages)
 {
   MutexAutoLock lock(mMutex);
   SetCurrentFramesLocked(aIntrinsicSize, aImages);
 }
 
-void VideoFrameContainer::SetCurrentFramesLocked(const gfxIntSize& aIntrinsicSize,
+void VideoFrameContainer::SetCurrentFramesLocked(const gfx::IntSize& aIntrinsicSize,
                                                  const nsTArray<ImageContainer::NonOwningImage>& aImages)
 {
   mMutex.AssertCurrentThreadOwns();
@@ -69,8 +87,33 @@ void VideoFrameContainer::SetCurrentFramesLocked(const gfxIntSize& aIntrinsicSiz
   //  composite it can then block on |mImageContainer|'s lock, causing a
   //  deadlock. We use this hack to defer the destruction of the current image
   //  until it is safe.
-  nsTArray<ImageContainer::OwningImage> kungFuDeathGrip;
-  mImageContainer->GetCurrentImages(&kungFuDeathGrip);
+  nsTArray<ImageContainer::OwningImage> oldImages;
+  mImageContainer->GetCurrentImages(&oldImages);
+
+  ImageContainer::FrameID lastFrameIDForOldPrincipalHandle =
+    mFrameIDForPendingPrincipalHandle - 1;
+  if (mPendingPrincipalHandle != PRINCIPAL_HANDLE_NONE &&
+       ((!oldImages.IsEmpty() &&
+          oldImages.LastElement().mFrameID >= lastFrameIDForOldPrincipalHandle) ||
+        (!aImages.IsEmpty() &&
+          aImages[0].mFrameID > lastFrameIDForOldPrincipalHandle))) {
+    // We are releasing the last FrameID prior to `lastFrameIDForOldPrincipalHandle`
+    // OR
+    // there are no FrameIDs prior to `lastFrameIDForOldPrincipalHandle` in the new
+    // set of images.
+    // This means that the old principal handle has been flushed out and we can
+    // notify our video element about this change.
+    RefPtr<VideoFrameContainer> self = this;
+    PrincipalHandle principalHandle = mPendingPrincipalHandle;
+    mLastPrincipalHandle = mPendingPrincipalHandle;
+    mPendingPrincipalHandle = PRINCIPAL_HANDLE_NONE;
+    mFrameIDForPendingPrincipalHandle = 0;
+    NS_DispatchToMainThread(NS_NewRunnableFunction([self, principalHandle]() {
+      if (self->mElement) {
+        self->mElement->PrincipalHandleChangedForVideoFrameContainer(self, principalHandle);
+      }
+    }));
+  }
 
   if (aImages.IsEmpty()) {
     mImageContainer->ClearAllImages();
@@ -93,7 +136,25 @@ void VideoFrameContainer::ClearCurrentFrame()
   mImageContainer->GetCurrentImages(&kungFuDeathGrip);
 
   mImageContainer->ClearAllImages();
-  mImageSizeChanged = false;
+  mImageContainer->ClearCachedResources();
+}
+
+void VideoFrameContainer::ClearFutureFrames()
+{
+  MutexAutoLock lock(mMutex);
+
+  // See comment in SetCurrentFrame for the reasoning behind
+  // using a kungFuDeathGrip here.
+  nsTArray<ImageContainer::OwningImage> kungFuDeathGrip;
+  mImageContainer->GetCurrentImages(&kungFuDeathGrip);
+
+  if (!kungFuDeathGrip.IsEmpty()) {
+    nsTArray<ImageContainer::NonOwningImage> currentFrame;
+    const ImageContainer::OwningImage& img = kungFuDeathGrip[0];
+    currentFrame.AppendElement(ImageContainer::NonOwningImage(img.mImage,
+        img.mTimeStamp, img.mFrameID, img.mProducerID));
+    mImageContainer->SetCurrentImages(currentFrame);
+  }
 }
 
 ImageContainer* VideoFrameContainer::GetImageContainer() {

@@ -44,7 +44,7 @@ NS_IMPL_RELEASE_INHERITED(TVSource, DOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TVSource)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-TVSource::TVSource(nsPIDOMWindow* aWindow,
+TVSource::TVSource(nsPIDOMWindowInner* aWindow,
                    TVSourceType aType,
                    TVTuner* aTuner)
   : DOMEventTargetHelper(aWindow)
@@ -61,11 +61,11 @@ TVSource::~TVSource()
 }
 
 /* static */ already_AddRefed<TVSource>
-TVSource::Create(nsPIDOMWindow* aWindow,
+TVSource::Create(nsPIDOMWindowInner* aWindow,
                  TVSourceType aType,
                  TVTuner* aTuner)
 {
-  nsRefPtr<TVSource> source = new TVSource(aWindow, aType, aTuner);
+  RefPtr<TVSource> source = new TVSource(aWindow, aType, aTuner);
   return (source->Init()) ? source.forget() : nullptr;
 }
 
@@ -133,6 +133,14 @@ TVSource::SetCurrentChannel(nsITVChannelData* aChannelData)
   mCurrentChannel = TVChannel::Create(GetOwner(), this, aChannelData);
   NS_ENSURE_TRUE(mCurrentChannel, NS_ERROR_DOM_ABORT_ERR);
 
+  RefPtr<TVSource> currentSource = mTuner->GetCurrentSource();
+  if (currentSource && mType == currentSource->Type()) {
+    rv = mTuner->ReloadMediaStream();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
   return DispatchCurrentChannelChangedEvent(mCurrentChannel);
 }
 
@@ -161,7 +169,7 @@ TVSource::GetChannels(ErrorResult& aRv)
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetOwner());
   MOZ_ASSERT(global);
 
-  nsRefPtr<Promise> promise = Promise::Create(global, aRv);
+  RefPtr<Promise> promise = Promise::Create(global, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
@@ -193,7 +201,7 @@ TVSource::SetCurrentChannel(const nsAString& aChannelNumber,
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetOwner());
   MOZ_ASSERT(global);
 
-  nsRefPtr<Promise> promise = Promise::Create(global, aRv);
+  RefPtr<Promise> promise = Promise::Create(global, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
@@ -225,7 +233,7 @@ TVSource::StartScanning(const TVStartScanningOptions& aOptions,
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetOwner());
   MOZ_ASSERT(global);
 
-  nsRefPtr<Promise> promise = Promise::Create(global, aRv);
+  RefPtr<Promise> promise = Promise::Create(global, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
@@ -269,7 +277,7 @@ TVSource::StopScanning(ErrorResult& aRv)
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetOwner());
   MOZ_ASSERT(global);
 
-  nsRefPtr<Promise> promise = Promise::Create(global, aRv);
+  RefPtr<Promise> promise = Promise::Create(global, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
@@ -293,7 +301,7 @@ TVSource::StopScanning(ErrorResult& aRv)
 already_AddRefed<TVTuner>
 TVSource::Tuner() const
 {
-  nsRefPtr<TVTuner> tuner = mTuner;
+  RefPtr<TVTuner> tuner = mTuner;
   return tuner.forget();
 }
 
@@ -312,14 +320,14 @@ TVSource::IsScanning() const
 already_AddRefed<TVChannel>
 TVSource::GetCurrentChannel() const
 {
-  nsRefPtr<TVChannel> currentChannel = mCurrentChannel;
+  RefPtr<TVChannel> currentChannel = mCurrentChannel;
   return currentChannel.forget();
 }
 
 nsresult
 TVSource::NotifyChannelScanned(nsITVChannelData* aChannelData)
 {
-  nsRefPtr<TVChannel> channel = TVChannel::Create(GetOwner(), this, aChannelData);
+  RefPtr<TVChannel> channel = TVChannel::Create(GetOwner(), this, aChannelData);
   NS_ENSURE_TRUE(channel, NS_ERROR_DOM_ABORT_ERR);
 
   return DispatchScanningStateChangedEvent(TVScanningState::Scanned, channel);
@@ -344,10 +352,10 @@ TVSource::NotifyEITBroadcasted(nsITVChannelData* aChannelData,
                                nsITVProgramData** aProgramDataList,
                                uint32_t aCount)
 {
-  nsRefPtr<TVChannel> channel = TVChannel::Create(GetOwner(), this, aChannelData);
+  RefPtr<TVChannel> channel = TVChannel::Create(GetOwner(), this, aChannelData);
   Sequence<OwningNonNull<TVProgram>> programs;
   for (uint32_t i = 0; i < aCount; i++) {
-    nsRefPtr<TVProgram> program =
+    RefPtr<TVProgram> program =
       new TVProgram(GetOwner(), channel, aProgramDataList[i]);
     *programs.AppendElement(fallible) = program;
   }
@@ -364,9 +372,9 @@ TVSource::DispatchCurrentChannelChangedEvent(TVChannel* aChannel)
                                               NS_LITERAL_STRING("currentchannelchanged"),
                                               init);
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArg<nsCOMPtr<nsIDOMEvent>>(this,
-                                                       &TVSource::DispatchTVEvent,
-                                                       event);
+    NewRunnableMethod<nsCOMPtr<nsIDOMEvent>>(this,
+                                             &TVSource::DispatchTVEvent,
+                                             event);
   return NS_DispatchToCurrentThread(runnable);
 }
 
@@ -382,9 +390,9 @@ TVSource::DispatchScanningStateChangedEvent(TVScanningState aState,
                                              NS_LITERAL_STRING("scanningstatechanged"),
                                              init);
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArg<nsCOMPtr<nsIDOMEvent>>(this,
-                                                       &TVSource::DispatchTVEvent,
-                                                       event);
+    NewRunnableMethod<nsCOMPtr<nsIDOMEvent>>(this,
+                                             &TVSource::DispatchTVEvent,
+                                             event);
   return NS_DispatchToCurrentThread(runnable);
 }
 
@@ -398,9 +406,9 @@ TVSource::DispatchEITBroadcastedEvent(const Sequence<OwningNonNull<TVProgram>>& 
                                        NS_LITERAL_STRING("eitbroadcasted"),
                                        init);
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArg<nsCOMPtr<nsIDOMEvent>>(this,
-                                                       &TVSource::DispatchTVEvent,
-                                                       event);
+    NewRunnableMethod<nsCOMPtr<nsIDOMEvent>>(this,
+                                             &TVSource::DispatchTVEvent,
+                                             event);
   return NS_DispatchToCurrentThread(runnable);
 }
 

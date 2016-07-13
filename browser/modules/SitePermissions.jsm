@@ -6,7 +6,7 @@ this.EXPORTED_SYMBOLS = [ "SitePermissions" ];
 
 Components.utils.import("resource://gre/modules/Services.jsm");
 
-let gStringBundle =
+var gStringBundle =
   Services.strings.createBundle("chrome://browser/locale/sitePermissions.properties");
 
 this.SitePermissions = {
@@ -15,6 +15,63 @@ this.SitePermissions = {
   ALLOW: Services.perms.ALLOW_ACTION,
   BLOCK: Services.perms.DENY_ACTION,
   SESSION: Components.interfaces.nsICookiePermission.ACCESS_SESSION,
+
+  /* Returns a list of objects representing all permissions that are currently
+   * set for the given URI. Each object contains the following keys:
+   * - id: the permissionID of the permission
+   * - label: the localized label
+   * - state: a constant representing the current permission state
+   *   (e.g. SitePermissions.ALLOW)
+   * - availableStates: an array of all available states for that permission,
+   *   represented as objects with the keys:
+   *   - id: the state constant
+   *   - label: the translated label of that state
+   */
+  getPermissionsByURI: function (aURI) {
+    if (!this.isSupportedURI(aURI)) {
+      return [];
+    }
+
+    let permissions = [];
+    for (let permission of kPermissionIDs) {
+      let state = this.get(aURI, permission);
+      if (state === this.UNKNOWN) {
+        continue;
+      }
+
+      let availableStates = this.getAvailableStates(permission).map( state => {
+        return { id: state, label: this.getStateLabel(permission, state) };
+      });
+      let label = this.getPermissionLabel(permission);
+
+      permissions.push({
+        id: permission,
+        label: label,
+        state: state,
+        availableStates: availableStates,
+      });
+    }
+
+    return permissions;
+  },
+
+  /* Returns a boolean indicating whether there are any granted
+   * (meaning allowed or session-allowed) permissions for the given URI.
+   * Will return false for invalid URIs (such as file:// URLs).
+   */
+  hasGrantedPermissions: function (aURI) {
+    if (!this.isSupportedURI(aURI)) {
+      return false;
+    }
+
+    for (let permission of kPermissionIDs) {
+      let state = this.get(aURI, permission);
+      if (state === this.ALLOW || state === this.SESSION) {
+        return true;
+      }
+    }
+    return false;
+  },
 
   /* Checks whether a UI for managing permissions should be exposed for a given
    * URI. This excludes file URIs, for instance, as they don't have a host,
@@ -27,11 +84,7 @@ this.SitePermissions = {
   /* Returns an array of all permission IDs.
    */
   listPermissions: function () {
-    let array = Object.keys(gPermissionObject);
-    array.sort((a, b) => {
-      return this.getPermissionLabel(a).localeCompare(this.getPermissionLabel(b));
-    });
-    return array;
+    return kPermissionIDs;
   },
 
   /* Returns an array of permission states to be exposed to the user for a
@@ -100,7 +153,8 @@ this.SitePermissions = {
    * used in a UI for managing permissions.
    */
   getPermissionLabel: function (aPermissionID) {
-    return gStringBundle.GetStringFromName("permission." + aPermissionID + ".label");
+    let labelID = gPermissionObject[aPermissionID].labelID || aPermissionID;
+    return gStringBundle.GetStringFromName("permission." + labelID + ".label");
   },
 
   /* Returns the localized label for the given permission state, to be used in
@@ -122,7 +176,7 @@ this.SitePermissions = {
   }
 };
 
-let gPermissionObject = {
+var gPermissionObject = {
   /* Holds permission ID => options pairs.
    *
    * Supported options:
@@ -135,6 +189,10 @@ let gPermissionObject = {
    *    Called to get the permission's default state.
    *    Defaults to UNKNOWN, indicating that the user will be asked each time
    *    a page asks for that permissions.
+   *
+   *  - labelID
+   *    Use the given ID instead of the permission name for looking up strings.
+   *    e.g. "desktop-notification2" to use permission.desktop-notification2.label
    *
    *  - states
    *    Array of permission states to be exposed to the user.
@@ -161,7 +219,10 @@ let gPermissionObject = {
     }
   },
 
-  "desktop-notification": {},
+  "desktop-notification": {
+    exactHostMatch: true,
+    labelID: "desktop-notification2",
+  },
 
   "camera": {},
   "microphone": {},
@@ -188,9 +249,7 @@ let gPermissionObject = {
 
   "pointerLock": {
     exactHostMatch: true
-  },
-
-  "push": {
-    exactHostMatch: true
   }
 };
+
+const kPermissionIDs = Object.keys(gPermissionObject);

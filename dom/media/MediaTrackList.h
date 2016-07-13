@@ -20,41 +20,7 @@ class AudioTrackList;
 class VideoTrackList;
 class AudioTrack;
 class VideoTrack;
-class MediaTrackList;
-
-/**
- * This is for the media resource to notify its audio track and video track,
- * when a media-resource-specific track has ended, or whether it has enabled or
- * not. All notification methods are called from the main thread.
- */
-class MediaTrackListListener
-{
-public:
-  friend class mozilla::DOMMediaStream;
-
-  explicit MediaTrackListListener(MediaTrackList* aMediaTrackList)
-    : mMediaTrackList(aMediaTrackList) {};
-
-  ~MediaTrackListListener()
-  {
-    mMediaTrackList = nullptr;
-  };
-
-  // Notify mMediaTrackList that a track has created by the media resource,
-  // and this corresponding MediaTrack object should be added into
-  // mMediaTrackList, and fires a addtrack event.
-  void NotifyMediaTrackCreated(MediaTrack* aTrack);
-
-  // Notify mMediaTrackList that a track has ended by the media resource,
-  // and this corresponding MediaTrack object should be removed from
-  // mMediaTrackList, and fires a removetrack event.
-  void NotifyMediaTrackEnded(const nsAString& aId);
-
-protected:
-  // A weak reference to a MediaTrackList object, its lifetime managed by its
-  // owner.
-  MediaTrackList* mMediaTrackList;
-};
+class VideoStreamTrack;
 
 /**
  * Base class of AudioTrackList and VideoTrackList. The AudioTrackList and
@@ -67,7 +33,7 @@ protected:
 class MediaTrackList : public DOMEventTargetHelper
 {
 public:
-  MediaTrackList(nsPIDOMWindow* aOwnerWindow, HTMLMediaElement* aMediaElement);
+  MediaTrackList(nsPIDOMWindowInner* aOwnerWindow, HTMLMediaElement* aMediaElement);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MediaTrackList, DOMEventTargetHelper)
@@ -80,7 +46,9 @@ public:
 
   void AddTrack(MediaTrack* aTrack);
 
-  void RemoveTrack(const nsRefPtr<MediaTrack>& aTrack);
+  // In remove track case, the VideoTrackList::mSelectedIndex should be updated
+  // due to mTracks changed. No need to take care this in add track case.
+  virtual void RemoveTrack(const RefPtr<MediaTrack>& aTrack);
 
   void RemoveTracks();
 
@@ -91,11 +59,14 @@ public:
                    const nsAString& aLanguage,
                    bool aEnabled);
 
+  // For the case of src of HTMLMediaElement is non-MediaStream, leave the
+  // aVideoTrack as default(nullptr).
   static already_AddRefed<VideoTrack>
   CreateVideoTrack(const nsAString& aId,
                    const nsAString& aKind,
                    const nsAString& aLabel,
-                   const nsAString& aLanguage);
+                   const nsAString& aLanguage,
+                   VideoStreamTrack* aVideoTrack = nullptr);
 
   virtual void EmptyTracks();
 
@@ -120,7 +91,6 @@ public:
   IMPL_EVENT_HANDLER(addtrack)
   IMPL_EVENT_HANDLER(removetrack)
 
-  friend class MediaTrackListListener;
   friend class AudioTrack;
   friend class VideoTrack;
 
@@ -136,8 +106,8 @@ protected:
 
   HTMLMediaElement* GetMediaElement() { return mMediaElement; }
 
-  nsTArray<nsRefPtr<MediaTrack>> mTracks;
-  nsRefPtr<HTMLMediaElement> mMediaElement;
+  nsTArray<RefPtr<MediaTrack>> mTracks;
+  RefPtr<HTMLMediaElement> mMediaElement;
 };
 
 } // namespace dom

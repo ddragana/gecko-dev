@@ -18,7 +18,12 @@ namespace gfx {
  */
 template <class T, class Sub>
 struct BaseSize {
-  T width, height;
+  union {
+    struct {
+      T width, height;
+    };
+    T components[2];
+  };
 
   // Constructors
   MOZ_CONSTEXPR BaseSize() : width(0), height(0) {}
@@ -27,7 +32,11 @@ struct BaseSize {
   void SizeTo(T aWidth, T aHeight) { width = aWidth; height = aHeight; }
 
   bool IsEmpty() const {
-    return width == 0 || height == 0;
+    return width <= 0 || height <= 0;
+  }
+
+  bool IsSquare() const {
+    return width == height;
   }
 
   // Note that '=' isn't defined so we'll get the

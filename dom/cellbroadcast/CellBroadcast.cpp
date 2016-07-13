@@ -60,7 +60,7 @@ NS_IMPL_ISUPPORTS(CellBroadcast::Listener, nsICellBroadcastListener)
 
 // static
 already_AddRefed<CellBroadcast>
-CellBroadcast::Create(nsPIDOMWindow* aWindow, ErrorResult& aRv)
+CellBroadcast::Create(nsPIDOMWindowInner* aWindow, ErrorResult& aRv)
 {
   MOZ_ASSERT(aWindow);
   MOZ_ASSERT(aWindow->IsInnerWindow());
@@ -72,12 +72,12 @@ CellBroadcast::Create(nsPIDOMWindow* aWindow, ErrorResult& aRv)
     return nullptr;
   }
 
-  nsRefPtr<CellBroadcast> cb = new CellBroadcast(aWindow, service);
+  RefPtr<CellBroadcast> cb = new CellBroadcast(aWindow, service);
   return cb.forget();
 }
 
-CellBroadcast::CellBroadcast(nsPIDOMWindow *aWindow,
-                             nsICellBroadcastService *aService)
+CellBroadcast::CellBroadcast(nsPIDOMWindowInner* aWindow,
+                             nsICellBroadcastService* aService)
   : DOMEventTargetHelper(aWindow)
 {
   mListener = new Listener(this);
@@ -142,7 +142,7 @@ CellBroadcast::NotifyMessageReceived(uint32_t aServiceId,
                                            aEtwsEmergencyUserAlert,
                                            aEtwsPopup);
 
-  nsRefPtr<MozCellBroadcastEvent> event =
+  RefPtr<MozCellBroadcastEvent> event =
     MozCellBroadcastEvent::Constructor(this, NS_LITERAL_STRING("received"), init);
   return DispatchTrustedEvent(event);
 }

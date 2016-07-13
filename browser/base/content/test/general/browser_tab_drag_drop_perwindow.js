@@ -2,8 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+requestLongerTimeout(2);
+
 const CHROMEUTILS_URL = "chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js";
-let ChromeUtils = {};
+var ChromeUtils = {};
 
 Services.scriptloader.loadSubScript(CHROMEUTILS_URL, ChromeUtils);
 
@@ -74,21 +76,13 @@ add_task(function* test_dragging_e10s_windows() {
     null, nonRemoteWin, remoteWin);
   is(effect, "none", "Should not be able to drag a non-remote tab to an e10s window");
 
-  try {
-    remoteWin.gBrowser.swapBrowsersAndCloseOther(remoteTab, nonRemoteTab);
-    ok(false, "swapBrowsersAndCloseOther should have thrown");
-  } catch(e) {}
-
+  remoteWin.gBrowser.swapBrowsersAndCloseOther(remoteTab, nonRemoteTab);
   is(remoteWin.gBrowser.tabs.length, 2,
      "Prevent moving a normal tab to a private tabbrowser");
   is(nonRemoteWin.gBrowser.tabs.length, 2,
      "Prevent accepting a normal tab in a private tabbrowser");
 
-  try {
-    nonRemoteWin.gBrowser.swapBrowsersAndCloseOther(nonRemoteTab, remoteTab);
-    ok(false, "swapBrowsersAndCloseOther should have thrown");
-  } catch(e) {}
-
+  nonRemoteWin.gBrowser.swapBrowsersAndCloseOther(nonRemoteTab, remoteTab);
   is(nonRemoteWin.gBrowser.tabs.length, 2,
      "Prevent moving a private tab to a normal tabbrowser");
   is(remoteWin.gBrowser.tabs.length, 2,
@@ -152,4 +146,34 @@ add_task(function* test_dragging_blacklisted() {
 
   yield BrowserTestUtils.closeWindow(remoteWin1);
   yield BrowserTestUtils.closeWindow(remoteWin2);
+});
+
+
+/**
+ * Tests that tabs dragged between windows dispatch TabOpen and TabClose
+ * events with the appropriate adoption details.
+ */
+add_task(function* test_dragging_adoption_events() {
+  let win1 = yield BrowserTestUtils.openNewBrowserWindow();
+  let win2 = yield BrowserTestUtils.openNewBrowserWindow();
+
+  let tab1 = yield BrowserTestUtils.openNewForegroundTab(win1.gBrowser);
+  let tab2 = yield BrowserTestUtils.openNewForegroundTab(win2.gBrowser);
+
+  let awaitCloseEvent = BrowserTestUtils.waitForEvent(tab1, "TabClose");
+  let awaitOpenEvent = BrowserTestUtils.waitForEvent(win2, "TabOpen");
+
+  let effect = ChromeUtils.synthesizeDrop(tab1, tab2,
+    [[{type: TAB_DROP_TYPE, data: tab1}]],
+    null, win1, win2);
+  is(effect, "move", "Tab should be moved from win1 to win2.");
+
+  let closeEvent = yield awaitCloseEvent;
+  let openEvent = yield awaitOpenEvent;
+
+  is(openEvent.detail.adoptedTab, tab1, "New tab adopted old tab");
+  is(closeEvent.detail.adoptedBy, openEvent.target, "Old tab adopted by new tab");
+
+  yield BrowserTestUtils.closeWindow(win1);
+  yield BrowserTestUtils.closeWindow(win2);
 });

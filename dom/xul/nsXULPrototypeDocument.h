@@ -8,7 +8,6 @@
 
 #include "js/TracingAPI.h"
 #include "mozilla/Attributes.h"
-#include "nsAutoPtr.h"
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
@@ -70,7 +69,7 @@ public:
      * @note GetProcessingInstructions retains the ownership (the PI
      *       protos only get deleted when the proto document is deleted)
      */
-    const nsTArray<nsRefPtr<nsXULPrototypePI> >& GetProcessingInstructions() const;
+    const nsTArray<RefPtr<nsXULPrototypePI> >& GetProcessingInstructions() const;
 
     /**
      * Access the array of style overlays for this document.
@@ -119,14 +118,14 @@ public:
 
 protected:
     nsCOMPtr<nsIURI> mURI;
-    nsRefPtr<nsXULPrototypeElement> mRoot;
-    nsTArray<nsRefPtr<nsXULPrototypePI> > mProcessingInstructions;
+    RefPtr<nsXULPrototypeElement> mRoot;
+    nsTArray<RefPtr<nsXULPrototypePI> > mProcessingInstructions;
     nsCOMArray<nsIURI> mStyleSheetReferences;
 
     bool mLoaded;
-    nsTArray< nsRefPtr<mozilla::dom::XULDocument> > mPrototypeWaiters;
+    nsTArray< RefPtr<mozilla::dom::XULDocument> > mPrototypeWaiters;
 
-    nsRefPtr<nsNodeInfoManager> mNodeInfoManager;
+    RefPtr<nsNodeInfoManager> mNodeInfoManager;
 
     uint32_t mCCGeneration;
     uint32_t mGCNumber;

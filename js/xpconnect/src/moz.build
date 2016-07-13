@@ -19,11 +19,9 @@ UNIFIED_SOURCES += [
     'nsXPConnect.cpp',
     'Sandbox.cpp',
     'XPCCallContext.cpp',
-    'XPCContext.cpp',
     'XPCConvert.cpp',
     'XPCDebug.cpp',
     'XPCException.cpp',
-    'XPCJSContextStack.cpp',
     'XPCJSID.cpp',
     'XPCJSRuntime.cpp',
     'XPCJSWeakReference.cpp',
@@ -51,8 +49,6 @@ SOURCES += [
     'XPCComponents.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
@@ -72,13 +68,8 @@ LOCAL_INCLUDES += [
 
 if CONFIG['MOZ_B2G_BT']:
     LOCAL_INCLUDES += [
-        '/dom/bluetooth',
+        '/dom/bluetooth/common',
     ]
-    if CONFIG['MOZ_B2G_BT_API_V1']:
-        LOCAL_INCLUDES += [
-            '/dom/bluetooth/bluetooth1',
-        ]
-    else:
-        LOCAL_INCLUDES += [
-            '/dom/bluetooth/bluetooth2',
-        ]
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-shadow']

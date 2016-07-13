@@ -13,12 +13,12 @@
 #include "jsobjinlines.h"
 
 #include "gc/Nursery-inl.h"
+#include "jit/MacroAssembler-inl.h"
 #include "vm/Shape-inl.h"
 
 using mozilla::ArrayLength;
 using mozilla::DebugOnly;
 using mozilla::PodCopy;
-using mozilla::UniquePtr;
 
 using namespace js;
 
@@ -35,20 +35,11 @@ UnboxedLayout::trace(JSTracer* trc)
     if (newScript())
         newScript()->trace(trc);
 
-    if (nativeGroup_)
-        TraceEdge(trc, &nativeGroup_, "unboxed_layout_nativeGroup");
-
-    if (nativeShape_)
-        TraceEdge(trc, &nativeShape_, "unboxed_layout_nativeShape");
-
-    if (allocationScript_)
-        TraceEdge(trc, &allocationScript_, "unboxed_layout_allocationScript");
-
-    if (replacementGroup_)
-        TraceEdge(trc, &replacementGroup_, "unboxed_layout_replacementGroup");
-
-    if (constructorCode_)
-        TraceEdge(trc, &constructorCode_, "unboxed_layout_constructorCode");
+    TraceNullableEdge(trc, &nativeGroup_, "unboxed_layout_nativeGroup");
+    TraceNullableEdge(trc, &nativeShape_, "unboxed_layout_nativeShape");
+    TraceNullableEdge(trc, &allocationScript_, "unboxed_layout_allocationScript");
+    TraceNullableEdge(trc, &replacementGroup_, "unboxed_layout_replacementGroup");
+    TraceNullableEdge(trc, &constructorCode_, "unboxed_layout_constructorCode");
 }
 
 size_t
@@ -102,6 +93,11 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
 #else
     propertiesReg = IntArgReg0;
     newKindReg = IntArgReg1;
+#endif
+
+#ifdef JS_CODEGEN_ARM64
+    // ARM64 communicates stack address via sp, but uses a pseudo-sp for addressing.
+    masm.initStackPtr();
 #endif
 
     MOZ_ASSERT(propertiesReg.volatile_());
@@ -160,7 +156,7 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
     masm.PushRegsInMask(liveVolatileRegisters);
 
     masm.mov(ImmPtr(cx->runtime()), scratch1);
-    masm.setupUnalignedABICall(2, scratch2);
+    masm.setupUnalignedABICall(scratch2);
     masm.passABIArg(scratch1);
     masm.passABIArg(object);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, PostWriteBarrier));
@@ -190,7 +186,7 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
 
             Label notObject;
             masm.branchTestObject(Assembler::NotEqual, valueOperand,
-                                  types->mightBeMIRType(MIRType_Null) ? &notObject : &failureStoreObject);
+                                  types->mightBeMIRType(MIRType::Null) ? &notObject : &failureStoreObject);
 
             Register payloadReg = masm.extractObject(valueOperand, scratch1);
 
@@ -200,7 +196,7 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
             }
 
             masm.storeUnboxedProperty(targetAddress, JSVAL_TYPE_OBJECT,
-                                      TypedOrValueRegister(MIRType_Object,
+                                      TypedOrValueRegister(MIRType::Object,
                                                            AnyRegister(payloadReg)), nullptr);
 
             if (notObject.used()) {
@@ -315,15 +311,14 @@ UnboxedPlainObject::trace(JSTracer* trc, JSObject* obj)
 
     uint8_t* data = obj->as<UnboxedPlainObject>().data();
     while (*list != -1) {
-        HeapPtrString* heap = reinterpret_cast<HeapPtrString*>(data + *list);
+        GCPtrString* heap = reinterpret_cast<GCPtrString*>(data + *list);
         TraceEdge(trc, heap, "unboxed_string");
         list++;
     }
     list++;
     while (*list != -1) {
-        HeapPtrObject* heap = reinterpret_cast<HeapPtrObject*>(data + *list);
-        if (*heap)
-            TraceEdge(trc, heap, "unboxed_object");
+        GCPtrObject* heap = reinterpret_cast<GCPtrObject*>(data + *list);
+        TraceNullableEdge(trc, heap, "unboxed_object");
         list++;
     }
 
@@ -338,9 +333,14 @@ UnboxedPlainObject::ensureExpando(JSContext* cx, Handle<UnboxedPlainObject*> obj
         return obj->expando_;
 
     UnboxedExpandoObject* expando =
-        NewObjectWithGivenProto<UnboxedExpandoObject>(cx, nullptr, AllocKind::OBJECT4);
+        NewObjectWithGivenProto<UnboxedExpandoObject>(cx, nullptr, gc::AllocKind::OBJECT4);
     if (!expando)
         return nullptr;
+
+    // Don't track property types for expando objects. This allows Baseline
+    // and Ion AddSlot ICs to guard on the unboxed group without guarding on
+    // the expando group.
+    MarkObjectGroupUnknownProperties(cx, expando->group());
 
     // If the expando is tenured then the original object must also be tenured.
     // Otherwise barriers triggered on the original object for writes to the
@@ -349,11 +349,11 @@ UnboxedPlainObject::ensureExpando(JSContext* cx, Handle<UnboxedPlainObject*> obj
     MOZ_ASSERT_IF(!IsInsideNursery(expando), !IsInsideNursery(obj));
 
     // As with setValue(), we need to manually trigger post barriers on the
-    // whole object. If we treat the field as a HeapPtrObject and later convert
-    // the object to its native representation, we will end up with a corrupted
-    // store buffer entry.
+    // whole object. If we treat the field as a GCPtrObject and later
+    // convert the object to its native representation, we will end up with a
+    // corrupted store buffer entry.
     if (IsInsideNursery(expando) && !IsInsideNursery(obj))
-        cx->runtime()->gc.storeBuffer.putWholeCellFromMainThread(obj);
+        cx->runtime()->gc.storeBuffer.putWholeCell(obj);
 
     obj->expando_ = expando;
     return expando;
@@ -496,10 +496,9 @@ UnboxedLayout::makeNativeGroup(JSContext* cx, ObjectGroup* group)
     for (size_t i = 0; i < layout.properties().length(); i++) {
         const UnboxedLayout::Property& property = layout.properties()[i];
 
-        StackShape unrootedChild(shape->base()->unowned(), NameToId(property.name), i,
-                                 JSPROP_ENUMERATE, 0);
-        RootedGeneric<StackShape*> child(cx, &unrootedChild);
-        shape = cx->compartment()->propertyTree.getChild(cx, shape, *child);
+        Rooted<StackShape> child(cx, StackShape(shape->base()->unowned(), NameToId(property.name),
+                                                i, JSPROP_ENUMERATE, 0));
+        shape = cx->compartment()->propertyTree.getChild(cx, shape, child);
         if (!shape)
             return false;
     }
@@ -510,21 +509,31 @@ UnboxedLayout::makeNativeGroup(JSContext* cx, ObjectGroup* group)
     if (!nativeGroup)
         return false;
 
-    // Propagate all property types from the old group to the new group.
-    if (layout.isArray()) {
-        if (!PropagatePropertyTypes(cx, JSID_VOID, group, nativeGroup))
-            return false;
-    } else {
-        for (size_t i = 0; i < layout.properties().length(); i++) {
-            const UnboxedLayout::Property& property = layout.properties()[i];
-            jsid id = NameToId(property.name);
-            if (!PropagatePropertyTypes(cx, id, group, nativeGroup))
+    // No sense propagating if we don't know what we started with.
+    if (!group->unknownProperties()) {
+        // Propagate all property types from the old group to the new group.
+        if (layout.isArray()) {
+            if (!PropagatePropertyTypes(cx, JSID_VOID, group, nativeGroup))
                 return false;
+        } else {
+            for (size_t i = 0; i < layout.properties().length(); i++) {
+                const UnboxedLayout::Property& property = layout.properties()[i];
+                jsid id = NameToId(property.name);
+                if (!PropagatePropertyTypes(cx, id, group, nativeGroup))
+                    return false;
 
-            HeapTypeSet* nativeProperty = nativeGroup->maybeGetProperty(id);
-            if (nativeProperty && nativeProperty->canSetDefinite(i))
-                nativeProperty->setDefinite(i);
+                // If we are OOM we may not be able to propagate properties.
+                if (nativeGroup->unknownProperties())
+                    break;
+
+                HeapTypeSet* nativeProperty = nativeGroup->maybeGetProperty(id);
+                if (nativeProperty && nativeProperty->canSetDefinite(i))
+                    nativeProperty->setDefinite(i);
+            }
         }
+    } else {
+        // If we skip, though, the new group had better agree.
+        MOZ_ASSERT(nativeGroup->unknownProperties());
     }
 
     layout.nativeGroup_ = nativeGroup;
@@ -571,7 +580,7 @@ UnboxedPlainObject::convertToNative(JSContext* cx, JSObject* obj)
     // writes to the expando (see WholeCellEdges::trace), so after conversion
     // we need to make sure the expando itself will still be traced.
     if (expando && !IsInsideNursery(expando))
-        cx->runtime()->gc.storeBuffer.putWholeCellFromMainThread(expando);
+        cx->runtime()->gc.storeBuffer.putWholeCell(expando);
 
     obj->setGroup(layout.nativeGroup());
     obj->as<PlainObject>().setLastPropertyMakeNative(cx, layout.nativeShape());
@@ -621,6 +630,8 @@ UnboxedPlainObject::convertToNative(JSContext* cx, JSObject* obj)
 UnboxedPlainObject*
 UnboxedPlainObject::create(ExclusiveContext* cx, HandleObjectGroup group, NewObjectKind newKind)
 {
+    AutoSetNewObjectMetadata metadata(cx);
+
     MOZ_ASSERT(group->clasp() == &class_);
     gc::AllocKind allocKind = group->unboxedLayout().getAllocKind();
 
@@ -638,13 +649,13 @@ UnboxedPlainObject::create(ExclusiveContext* cx, HandleObjectGroup group, NewObj
     if (list) {
         uint8_t* data = res->data();
         while (*list != -1) {
-            HeapPtrString* heap = reinterpret_cast<HeapPtrString*>(data + *list);
+            GCPtrString* heap = reinterpret_cast<GCPtrString*>(data + *list);
             heap->init(cx->names().empty);
             list++;
         }
         list++;
         while (*list != -1) {
-            HeapPtrObject* heap = reinterpret_cast<HeapPtrObject*>(data + *list);
+            GCPtrObject* heap = reinterpret_cast<GCPtrObject*>(data + *list);
             heap->init(nullptr);
             list++;
         }
@@ -693,6 +704,7 @@ UnboxedPlainObject::createWithProperties(ExclusiveContext* cx, HandleObjectGroup
 
 #ifndef JS_CODEGEN_NONE
     if (cx->isJSContext() &&
+        !group->unknownProperties() &&
         !layout.constructorCode() &&
         cx->asJSContext()->runtime()->jitSupportsFloatingPoint)
     {
@@ -715,7 +727,7 @@ UnboxedPlainObject::obj_lookupProperty(JSContext* cx, HandleObject obj,
         return true;
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         objp.set(nullptr);
         propp.set(nullptr);
@@ -727,7 +739,7 @@ UnboxedPlainObject::obj_lookupProperty(JSContext* cx, HandleObject obj,
 
 /* static */ bool
 UnboxedPlainObject::obj_defineProperty(JSContext* cx, HandleObject obj, HandleId id,
-                                       Handle<JSPropertyDescriptor> desc,
+                                       Handle<PropertyDescriptor> desc,
                                        ObjectOpResult& result)
 {
     const UnboxedLayout& layout = obj->as<UnboxedPlainObject>().layout();
@@ -766,7 +778,7 @@ UnboxedPlainObject::obj_hasProperty(JSContext* cx, HandleObject obj, HandleId id
         return true;
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         *foundp = false;
         return true;
@@ -776,7 +788,7 @@ UnboxedPlainObject::obj_hasProperty(JSContext* cx, HandleObject obj, HandleId id
 }
 
 /* static */ bool
-UnboxedPlainObject::obj_getProperty(JSContext* cx, HandleObject obj, HandleObject receiver,
+UnboxedPlainObject::obj_getProperty(JSContext* cx, HandleObject obj, HandleValue receiver,
                                     HandleId id, MutableHandleValue vp)
 {
     const UnboxedLayout& layout = obj->as<UnboxedPlainObject>().layout();
@@ -789,12 +801,11 @@ UnboxedPlainObject::obj_getProperty(JSContext* cx, HandleObject obj, HandleObjec
     if (UnboxedExpandoObject* expando = obj->as<UnboxedPlainObject>().maybeExpando()) {
         if (expando->containsShapeOrElement(cx, id)) {
             RootedObject nexpando(cx, expando);
-            RootedObject nreceiver(cx, (obj == receiver) ? expando : receiver.get());
-            return GetProperty(cx, nexpando, nreceiver, id, vp);
+            return GetProperty(cx, nexpando, receiver, id, vp);
         }
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         vp.setUndefined();
         return true;
@@ -819,7 +830,7 @@ UnboxedPlainObject::obj_setProperty(JSContext* cx, HandleObject obj, HandleId id
             return SetProperty(cx, obj, id, v, receiver, result);
         }
 
-        return SetPropertyByDefining(cx, obj, id, v, receiver, false, result);
+        return SetPropertyByDefining(cx, id, v, receiver, result);
     }
 
     if (UnboxedExpandoObject* expando = obj->as<UnboxedPlainObject>().maybeExpando()) {
@@ -828,10 +839,7 @@ UnboxedPlainObject::obj_setProperty(JSContext* cx, HandleObject obj, HandleId id
             AddTypePropertyId(cx, obj, id, v);
 
             RootedObject nexpando(cx, expando);
-            RootedValue nreceiver(cx, (receiver.isObject() && obj == &receiver.toObject())
-                                      ? ObjectValue(*expando)
-                                      : receiver);
-            return SetProperty(cx, nexpando, id, v, nreceiver, result);
+            return SetProperty(cx, nexpando, id, v, receiver, result);
         }
     }
 
@@ -840,7 +848,7 @@ UnboxedPlainObject::obj_setProperty(JSContext* cx, HandleObject obj, HandleId id
 
 /* static */ bool
 UnboxedPlainObject::obj_getOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
-                                                 MutableHandle<JSPropertyDescriptor> desc)
+                                                 MutableHandle<PropertyDescriptor> desc)
 {
     const UnboxedLayout& layout = obj->as<UnboxedPlainObject>().layout();
 
@@ -884,34 +892,15 @@ UnboxedPlainObject::obj_watch(JSContext* cx, HandleObject obj, HandleId id, Hand
 }
 
 /* static */ bool
-UnboxedPlainObject::obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector& properties)
+UnboxedPlainObject::obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector& properties,
+                                  bool enumerableOnly)
 {
-    UnboxedExpandoObject* expando = obj->as<UnboxedPlainObject>().maybeExpando();
-
-    // Add dense elements in the expando first, for consistency with plain objects.
-    if (expando) {
-        for (size_t i = 0; i < expando->getDenseInitializedLength(); i++) {
-            if (!expando->getDenseElement(i).isMagic(JS_ELEMENTS_HOLE)) {
-                if (!properties.append(INT_TO_JSID(i)))
-                    return false;
-            }
-        }
-    }
+    // Ignore expando properties here, they are special-cased by the property
+    // enumeration code.
 
     const UnboxedLayout::PropertyVector& unboxed = obj->as<UnboxedPlainObject>().layout().properties();
     for (size_t i = 0; i < unboxed.length(); i++) {
         if (!properties.append(NameToId(unboxed[i].name)))
-            return false;
-    }
-
-    if (expando) {
-        Vector<jsid> ids(cx);
-        for (Shape::Range<NoGC> r(expando->lastProperty()); !r.empty(); r.popFront()) {
-            if (!ids.append(r.front().propid()))
-                return false;
-        }
-        ::Reverse(ids.begin(), ids.end());
-        if (!properties.append(ids.begin(), ids.length()))
             return false;
     }
 
@@ -920,14 +909,10 @@ UnboxedPlainObject::obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector&
 
 const Class UnboxedExpandoObject::class_ = {
     "UnboxedExpandoObject",
-    JSCLASS_IMPLEMENTS_BARRIERS
+    0
 };
 
-const Class UnboxedPlainObject::class_ = {
-    js_Object_str,
-    Class::NON_NATIVE |
-    JSCLASS_IMPLEMENTS_BARRIERS |
-    JSCLASS_HAS_CACHED_PROTO(JSProto_Object),
+static const ClassOps UnboxedPlainObjectClassOps = {
     nullptr,        /* addProperty */
     nullptr,        /* delProperty */
     nullptr,        /* getProperty */
@@ -935,28 +920,37 @@ const Class UnboxedPlainObject::class_ = {
     nullptr,        /* enumerate   */
     nullptr,        /* resolve     */
     nullptr,        /* mayResolve  */
-    nullptr,        /* convert     */
     nullptr,        /* finalize    */
     nullptr,        /* call        */
     nullptr,        /* hasInstance */
     nullptr,        /* construct   */
     UnboxedPlainObject::trace,
+};
+
+static const ObjectOps UnboxedPlainObjectObjectOps = {
+    UnboxedPlainObject::obj_lookupProperty,
+    UnboxedPlainObject::obj_defineProperty,
+    UnboxedPlainObject::obj_hasProperty,
+    UnboxedPlainObject::obj_getProperty,
+    UnboxedPlainObject::obj_setProperty,
+    UnboxedPlainObject::obj_getOwnPropertyDescriptor,
+    UnboxedPlainObject::obj_deleteProperty,
+    UnboxedPlainObject::obj_watch,
+    nullptr,   /* No unwatch needed, as watch() converts the object to native */
+    nullptr,   /* getElements */
+    UnboxedPlainObject::obj_enumerate,
+    nullptr    /* funToString */
+};
+
+const Class UnboxedPlainObject::class_ = {
+    js_Object_str,
+    Class::NON_NATIVE |
+    JSCLASS_HAS_CACHED_PROTO(JSProto_Object) |
+    JSCLASS_DELAY_METADATA_BUILDER,
+    &UnboxedPlainObjectClassOps,
     JS_NULL_CLASS_SPEC,
     JS_NULL_CLASS_EXT,
-    {
-        UnboxedPlainObject::obj_lookupProperty,
-        UnboxedPlainObject::obj_defineProperty,
-        UnboxedPlainObject::obj_hasProperty,
-        UnboxedPlainObject::obj_getProperty,
-        UnboxedPlainObject::obj_setProperty,
-        UnboxedPlainObject::obj_getOwnPropertyDescriptor,
-        UnboxedPlainObject::obj_deleteProperty,
-        UnboxedPlainObject::obj_watch,
-        nullptr,   /* No unwatch needed, as watch() converts the object to native */
-        nullptr,   /* getElements */
-        UnboxedPlainObject::obj_enumerate,
-        nullptr, /* thisObject */
-    }
+    &UnboxedPlainObjectObjectOps
 };
 
 /////////////////////////////////////////////////////////////////////
@@ -965,15 +959,49 @@ const Class UnboxedPlainObject::class_ = {
 
 template <JSValueType Type>
 DenseElementResult
-AppendUnboxedDenseElements(UnboxedArrayObject* obj, uint32_t initlen, AutoValueVector* values)
+AppendUnboxedDenseElements(UnboxedArrayObject* obj, uint32_t initlen,
+                           MutableHandle<GCVector<Value>> values)
 {
     for (size_t i = 0; i < initlen; i++)
-        values->infallibleAppend(obj->getElementSpecific<Type>(i));
+        values.infallibleAppend(obj->getElementSpecific<Type>(i));
     return DenseElementResult::Success;
 }
 
 DefineBoxedOrUnboxedFunctor3(AppendUnboxedDenseElements,
-                             UnboxedArrayObject*, uint32_t, AutoValueVector*);
+                             UnboxedArrayObject*, uint32_t, MutableHandle<GCVector<Value>>);
+
+/* static */ bool
+UnboxedArrayObject::convertToNativeWithGroup(ExclusiveContext* cx, JSObject* obj,
+                                             ObjectGroup* group, Shape* shape)
+{
+    size_t length = obj->as<UnboxedArrayObject>().length();
+    size_t initlen = obj->as<UnboxedArrayObject>().initializedLength();
+
+    Rooted<GCVector<Value>> values(cx, GCVector<Value>(cx));
+    if (!values.reserve(initlen))
+        return false;
+
+    AppendUnboxedDenseElementsFunctor functor(&obj->as<UnboxedArrayObject>(), initlen, &values);
+    DebugOnly<DenseElementResult> result = CallBoxedOrUnboxedSpecialization(functor, obj);
+    MOZ_ASSERT(result.value == DenseElementResult::Success);
+
+    obj->setGroup(group);
+
+    ArrayObject* aobj = &obj->as<ArrayObject>();
+    aobj->setLastPropertyMakeNative(cx, shape);
+
+    // Make sure there is at least one element, so that this array does not
+    // use emptyObjectElements / emptyObjectElementsShared.
+    if (!aobj->ensureElements(cx, Max<size_t>(initlen, 1)))
+        return false;
+
+    MOZ_ASSERT(!aobj->getDenseInitializedLength());
+    aobj->setDenseInitializedLength(initlen);
+    aobj->initDenseElements(0, values.begin(), initlen);
+    aobj->setLengthInt32(length);
+
+    return true;
+}
 
 /* static */ bool
 UnboxedArrayObject::convertToNative(JSContext* cx, JSObject* obj)
@@ -985,31 +1013,37 @@ UnboxedArrayObject::convertToNative(JSContext* cx, JSObject* obj)
             return false;
     }
 
-    size_t length = obj->as<UnboxedArrayObject>().length();
-    size_t initlen = obj->as<UnboxedArrayObject>().initializedLength();
+    return convertToNativeWithGroup(cx, obj, layout.nativeGroup(), layout.nativeShape());
+}
 
-    AutoValueVector values(cx);
-    if (!values.reserve(initlen))
+bool
+UnboxedArrayObject::convertInt32ToDouble(ExclusiveContext* cx, ObjectGroup* group)
+{
+    MOZ_ASSERT(elementType() == JSVAL_TYPE_INT32);
+    MOZ_ASSERT(group->unboxedLayout().elementType() == JSVAL_TYPE_DOUBLE);
+
+    Vector<int32_t> values(cx);
+    if (!values.reserve(initializedLength()))
+        return false;
+    for (size_t i = 0; i < initializedLength(); i++)
+        values.infallibleAppend(getElementSpecific<JSVAL_TYPE_INT32>(i).toInt32());
+
+    uint8_t* newElements;
+    if (hasInlineElements()) {
+        newElements = AllocateObjectBuffer<uint8_t>(cx, this, capacity() * sizeof(double));
+    } else {
+        newElements = ReallocateObjectBuffer<uint8_t>(cx, this, elements(),
+                                                      capacity() * sizeof(int32_t),
+                                                      capacity() * sizeof(double));
+    }
+    if (!newElements)
         return false;
 
-    AppendUnboxedDenseElementsFunctor functor(&obj->as<UnboxedArrayObject>(), initlen, &values);
-    DebugOnly<DenseElementResult> result = CallBoxedOrUnboxedSpecialization(functor, obj);
-    MOZ_ASSERT(result.value == DenseElementResult::Success);
+    setGroup(group);
+    elements_ = newElements;
 
-    obj->setGroup(layout.nativeGroup());
-
-    ArrayObject* aobj = &obj->as<ArrayObject>();
-    aobj->setLastPropertyMakeNative(cx, layout.nativeShape());
-
-    // Make sure there is at least one element, so that this array does not
-    // use emptyObjectElements.
-    if (!aobj->ensureElements(cx, Max<size_t>(initlen, 1)))
-        return false;
-
-    MOZ_ASSERT(!aobj->getDenseInitializedLength());
-    aobj->setDenseInitializedLength(initlen);
-    aobj->initDenseElements(0, values.begin(), initlen);
-    aobj->setLengthInt32(length);
+    for (size_t i = 0; i < initializedLength(); i++)
+        setElementNoTypeChangeSpecific<JSVAL_TYPE_DOUBLE>(i, DoubleValue(values[i]));
 
     return true;
 }
@@ -1037,6 +1071,7 @@ UnboxedArrayObject::create(ExclusiveContext* cx, HandleObjectGroup group, uint32
         res = NewObjectWithGroup<UnboxedArrayObject>(cx, group, allocKind, newKind);
         if (!res)
             return nullptr;
+        res->setInitializedLengthNoBarrier(0);
         res->setInlineElements();
 
         size_t actualCapacity = (GetGCKindBytes(allocKind) - offsetOfInlineElements()) / elementSize;
@@ -1046,6 +1081,7 @@ UnboxedArrayObject::create(ExclusiveContext* cx, HandleObjectGroup group, uint32
         res = NewObjectWithGroup<UnboxedArrayObject>(cx, group, gc::AllocKind::OBJECT0, newKind);
         if (!res)
             return nullptr;
+        res->setInitializedLengthNoBarrier(0);
 
         uint32_t capacityIndex = (capacity == length)
                                  ? CapacityMatchesLengthIndex
@@ -1056,7 +1092,6 @@ UnboxedArrayObject::create(ExclusiveContext* cx, HandleObjectGroup group, uint32
         if (!res->elements_) {
             // Make the object safe for GC.
             res->setInlineElements();
-            res->setInitializedLength(0);
             return nullptr;
         }
 
@@ -1064,7 +1099,6 @@ UnboxedArrayObject::create(ExclusiveContext* cx, HandleObjectGroup group, uint32
     }
 
     res->setLength(cx, length);
-    res->setInitializedLength(0);
     return res;
 }
 
@@ -1116,15 +1150,14 @@ UnboxedArrayObject::trace(JSTracer* trc, JSObject* obj)
     switch (type) {
       case JSVAL_TYPE_OBJECT:
         for (size_t i = 0; i < initlen; i++) {
-            HeapPtrObject* heap = reinterpret_cast<HeapPtrObject*>(elements + i);
-            if (*heap)
-                TraceEdge(trc, heap, "unboxed_object");
+            GCPtrObject* heap = reinterpret_cast<GCPtrObject*>(elements + i);
+            TraceNullableEdge(trc, heap, "unboxed_object");
         }
         break;
 
       case JSVAL_TYPE_STRING:
         for (size_t i = 0; i < initlen; i++) {
-            HeapPtrString* heap = reinterpret_cast<HeapPtrString*>(elements + i);
+            GCPtrString* heap = reinterpret_cast<GCPtrString*>(elements + i);
             TraceEdge(trc, heap, "unboxed_string");
         }
         break;
@@ -1177,9 +1210,10 @@ UnboxedArrayObject::objectMovedDuringMinorGC(JSTracer* trc, JSObject* dst, JSObj
     } else {
         MOZ_ASSERT(allocKind == gc::AllocKind::OBJECT0);
 
+        AutoEnterOOMUnsafeRegion oomUnsafe;
         uint8_t* data = nsrc->zone()->pod_malloc<uint8_t>(nbytes);
         if (!data)
-            CrashAtUnhandlableOOM("Failed to allocate unboxed array elements while tenuring.");
+            oomUnsafe.crash("Failed to allocate unboxed array elements while tenuring.");
         ndst->elements_ = data;
     }
 
@@ -1197,11 +1231,29 @@ UnboxedArrayObject::objectMovedDuringMinorGC(JSTracer* trc, JSObject* dst, JSObj
 // a little weird, but were chosen to allow the inline data of objects of each
 // size to be fully utilized for arrays of the various types on both 32 bit and
 // 64 bit platforms.
+//
+// To find the possible inline capacities, the following script was used:
+//
+// var fixedSlotCapacities = [0, 2, 4, 8, 12, 16];
+// var dataSizes = [1, 4, 8];
+// var header32 = 4 * 2 + 4 * 2;
+// var header64 = 8 * 2 + 4 * 2;
+//
+// for (var i = 0; i < fixedSlotCapacities.length; i++) {
+//    var nfixed = fixedSlotCapacities[i];
+//    var size32 = 4 * 4 + 8 * nfixed - header32;
+//    var size64 = 8 * 4 + 8 * nfixed - header64;
+//    for (var j = 0; j < dataSizes.length; j++) {
+//        print(size32 / dataSizes[j]);
+//        print(size64 / dataSizes[j]);
+//    }
+// }
+//
 /* static */ const uint32_t
 UnboxedArrayObject::CapacityArray[] = {
     UINT32_MAX, // For CapacityMatchesLengthIndex.
-    0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 13, 16, 17, 18, 20, 24, 26, 32, 34, 36, 48, 52, 64, 68,
-    72, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288,
+    0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 13, 16, 17, 18, 24, 26, 32, 34, 40, 64, 72, 96, 104, 128, 136,
+    256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288,
     1048576, 2097152, 3145728, 4194304, 5242880, 6291456, 7340032, 8388608, 9437184, 11534336,
     13631488, 15728640, 17825792, 20971520, 24117248, 27262976, 31457280, 35651584, 40894464,
     46137344, 52428800, 59768832, MaximumCapacity
@@ -1209,30 +1261,30 @@ UnboxedArrayObject::CapacityArray[] = {
 
 static const uint32_t
 Pow2CapacityIndexes[] = {
-    1,  // 1
-    2,  // 2
-    4,  // 4
+    2,  // 1
+    3,  // 2
+    5,  // 4
     8,  // 8
     13, // 16
-    19, // 32
-    24, // 64
-    27, // 128
-    28, // 256
-    29, // 512
-    30, // 1024
-    31, // 2048
-    32, // 4096
-    33, // 8192
-    34, // 16384
-    35, // 32768
-    36, // 65536
-    37, // 131072
-    38, // 262144
-    39, // 524288
-    40  // 1048576
+    18, // 32
+    21, // 64
+    25, // 128
+    27, // 256
+    28, // 512
+    29, // 1024
+    30, // 2048
+    31, // 4096
+    32, // 8192
+    33, // 16384
+    34, // 32768
+    35, // 65536
+    36, // 131072
+    37, // 262144
+    38, // 524288
+    39  // 1048576
 };
 
-static const uint32_t MebiCapacityIndex = 40;
+static const uint32_t MebiCapacityIndex = 39;
 
 /* static */ uint32_t
 UnboxedArrayObject::chooseCapacityIndex(uint32_t capacity, uint32_t length)
@@ -1242,7 +1294,8 @@ UnboxedArrayObject::chooseCapacityIndex(uint32_t capacity, uint32_t length)
     // should generally be matched by the other.
 
     // Make sure we have enough space to store all possible values for the capacity index.
-    MOZ_ASSERT(mozilla::ArrayLength(CapacityArray) - 1 <= CapacityMask >> CapacityShift);
+    // This ought to be a static_assert, but MSVC doesn't like that.
+    MOZ_ASSERT(mozilla::ArrayLength(CapacityArray) - 1 <= (CapacityMask >> CapacityShift));
 
     // The caller should have ensured the capacity is possible for an unboxed array.
     MOZ_ASSERT(capacity <= MaximumCapacity);
@@ -1375,7 +1428,7 @@ UnboxedArrayObject::obj_lookupProperty(JSContext* cx, HandleObject obj,
         return true;
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         objp.set(nullptr);
         propp.set(nullptr);
@@ -1387,7 +1440,7 @@ UnboxedArrayObject::obj_lookupProperty(JSContext* cx, HandleObject obj,
 
 /* static */ bool
 UnboxedArrayObject::obj_defineProperty(JSContext* cx, HandleObject obj, HandleId id,
-                                       Handle<JSPropertyDescriptor> desc,
+                                       Handle<PropertyDescriptor> desc,
                                        ObjectOpResult& result)
 {
     if (JSID_IS_INT(id) && !desc.getter() && !desc.setter() && desc.attributes() == JSPROP_ENUMERATE) {
@@ -1408,7 +1461,7 @@ UnboxedArrayObject::obj_defineProperty(JSContext* cx, HandleObject obj, HandleId
                     nobj->setLengthInt32(index + 1);
                 return result.succeed();
             }
-            nobj->setInitializedLength(index);
+            nobj->setInitializedLengthNoBarrier(index);
         }
     }
 
@@ -1426,7 +1479,7 @@ UnboxedArrayObject::obj_hasProperty(JSContext* cx, HandleObject obj, HandleId id
         return true;
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         *foundp = false;
         return true;
@@ -1436,7 +1489,7 @@ UnboxedArrayObject::obj_hasProperty(JSContext* cx, HandleObject obj, HandleId id
 }
 
 /* static */ bool
-UnboxedArrayObject::obj_getProperty(JSContext* cx, HandleObject obj, HandleObject receiver,
+UnboxedArrayObject::obj_getProperty(JSContext* cx, HandleObject obj, HandleValue receiver,
                                     HandleId id, MutableHandleValue vp)
 {
     if (obj->as<UnboxedArrayObject>().containsProperty(cx, id)) {
@@ -1447,7 +1500,7 @@ UnboxedArrayObject::obj_getProperty(JSContext* cx, HandleObject obj, HandleObjec
         return true;
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         vp.setUndefined();
         return true;
@@ -1483,7 +1536,7 @@ UnboxedArrayObject::obj_setProperty(JSContext* cx, HandleObject obj, HandleId id
             return SetProperty(cx, obj, id, v, receiver, result);
         }
 
-        return SetPropertyByDefining(cx, obj, id, v, receiver, false, result);
+        return SetPropertyByDefining(cx, id, v, receiver, result);
     }
 
     return SetPropertyOnProto(cx, obj, id, v, receiver, result);
@@ -1491,7 +1544,7 @@ UnboxedArrayObject::obj_setProperty(JSContext* cx, HandleObject obj, HandleId id
 
 /* static */ bool
 UnboxedArrayObject::obj_getOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
-                                                 MutableHandle<JSPropertyDescriptor> desc)
+                                                 MutableHandle<PropertyDescriptor> desc)
 {
     if (obj->as<UnboxedArrayObject>().containsProperty(cx, id)) {
         if (JSID_IS_INT(id)) {
@@ -1536,21 +1589,21 @@ UnboxedArrayObject::obj_watch(JSContext* cx, HandleObject obj, HandleId id, Hand
 }
 
 /* static */ bool
-UnboxedArrayObject::obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector& properties)
+UnboxedArrayObject::obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector& properties,
+                                  bool enumerableOnly)
 {
     for (size_t i = 0; i < obj->as<UnboxedArrayObject>().initializedLength(); i++) {
         if (!properties.append(INT_TO_JSID(i)))
             return false;
     }
-    return properties.append(NameToId(cx->names().length));
+
+    if (!enumerableOnly && !properties.append(NameToId(cx->names().length)))
+        return false;
+
+    return true;
 }
 
-const Class UnboxedArrayObject::class_ = {
-    "Array",
-    Class::NON_NATIVE |
-    JSCLASS_IMPLEMENTS_BARRIERS |
-    JSCLASS_SKIP_NURSERY_FINALIZE |
-    JSCLASS_BACKGROUND_FINALIZE,
+static const ClassOps UnboxedArrayObjectClassOps = {
     nullptr,        /* addProperty */
     nullptr,        /* delProperty */
     nullptr,        /* getProperty */
@@ -1558,34 +1611,42 @@ const Class UnboxedArrayObject::class_ = {
     nullptr,        /* enumerate   */
     nullptr,        /* resolve     */
     nullptr,        /* mayResolve  */
-    nullptr,        /* convert     */
     UnboxedArrayObject::finalize,
     nullptr,        /* call        */
     nullptr,        /* hasInstance */
     nullptr,        /* construct   */
     UnboxedArrayObject::trace,
+};
+
+static const ClassExtension UnboxedArrayObjectClassExtension = {
+    nullptr,    /* weakmapKeyDelegateOp */
+    UnboxedArrayObject::objectMoved
+};
+
+static const ObjectOps UnboxedArrayObjectObjectOps = {
+    UnboxedArrayObject::obj_lookupProperty,
+    UnboxedArrayObject::obj_defineProperty,
+    UnboxedArrayObject::obj_hasProperty,
+    UnboxedArrayObject::obj_getProperty,
+    UnboxedArrayObject::obj_setProperty,
+    UnboxedArrayObject::obj_getOwnPropertyDescriptor,
+    UnboxedArrayObject::obj_deleteProperty,
+    UnboxedArrayObject::obj_watch,
+    nullptr,   /* No unwatch needed, as watch() converts the object to native */
+    nullptr,   /* getElements */
+    UnboxedArrayObject::obj_enumerate,
+    nullptr    /* funToString */
+};
+
+const Class UnboxedArrayObject::class_ = {
+    "Array",
+    Class::NON_NATIVE |
+    JSCLASS_SKIP_NURSERY_FINALIZE |
+    JSCLASS_BACKGROUND_FINALIZE,
+    &UnboxedArrayObjectClassOps,
     JS_NULL_CLASS_SPEC,
-    {
-        nullptr,    /* outerObject */
-        nullptr,    /* innerObject */
-        false,      /* isWrappedNative */
-        nullptr,    /* weakmapKeyDelegateOp */
-        UnboxedArrayObject::objectMoved
-    },
-    {
-        UnboxedArrayObject::obj_lookupProperty,
-        UnboxedArrayObject::obj_defineProperty,
-        UnboxedArrayObject::obj_hasProperty,
-        UnboxedArrayObject::obj_getProperty,
-        UnboxedArrayObject::obj_setProperty,
-        UnboxedArrayObject::obj_getOwnPropertyDescriptor,
-        UnboxedArrayObject::obj_deleteProperty,
-        UnboxedArrayObject::obj_watch,
-        nullptr,   /* No unwatch needed, as watch() converts the object to native */
-        nullptr,   /* getElements */
-        UnboxedArrayObject::obj_enumerate,
-        nullptr,   /* thisObject */
-    }
+    &UnboxedArrayObjectClassExtension,
+    &UnboxedArrayObjectObjectOps
 };
 
 /////////////////////////////////////////////////////////////////////
@@ -1671,11 +1732,9 @@ CombineArrayObjectElements(ExclusiveContext* cx, ArrayObject* obj, JSValueType* 
 {
     if (obj->inDictionaryMode() ||
         obj->lastProperty()->propid() != AtomToId(cx->names().length) ||
-        !obj->lastProperty()->previous()->isEmptyShape() ||
-        !obj->getDenseInitializedLength())
+        !obj->lastProperty()->previous()->isEmptyShape())
     {
-        // Only use an unboxed representation if the object has at
-        // least one element, and no properties.
+        // Only use an unboxed representation if the object has no properties.
         return false;
     }
 
@@ -1713,10 +1772,7 @@ ComputePlainObjectLayout(ExclusiveContext* cx, Shape* templateShape,
     // properties, which will allow us to generate better code if the objects
     // have a subtype/supertype relation and are accessed at common sites.
     UnboxedLayout* bestExisting = nullptr;
-    for (UnboxedLayout* existing = cx->compartment()->unboxedLayouts.getFirst();
-         existing;
-         existing = existing->getNext())
-    {
+    for (UnboxedLayout* existing : cx->compartment()->unboxedLayouts) {
         if (PropertiesAreSuperset(properties, existing)) {
             if (!bestExisting ||
                 existing->properties().length() > bestExisting->properties().length())
@@ -1799,13 +1855,13 @@ SetLayoutTraceList(ExclusiveContext* cx, UnboxedLayout* layout)
 }
 
 static inline Value
-NextValue(const AutoValueVector& values, size_t* valueCursor)
+NextValue(Handle<GCVector<Value>> values, size_t* valueCursor)
 {
     return values[(*valueCursor)++];
 }
 
 static bool
-GetValuesFromPreliminaryArrayObject(ArrayObject* obj, AutoValueVector& values)
+GetValuesFromPreliminaryArrayObject(ArrayObject* obj, MutableHandle<GCVector<Value>> values)
 {
     if (!values.append(Int32Value(obj->length())))
         return false;
@@ -1820,19 +1876,23 @@ GetValuesFromPreliminaryArrayObject(ArrayObject* obj, AutoValueVector& values)
 
 void
 UnboxedArrayObject::fillAfterConvert(ExclusiveContext* cx,
-                                     const AutoValueVector& values, size_t* valueCursor)
+                                     Handle<GCVector<Value>> values, size_t* valueCursor)
 {
     MOZ_ASSERT(CapacityArray[1] == 0);
     setCapacityIndex(1);
-    setInitializedLength(0);
+    setInitializedLengthNoBarrier(0);
     setInlineElements();
 
     setLength(cx, NextValue(values, valueCursor).toInt32());
 
     int32_t initlen = NextValue(values, valueCursor).toInt32();
+    if (!initlen)
+        return;
 
+    AutoEnterOOMUnsafeRegion oomUnsafe;
     if (!growElements(cx, initlen))
-        CrashAtUnhandlableOOM("UnboxedArrayObject::fillAfterConvert");
+        oomUnsafe.crash("UnboxedArrayObject::fillAfterConvert");
+
     setInitializedLength(initlen);
 
     for (size_t i = 0; i < size_t(initlen); i++)
@@ -1840,7 +1900,7 @@ UnboxedArrayObject::fillAfterConvert(ExclusiveContext* cx,
 }
 
 static bool
-GetValuesFromPreliminaryPlainObject(PlainObject* obj, AutoValueVector& values)
+GetValuesFromPreliminaryPlainObject(PlainObject* obj, MutableHandle<GCVector<Value>> values)
 {
     for (size_t i = 0; i < obj->slotSpan(); i++) {
         if (!values.append(obj->getSlot(i)))
@@ -1851,7 +1911,7 @@ GetValuesFromPreliminaryPlainObject(PlainObject* obj, AutoValueVector& values)
 
 void
 UnboxedPlainObject::fillAfterConvert(ExclusiveContext* cx,
-                                     const AutoValueVector& values, size_t* valueCursor)
+                                     Handle<GCVector<Value>> values, size_t* valueCursor)
 {
     initExpando();
     memset(data(), 0, layout().size());
@@ -1870,14 +1930,14 @@ js::TryConvertToUnboxedLayout(ExclusiveContext* cx, Shape* templateShape,
     if (isArray) {
 #ifdef NIGHTLY_BUILD
         if (!getenv("JS_OPTION_USE_UNBOXED_ARRAYS")) {
-            if (!group->runtimeFromAnyThread()->options().unboxedArrays())
+            if (!cx->options().unboxedArrays())
                 return true;
         }
 #else
         return true;
 #endif
     } else {
-        if (jit::js_JitOptions.disableUnboxedObjects)
+        if (jit::JitOptions.disableUnboxedObjects)
             return true;
     }
 
@@ -1955,8 +2015,7 @@ js::TryConvertToUnboxedLayout(ExclusiveContext* cx, Shape* templateShape,
             return true;
     }
 
-    UniquePtr<UnboxedLayout, JS::DeletePolicy<UnboxedLayout> > layout;
-    layout.reset(group->zone()->new_<UnboxedLayout>());
+    AutoInitGCManagedObject<UnboxedLayout> layout(group->zone()->make_unique<UnboxedLayout>());
     if (!layout)
         return false;
 
@@ -1988,18 +2047,21 @@ js::TryConvertToUnboxedLayout(ExclusiveContext* cx, Shape* templateShape,
 
     // Accumulate a list of all the values in each preliminary object, and
     // update their shapes.
-    AutoValueVector values(cx);
+    Rooted<GCVector<Value>> values(cx, GCVector<Value>(cx));
     for (size_t i = 0; i < PreliminaryObjectArray::COUNT; i++) {
         JSObject* obj = objects->get(i);
         if (!obj)
             continue;
 
-        if (isArray) {
-            if (!GetValuesFromPreliminaryArrayObject(&obj->as<ArrayObject>(), values))
-                return false;
-        } else {
-            if (!GetValuesFromPreliminaryPlainObject(&obj->as<PlainObject>(), values))
-                return false;
+        bool ok;
+        if (isArray)
+            ok = GetValuesFromPreliminaryArrayObject(&obj->as<ArrayObject>(), &values);
+        else
+            ok = GetValuesFromPreliminaryPlainObject(&obj->as<PlainObject>(), &values);
+
+        if (!ok) {
+            cx->recoverFromOutOfMemory();
+            return false;
         }
     }
 
@@ -2012,7 +2074,7 @@ js::TryConvertToUnboxedLayout(ExclusiveContext* cx, Shape* templateShape,
     }
 
     group->setClasp(clasp);
-    group->setUnboxedLayout(layout.get());
+    group->setUnboxedLayout(layout.release());
 
     size_t valueCursor = 0;
     for (size_t i = 0; i < PreliminaryObjectArray::COUNT; i++) {
@@ -2055,15 +2117,15 @@ js::MoveAnyBoxedOrUnboxedDenseElements(JSContext* cx, JSObject* obj,
     return CallBoxedOrUnboxedSpecialization(functor, obj);
 }
 
-DefineBoxedOrUnboxedFunctor6(CopyBoxedOrUnboxedDenseElements,
-                             JSContext*, JSObject*, JSObject*, uint32_t, uint32_t, uint32_t);
+DefineBoxedOrUnboxedFunctorPair6(CopyBoxedOrUnboxedDenseElements,
+                                 JSContext*, JSObject*, JSObject*, uint32_t, uint32_t, uint32_t);
 
 DenseElementResult
 js::CopyAnyBoxedOrUnboxedDenseElements(JSContext* cx, JSObject* dst, JSObject* src,
                                        uint32_t dstStart, uint32_t srcStart, uint32_t length)
 {
     CopyBoxedOrUnboxedDenseElementsFunctor functor(cx, dst, src, dstStart, srcStart, length);
-    return CallBoxedOrUnboxedSpecialization(functor, dst);
+    return CallBoxedOrUnboxedSpecialization(functor, dst, src);
 }
 
 DefineBoxedOrUnboxedFunctor3(SetBoxedOrUnboxedInitializedLength,
@@ -2074,4 +2136,14 @@ js::SetAnyBoxedOrUnboxedInitializedLength(JSContext* cx, JSObject* obj, size_t i
 {
     SetBoxedOrUnboxedInitializedLengthFunctor functor(cx, obj, initlen);
     JS_ALWAYS_TRUE(CallBoxedOrUnboxedSpecialization(functor, obj) == DenseElementResult::Success);
+}
+
+DefineBoxedOrUnboxedFunctor3(EnsureBoxedOrUnboxedDenseElements,
+                             JSContext*, JSObject*, size_t);
+
+DenseElementResult
+js::EnsureAnyBoxedOrUnboxedDenseElements(JSContext* cx, JSObject* obj, size_t initlen)
+{
+    EnsureBoxedOrUnboxedDenseElementsFunctor functor(cx, obj, initlen);
+    return CallBoxedOrUnboxedSpecialization(functor, obj);
 }

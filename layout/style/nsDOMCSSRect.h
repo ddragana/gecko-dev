@@ -10,7 +10,6 @@
 
 #include "mozilla/Attributes.h"
 #include "nsIDOMRect.h"
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 
@@ -44,10 +43,10 @@ protected:
   virtual ~nsDOMCSSRect(void);
 
 private:
-  nsRefPtr<nsROCSSPrimitiveValue> mTop;
-  nsRefPtr<nsROCSSPrimitiveValue> mRight;
-  nsRefPtr<nsROCSSPrimitiveValue> mBottom;
-  nsRefPtr<nsROCSSPrimitiveValue> mLeft;
+  RefPtr<nsROCSSPrimitiveValue> mTop;
+  RefPtr<nsROCSSPrimitiveValue> mRight;
+  RefPtr<nsROCSSPrimitiveValue> mBottom;
+  RefPtr<nsROCSSPrimitiveValue> mLeft;
 };
 
 #endif /* nsDOMCSSRect_h_ */

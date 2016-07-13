@@ -6,7 +6,7 @@
 #include "gtest/gtest.h"
 #include "MP4Reader.h"
 #include "MP4Decoder.h"
-#include "SharedThreadPool.h"
+#include "mozilla/SharedThreadPool.h"
 #include "MockMediaResource.h"
 #include "MockMediaDecoderOwner.h"
 #include "mozilla/Preferences.h"
@@ -20,9 +20,9 @@ class TestBinding
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TestBinding);
 
-  nsRefPtr<MP4Decoder> decoder;
-  nsRefPtr<MockMediaResource> resource;
-  nsRefPtr<MP4Reader> reader;
+  RefPtr<MP4Decoder> decoder;
+  RefPtr<MockMediaResource> resource;
+  RefPtr<MP4Reader> reader;
 
   explicit TestBinding(const char* aFileName = "gizmo.mp4")
     : decoder(new MP4Decoder())
@@ -30,7 +30,7 @@ public:
     , reader(new MP4Reader(decoder))
   {
     EXPECT_EQ(NS_OK, Preferences::SetBool(
-                       "media.fragmented-mp4.use-blank-decoder", true));
+                       "media.use-blank-decoder", true));
 
     EXPECT_EQ(NS_OK, resource->Open(nullptr));
     decoder->SetResource(resource);
@@ -43,8 +43,8 @@ public:
 
   void Init() {
     nsCOMPtr<nsIThread> thread;
-    nsresult rv = NS_NewThread(getter_AddRefs(thread),
-                               NS_NewRunnableMethod(this, &TestBinding::ReadMetadata));
+    nsCOMPtr<nsIRunnable> r = NewRunnableMethod(this, &TestBinding::ReadMetadata);
+    nsresult rv = NS_NewThread(getter_AddRefs(thread), r);
     EXPECT_EQ(NS_OK, rv);
     thread->Shutdown();
   }
@@ -53,8 +53,8 @@ private:
   virtual ~TestBinding()
   {
     {
-      nsRefPtr<TaskQueue> queue = reader->OwnerThread();
-      nsCOMPtr<nsIRunnable> task = NS_NewRunnableMethod(reader, &MP4Reader::Shutdown);
+      RefPtr<TaskQueue> queue = reader->OwnerThread();
+      nsCOMPtr<nsIRunnable> task = NewRunnableMethod(reader, &MP4Reader::Shutdown);
       // Hackily bypass the tail dispatcher so that we can AwaitShutdownAndIdle.
       // In production code we'd use BeginShutdown + promises.
       queue->Dispatch(task.forget(), AbstractThread::AssertDispatchSuccess,
@@ -77,7 +77,7 @@ private:
 
 TEST(MP4Reader, BufferedRange)
 {
-  nsRefPtr<TestBinding> b = new TestBinding();
+  RefPtr<TestBinding> b = new TestBinding();
   b->Init();
 
   // Video 3-4 sec, audio 2.986666-4.010666 sec
@@ -91,7 +91,7 @@ TEST(MP4Reader, BufferedRange)
 
 TEST(MP4Reader, BufferedRangeMissingLastByte)
 {
-  nsRefPtr<TestBinding> b = new TestBinding();
+  RefPtr<TestBinding> b = new TestBinding();
   b->Init();
 
   // Dropping the last byte of the video
@@ -107,7 +107,7 @@ TEST(MP4Reader, BufferedRangeMissingLastByte)
 
 TEST(MP4Reader, BufferedRangeSyncFrame)
 {
-  nsRefPtr<TestBinding> b = new TestBinding();
+  RefPtr<TestBinding> b = new TestBinding();
   b->Init();
 
   // Check that missing the first byte at 2 seconds skips right through to 3
@@ -123,7 +123,7 @@ TEST(MP4Reader, BufferedRangeSyncFrame)
 
 TEST(MP4Reader, CompositionOrder)
 {
-  nsRefPtr<TestBinding> b = new TestBinding("mediasource_test.mp4");
+  RefPtr<TestBinding> b = new TestBinding("mediasource_test.mp4");
   b->Init();
 
   // The first 5 video samples of this file are:
@@ -180,7 +180,7 @@ TEST(MP4Reader, CompositionOrder)
 
 TEST(MP4Reader, Normalised)
 {
-  nsRefPtr<TestBinding> b = new TestBinding("mediasource_test.mp4");
+  RefPtr<TestBinding> b = new TestBinding("mediasource_test.mp4");
   b->Init();
 
   // The first 5 video samples of this file are:

@@ -124,15 +124,15 @@ private:
   //
 
   void ReceiveSocketData(int aIndex,
-                         nsAutoPtr<UnixSocketBuffer>& aMessage) override;
+                         UniquePtr<UnixSocketBuffer>& aMessage) override;
   void OnConnectSuccess(int aIndex) override;
   void OnConnectError(int aIndex) override;
   void OnDisconnect(int aIndex) override;
 
   bool mShutdown;
 
-  nsRefPtr<ListenSocket> mListenSocket;
-  nsRefPtr<StreamSocket> mStreamSocket;
+  RefPtr<ListenSocket> mListenSocket;
+  RefPtr<StreamSocket> mStreamSocket;
 };
 
 } // namespace ipc

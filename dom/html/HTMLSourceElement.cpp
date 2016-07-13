@@ -74,13 +74,26 @@ HTMLSourceElement::WouldMatchMediaForDocument(const nsAString& aMedia,
 
   nsIPresShell* presShell = aDocument->GetShell();
   nsPresContext* pctx = presShell ? presShell->GetPresContext() : nullptr;
-  MOZ_ASSERT(pctx, "Called for document with no prescontext");
 
   nsCSSParser cssParser;
-  nsRefPtr<nsMediaList> mediaList = new nsMediaList();
+  RefPtr<nsMediaList> mediaList = new nsMediaList();
   cssParser.ParseMediaList(aMedia, nullptr, 0, mediaList, false);
 
   return pctx && mediaList->Matches(pctx, nullptr);
+}
+
+void
+HTMLSourceElement::UpdateMediaList(const nsAttrValue* aValue)
+{
+  mMediaList = nullptr;
+  nsString mediaStr;
+  if (!aValue || (mediaStr = aValue->GetStringValue()).IsEmpty()) {
+    return;
+  }
+
+  nsCSSParser cssParser;
+  mMediaList = new nsMediaList();
+  cssParser.ParseMediaList(mediaStr, nullptr, 0, mMediaList, false);
 }
 
 nsresult
@@ -106,23 +119,17 @@ HTMLSourceElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
           img->PictureSourceSrcsetChanged(AsContent(), strVal, aNotify);
         } else if (aName == nsGkAtoms::sizes) {
           img->PictureSourceSizesChanged(AsContent(), strVal, aNotify);
-        } else if (aName == nsGkAtoms::media ||
-                   aName == nsGkAtoms::type) {
+        } else if (aName == nsGkAtoms::media) {
+          UpdateMediaList(aValue);
+          img->PictureSourceMediaOrTypeChanged(AsContent(), aNotify);
+        } else if (aName == nsGkAtoms::type) {
           img->PictureSourceMediaOrTypeChanged(AsContent(), aNotify);
         }
       }
     }
 
   } else if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::media) {
-    mMediaList = nullptr;
-    if (aValue) {
-      nsString mediaStr = aValue->GetStringValue();
-      if (!mediaStr.IsEmpty()) {
-        nsCSSParser cssParser;
-        mMediaList = new nsMediaList();
-        cssParser.ParseMediaList(mediaStr, nullptr, 0, mMediaList, false);
-      }
-    }
+    UpdateMediaList(aValue);
   } else if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::src) {
     mSrcMediaSource = nullptr;
     if (aValue) {
@@ -137,18 +144,6 @@ HTMLSourceElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 
   return nsGenericHTMLElement::AfterSetAttr(aNameSpaceID, aName,
                                             aValue, aNotify);
-}
-
-void
-HTMLSourceElement::GetItemValueText(DOMString& aValue)
-{
-  GetSrc(aValue);
-}
-
-void
-HTMLSourceElement::SetItemValueText(const nsAString& aValue)
-{
-  SetSrc(aValue);
 }
 
 nsresult
@@ -166,15 +161,6 @@ HTMLSourceElement::BindToTree(nsIDocument *aDocument,
   if (aParent && aParent->IsNodeOfType(nsINode::eMEDIA)) {
     HTMLMediaElement* media = static_cast<HTMLMediaElement*>(aParent);
     media->NotifyAddedSource();
-  } else if (aParent && aParent->IsHTMLElement(nsGkAtoms::picture)) {
-    // Find any img siblings after this <source> and notify them
-    nsCOMPtr<nsIContent> sibling = AsContent();
-    while ( (sibling = sibling->GetNextSibling()) ) {
-      if (sibling->IsHTMLElement(nsGkAtoms::img)) {
-        HTMLImageElement *img = static_cast<HTMLImageElement*>(sibling.get());
-        img->PictureSourceAdded(AsContent());
-      }
-    }
   }
 
   return NS_OK;

@@ -10,7 +10,6 @@
 
 #include <QPointF>
 
-#include "nsAutoPtr.h"
 #include "nsBaseWidget.h"
 #include "mozilla/EventForwards.h"
 
@@ -84,10 +83,10 @@ public:
     //
     // nsIWidget
     //
-    NS_IMETHOD Create(nsIWidget        *aParent,
-                      nsNativeWidget   aNativeParent,
-                      const nsIntRect  &aRect,
-                      nsWidgetInitData *aInitData);
+    NS_IMETHOD Create(nsIWidget* aParent,
+                      nsNativeWidget aNativeParent,
+                      const LayoutDeviceIntRect& aRect,
+                      nsWidgetInitData* aInitData);
     NS_IMETHOD Destroy(void);
 
     NS_IMETHOD Show(bool aState);
@@ -110,7 +109,7 @@ public:
     virtual bool IsEnabled() const;
     NS_IMETHOD SetFocus(bool aRaise = false);
     NS_IMETHOD ConfigureChildren(const nsTArray<nsIWidget::Configuration>&);
-    NS_IMETHOD         Invalidate(const nsIntRect &aRect);
+    NS_IMETHOD         Invalidate(const LayoutDeviceIntRect& aRect);
     virtual void*      GetNativeData(uint32_t aDataType);
     NS_IMETHOD         SetTitle(const nsAString& aTitle);
     NS_IMETHOD         SetCursor(nsCursor aCursor);
@@ -119,7 +118,7 @@ public:
     {
         return NS_OK;
     }
-    virtual mozilla::LayoutDeviceIntPoint WidgetToScreenOffset();
+    virtual LayoutDeviceIntPoint WidgetToScreenOffset();
     NS_IMETHOD DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
                              nsEventStatus& aStatus);
     NS_IMETHOD CaptureRollupEvents(nsIRollupListener *aListener,
@@ -133,8 +132,7 @@ public:
     virtual mozilla::layers::LayerManager*
         GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                         LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
-                        LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                        bool* aAllowRetaining = nullptr);
+                        LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT);
 
     NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                       const InputContextAction& aAction);
@@ -178,7 +176,8 @@ private:
     void DispatchDeactivateEvent(void);
     void DispatchActivateEventOnTopLevelWindow(void);
     void DispatchDeactivateEventOnTopLevelWindow(void);
-    void DispatchResizeEvent(nsIntRect &aRect, nsEventStatus &aStatus);
+    void DispatchResizeEvent(LayoutDeviceIntRect &aRect,
+                             nsEventStatus &aStatus);
 
     // Remember the last sizemode so that we can restore it when
     // leaving fullscreen
@@ -201,8 +200,8 @@ public:
     NS_IMETHOD         PlaceBehind(nsTopLevelWidgetZPlacement  aPlacement,
                                    nsIWidget                  *aWidget,
                                    bool                        aActivate);
-    NS_IMETHOD         SetSizeMode(int32_t aMode);
-    NS_IMETHOD         GetScreenBounds(nsIntRect &aRect);
+    NS_IMETHOD         SetSizeMode(nsSizeMode aMode);
+    NS_IMETHOD         GetScreenBounds(LayoutDeviceIntRect& aRect) override;
     NS_IMETHOD         SetHasTransparentBackground(bool aTransparent);
     NS_IMETHOD         GetHasTransparentBackground(bool& aTransparent);
     NS_IMETHOD         HideWindowChrome(bool aShouldHide);
@@ -253,13 +252,14 @@ private:
         bool needDispatch;
     } MozCachedMoveEvent;
 
+    nsIWidgetListener* GetPaintListener();
     bool               CheckForRollup(double aMouseX, double aMouseY, bool aIsWheel);
     void*              SetupPluginPort(void);
     nsresult           SetWindowIconList(const nsTArray<nsCString> &aIconList);
     void               SetDefaultIcon(void);
 
     nsEventStatus      DispatchCommandEvent(nsIAtom* aCommand);
-    nsEventStatus      DispatchContentCommandEvent(int32_t aMsg);
+    nsEventStatus      DispatchContentCommandEvent(mozilla::EventMessage aMsg);
     void               SetSoftwareKeyboardState(bool aOpen, const InputContextAction& aAction);
     void               ClearCachedResources();
 
@@ -312,7 +312,7 @@ private:
     void DispatchMotionToMainThread() {
         if (!mTimerStarted) {
             nsCOMPtr<nsIRunnable> event =
-                NS_NewRunnableMethod(this, &nsWindow::ProcessMotionEvent);
+                mozilla::NewRunnableMethod(this, &nsWindow::ProcessMotionEvent);
             NS_DispatchToMainThread(event);
             mTimerStarted = true;
         }

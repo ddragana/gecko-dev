@@ -69,7 +69,9 @@ WorkerThread::WorkerThread()
   , mWorkerPrivateCondVar(mLock, "WorkerThread::mWorkerPrivateCondVar")
   , mWorkerPrivate(nullptr)
   , mOtherThreadsDispatchingViaEventTarget(0)
+#ifdef DEBUG
   , mAcceptingNonWorkerRunnables(true)
+#endif
 {
 }
 
@@ -86,7 +88,7 @@ WorkerThread::Create(const WorkerThreadFriendKey& /* aKey */)
 {
   MOZ_ASSERT(nsThreadManager::get());
 
-  nsRefPtr<WorkerThread> thread = new WorkerThread();
+  RefPtr<WorkerThread> thread = new WorkerThread();
   if (NS_FAILED(thread->Init())) {
     NS_WARNING("Failed to create new thread!");
     return nullptr;
@@ -109,13 +111,15 @@ WorkerThread::SetWorker(const WorkerThreadFriendKey& /* aKey */,
       MOZ_ASSERT(mAcceptingNonWorkerRunnables);
 
       mWorkerPrivate = aWorkerPrivate;
+#ifdef DEBUG
       mAcceptingNonWorkerRunnables = false;
+#endif
     }
 
     mObserver = new Observer(aWorkerPrivate);
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(AddObserver(mObserver)));
+    MOZ_ALWAYS_SUCCEEDS(AddObserver(mObserver));
   } else {
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(RemoveObserver(mObserver)));
+    MOZ_ALWAYS_SUCCEEDS(RemoveObserver(mObserver));
     mObserver = nullptr;
 
     {
@@ -131,7 +135,9 @@ WorkerThread::SetWorker(const WorkerThreadFriendKey& /* aKey */,
         mWorkerPrivateCondVar.Wait();
       }
 
+#ifdef DEBUG
       mAcceptingNonWorkerRunnables = true;
+#endif
       mWorkerPrivate = nullptr;
     }
   }
@@ -139,7 +145,7 @@ WorkerThread::SetWorker(const WorkerThreadFriendKey& /* aKey */,
 
 nsresult
 WorkerThread::DispatchPrimaryRunnable(const WorkerThreadFriendKey& /* aKey */,
-                                      already_AddRefed<nsIRunnable>&& aRunnable)
+                                      already_AddRefed<nsIRunnable> aRunnable)
 {
   nsCOMPtr<nsIRunnable> runnable(aRunnable);
 
@@ -164,7 +170,7 @@ WorkerThread::DispatchPrimaryRunnable(const WorkerThreadFriendKey& /* aKey */,
 
 nsresult
 WorkerThread::DispatchAnyThread(const WorkerThreadFriendKey& /* aKey */,
-                       already_AddRefed<WorkerRunnable>&& aWorkerRunnable)
+                       already_AddRefed<WorkerRunnable> aWorkerRunnable)
 {
   // May be called on any thread!
 
@@ -207,7 +213,7 @@ WorkerThread::DispatchFromScript(nsIRunnable* aRunnable, uint32_t aFlags)
 }
 
 NS_IMETHODIMP
-WorkerThread::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlags)
+WorkerThread::Dispatch(already_AddRefed<nsIRunnable> aRunnable, uint32_t aFlags)
 {
   // May be called on any thread!
   nsCOMPtr<nsIRunnable> runnable(aRunnable); // in case we exit early
@@ -258,7 +264,7 @@ WorkerThread::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlag
 
   nsresult rv;
   if (runnable && onWorkerThread) {
-    nsRefPtr<WorkerRunnable> workerRunnable = workerPrivate->MaybeWrapAsWorkerRunnable(runnable.forget());
+    RefPtr<WorkerRunnable> workerRunnable = workerPrivate->MaybeWrapAsWorkerRunnable(runnable.forget());
     rv = nsThread::Dispatch(workerRunnable.forget(), NS_DISPATCH_NORMAL);
   } else {
     rv = nsThread::Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
@@ -292,6 +298,12 @@ WorkerThread::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlag
   return NS_OK;
 }
 
+NS_IMETHODIMP
+WorkerThread::DelayedDispatch(already_AddRefed<nsIRunnable>, uint32_t)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 uint32_t
 WorkerThread::RecursionDepth(const WorkerThreadFriendKey& /* aKey */) const
 {
@@ -310,34 +322,33 @@ WorkerThread::Observer::OnDispatchedEvent(nsIThreadInternal* /* aThread */)
 
 NS_IMETHODIMP
 WorkerThread::Observer::OnProcessNextEvent(nsIThreadInternal* /* aThread */,
-                                           bool aMayWait,
-                                           uint32_t aRecursionDepth)
+                                           bool aMayWait)
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
 
   // If the PBackground child is not created yet, then we must permit
-  // blocking event processing to support SynchronouslyCreatePBackground().
-  // If this occurs then we are spinning on the event queue at the start of
+  // blocking event processing to support
+  // BackgroundChild::SynchronouslyCreateForCurrentThread(). If this occurs
+  // then we are spinning on the event queue at the start of
   // PrimaryWorkerRunnable::Run() and don't want to process the event in
   // mWorkerPrivate yet.
   if (aMayWait) {
-    MOZ_ASSERT(aRecursionDepth == 2);
+    MOZ_ASSERT(CycleCollectedJSRuntime::Get()->RecursionDepth() == 2);
     MOZ_ASSERT(!BackgroundChild::GetForCurrentThread());
     return NS_OK;
   }
 
-  mWorkerPrivate->OnProcessNextEvent(aRecursionDepth);
+  mWorkerPrivate->OnProcessNextEvent();
   return NS_OK;
 }
 
 NS_IMETHODIMP
 WorkerThread::Observer::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
-                                              uint32_t aRecursionDepth,
                                               bool /* aEventWasProcessed */)
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
 
-  mWorkerPrivate->AfterProcessNextEvent(aRecursionDepth);
+  mWorkerPrivate->AfterProcessNextEvent();
   return NS_OK;
 }
 

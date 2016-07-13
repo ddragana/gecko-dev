@@ -16,6 +16,8 @@ namespace mozilla {
 namespace dom {
 namespace workers {
 
+class ServiceWorkerRegistrationInfo;
+
 namespace serviceWorkerScriptCache {
 
 nsresult
@@ -44,7 +46,8 @@ public:
 };
 
 nsresult
-Compare(nsIPrincipal* aPrincipal, const nsAString& aCacheName,
+Compare(ServiceWorkerRegistrationInfo* aRegistration,
+        nsIPrincipal* aPrincipal, const nsAString& aCacheName,
         const nsAString& aURL, CompareCallback* aCallback, nsILoadGroup* aLoadGroup);
 
 } // namespace serviceWorkerScriptCache

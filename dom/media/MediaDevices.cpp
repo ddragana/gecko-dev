@@ -4,6 +4,7 @@
 
 #include "mozilla/dom/MediaDevices.h"
 #include "mozilla/dom/MediaStreamBinding.h"
+#include "mozilla/dom/MediaDeviceInfo.h"
 #include "mozilla/dom/MediaDevicesBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/MediaManager.h"
@@ -27,7 +28,7 @@ public:
   NS_IMETHOD
   OnSuccess(nsISupports* aStream) override
   {
-    nsRefPtr<DOMLocalMediaStream> stream = do_QueryObject(aStream);
+    RefPtr<DOMMediaStream> stream = do_QueryObject(aStream);
     if (!stream) {
       return NS_ERROR_FAILURE;
     }
@@ -37,7 +38,7 @@ public:
 
 private:
   virtual ~GumResolver() {}
-  nsRefPtr<Promise> mPromise;
+  RefPtr<Promise> mPromise;
 };
 
 class MediaDevices::EnumDevResolver : public nsIGetUserMediaDevicesSuccessCallback
@@ -81,7 +82,7 @@ public:
         free(rawArray); // explicitly free memory from nsIVariant::GetAsArray
       }
     }
-    nsTArray<nsRefPtr<MediaDeviceInfo>> infos;
+    nsTArray<RefPtr<MediaDeviceInfo>> infos;
     for (auto& device : devices) {
       nsString type;
       device->GetType(type);
@@ -99,7 +100,7 @@ public:
             Preferences::GetBool("media.navigator.permission.disabled", false)) {
           device->GetName(name);
         }
-        nsRefPtr<MediaDeviceInfo> info = new MediaDeviceInfo(id, kind, name);
+        RefPtr<MediaDeviceInfo> info = new MediaDeviceInfo(id, kind, name);
         infos.AppendElement(info);
       }
     }
@@ -109,7 +110,7 @@ public:
 
 private:
   virtual ~EnumDevResolver() {}
-  nsRefPtr<Promise> mPromise;
+  RefPtr<Promise> mPromise;
   uint64_t mWindowId;
 };
 
@@ -123,7 +124,7 @@ public:
   NS_IMETHOD
   OnError(nsISupports* aError) override
   {
-    nsRefPtr<MediaStreamError> error = do_QueryObject(aError);
+    RefPtr<MediaStreamError> error = do_QueryObject(aError);
     if (!error) {
       return NS_ERROR_FAILURE;
     }
@@ -133,7 +134,7 @@ public:
 
 private:
   virtual ~GumRejecter() {}
-  nsRefPtr<Promise> mPromise;
+  RefPtr<Promise> mPromise;
 };
 
 NS_IMPL_ISUPPORTS(MediaDevices::GumResolver, nsIDOMGetUserMediaSuccessCallback)
@@ -144,13 +145,13 @@ already_AddRefed<Promise>
 MediaDevices::GetUserMedia(const MediaStreamConstraints& aConstraints,
                            ErrorResult &aRv)
 {
-  nsPIDOMWindow* window = GetOwner();
+  nsPIDOMWindowInner* window = GetOwner();
   nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(window);
-  nsRefPtr<Promise> p = Promise::Create(go, aRv);
+  RefPtr<Promise> p = Promise::Create(go, aRv);
   NS_ENSURE_TRUE(!aRv.Failed(), nullptr);
 
-  nsRefPtr<GumResolver> resolver = new GumResolver(p);
-  nsRefPtr<GumRejecter> rejecter = new GumRejecter(p);
+  RefPtr<GumResolver> resolver = new GumResolver(p);
+  RefPtr<GumRejecter> rejecter = new GumRejecter(p);
 
   aRv = MediaManager::Get()->GetUserMedia(window, aConstraints,
                                           resolver, rejecter);
@@ -160,13 +161,13 @@ MediaDevices::GetUserMedia(const MediaStreamConstraints& aConstraints,
 already_AddRefed<Promise>
 MediaDevices::EnumerateDevices(ErrorResult &aRv)
 {
-  nsPIDOMWindow* window = GetOwner();
+  nsPIDOMWindowInner* window = GetOwner();
   nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(window);
-  nsRefPtr<Promise> p = Promise::Create(go, aRv);
+  RefPtr<Promise> p = Promise::Create(go, aRv);
   NS_ENSURE_TRUE(!aRv.Failed(), nullptr);
 
-  nsRefPtr<EnumDevResolver> resolver = new EnumDevResolver(p, window->WindowID());
-  nsRefPtr<GumRejecter> rejecter = new GumRejecter(p);
+  RefPtr<EnumDevResolver> resolver = new EnumDevResolver(p, window->WindowID());
+  RefPtr<GumRejecter> rejecter = new GumRejecter(p);
 
   aRv = MediaManager::Get()->EnumerateDevices(window, resolver, rejecter);
   return p.forget();

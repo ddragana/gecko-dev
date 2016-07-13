@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/SharedThreadPool.h"
 #include "FileBlockCache.h"
 #include "VideoUtils.h"
 #include "prio.h"
@@ -23,7 +24,7 @@ nsresult FileBlockCache::Open(PRFileDesc* aFD)
     MonitorAutoLock mon(mDataMonitor);
     nsresult res = NS_NewThread(getter_AddRefs(mThread),
                                 nullptr,
-                                MEDIA_THREAD_STACK_SIZE);
+                                SharedThreadPool::kStackSize);
     mIsOpen = NS_SUCCEEDED(res);
     return res;
   }
@@ -87,6 +88,14 @@ void FileBlockCache::Close()
   }
 }
 
+template<typename Container, typename Value>
+bool
+ContainerContains(const Container& aContainer, const Value& value)
+{
+  return std::find(aContainer.begin(), aContainer.end(), value)
+         != aContainer.end();
+}
+
 nsresult FileBlockCache::WriteBlock(uint32_t aBlockIndex, const uint8_t* aData)
 {
   MonitorAutoLock mon(mDataMonitor);
@@ -99,16 +108,16 @@ nsresult FileBlockCache::WriteBlock(uint32_t aBlockIndex, const uint8_t* aData)
   bool blockAlreadyHadPendingChange = mBlockChanges[aBlockIndex] != nullptr;
   mBlockChanges[aBlockIndex] = new BlockChange(aData);
 
-  if (!blockAlreadyHadPendingChange || !mChangeIndexList.Contains(aBlockIndex)) {
+  if (!blockAlreadyHadPendingChange || !ContainerContains(mChangeIndexList, aBlockIndex)) {
     // We either didn't already have a pending change for this block, or we
     // did but we didn't have an entry for it in mChangeIndexList (we're in the process
     // of writing it and have removed the block's index out of mChangeIndexList
     // in Run() but not finished writing the block to file yet). Add the blocks
     // index to the end of mChangeIndexList to ensure the block is written as
     // as soon as possible.
-    mChangeIndexList.PushBack(aBlockIndex);
+    mChangeIndexList.push_back(aBlockIndex);
   }
-  NS_ASSERTION(mChangeIndexList.Contains(aBlockIndex), "Must have entry for new block");
+  NS_ASSERTION(ContainerContains(mChangeIndexList, aBlockIndex), "Must have entry for new block");
 
   EnsureWriteScheduled();
 
@@ -196,10 +205,10 @@ nsresult FileBlockCache::Run()
 {
   MonitorAutoLock mon(mDataMonitor);
   NS_ASSERTION(!NS_IsMainThread(), "Don't call on main thread");
-  NS_ASSERTION(!mChangeIndexList.IsEmpty(), "Only dispatch when there's work to do");
+  NS_ASSERTION(!mChangeIndexList.empty(), "Only dispatch when there's work to do");
   NS_ASSERTION(mIsWriteScheduled, "Should report write running or scheduled.");
 
-  while (!mChangeIndexList.IsEmpty()) {
+  while (!mChangeIndexList.empty()) {
     if (!mIsOpen) {
       // We've been closed, abort, discarding unwritten changes.
       mIsWriteScheduled = false;
@@ -217,8 +226,9 @@ nsresult FileBlockCache::Run()
     // Hold a reference to the change, in case another change
     // overwrites the mBlockChanges entry for this block while we drop
     // mDataMonitor to take mFileMonitor.
-    int32_t blockIndex = mChangeIndexList.PopFront();
-    nsRefPtr<BlockChange> change = mBlockChanges[blockIndex];
+    int32_t blockIndex = mChangeIndexList.front();
+    mChangeIndexList.pop_front();
+    RefPtr<BlockChange> change = mBlockChanges[blockIndex];
     MOZ_ASSERT(change,
                "Change index list should only contain entries for blocks "
                "with changes");
@@ -265,7 +275,7 @@ nsresult FileBlockCache::Read(int64_t aOffset,
     // If the block is not yet written to file, we can just read from
     // the memory buffer, otherwise we need to read from file.
     int32_t bytesRead = 0;
-    nsRefPtr<BlockChange> change = mBlockChanges[blockIndex];
+    RefPtr<BlockChange> change = mBlockChanges[blockIndex];
     if (change && change->IsWrite()) {
       // Block isn't yet written to file. Read from memory buffer.
       const uint8_t* blockData = change->mData.get();
@@ -326,14 +336,14 @@ nsresult FileBlockCache::MoveBlock(int32_t aSourceBlockIndex, int32_t aDestBlock
   }
 
   if (mBlockChanges[aDestBlockIndex] == nullptr ||
-      !mChangeIndexList.Contains(aDestBlockIndex)) {
+      !ContainerContains(mChangeIndexList, aDestBlockIndex)) {
     // Only add another entry to the change index list if we don't already
     // have one for this block. We won't have an entry when either there's
     // no pending change for this block, or if there is a pending change for
     // this block and we're in the process of writing it (we've popped the
     // block's index out of mChangeIndexList in Run() but not finished writing
     // the block to file yet.
-    mChangeIndexList.PushBack(aDestBlockIndex);
+    mChangeIndexList.push_back(aDestBlockIndex);
   }
 
   // If the source block hasn't yet been written to file then the dest block
@@ -346,7 +356,7 @@ nsresult FileBlockCache::MoveBlock(int32_t aSourceBlockIndex, int32_t aDestBlock
 
   EnsureWriteScheduled();
 
-  NS_ASSERTION(mChangeIndexList.Contains(aDestBlockIndex),
+  NS_ASSERTION(ContainerContains(mChangeIndexList, aDestBlockIndex),
     "Should have scheduled block for change");
 
   return NS_OK;

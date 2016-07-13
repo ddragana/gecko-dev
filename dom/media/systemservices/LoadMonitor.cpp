@@ -55,7 +55,7 @@
 #pragma comment(lib, "pdh.lib")
 #endif
 
-// NSPR_LOG_MODULES=LoadManager:5
+// MOZ_LOG=LoadManager:5
 #undef LOG
 #undef LOG_ENABLED
 #define LOG(args) MOZ_LOG(gLoadManagerLog, mozilla::LogLevel::Debug, args)
@@ -94,10 +94,10 @@ LoadMonitor::Observe(nsISupports* /* aSubject */,
   return NS_OK;
 }
 
-class LoadMonitorAddObserver : public nsRunnable
+class LoadMonitorAddObserver : public Runnable
 {
 public:
-  explicit LoadMonitorAddObserver(nsRefPtr<LoadMonitor> loadMonitor)
+  explicit LoadMonitorAddObserver(RefPtr<LoadMonitor> loadMonitor)
   {
     mLoadMonitor = loadMonitor;
   }
@@ -116,13 +116,13 @@ public:
   }
 
 private:
-  nsRefPtr<LoadMonitor> mLoadMonitor;
+  RefPtr<LoadMonitor> mLoadMonitor;
 };
 
-class LoadMonitorRemoveObserver : public nsRunnable
+class LoadMonitorRemoveObserver : public Runnable
 {
 public:
-  explicit LoadMonitorRemoveObserver(nsRefPtr<LoadMonitor> loadMonitor)
+  explicit LoadMonitorRemoveObserver(RefPtr<LoadMonitor> loadMonitor)
   {
     mLoadMonitor = loadMonitor;
   }
@@ -140,7 +140,7 @@ public:
   }
 
 private:
-  nsRefPtr<LoadMonitor> mLoadMonitor;
+  RefPtr<LoadMonitor> mLoadMonitor;
 };
 
 void LoadMonitor::Shutdown()
@@ -158,7 +158,7 @@ void LoadMonitor::Shutdown()
     // collection.  Argh.
     mLoadInfoThread = nullptr;
 
-    nsRefPtr<LoadMonitorRemoveObserver> remObsRunner = new LoadMonitorRemoveObserver(this);
+    RefPtr<LoadMonitorRemoveObserver> remObsRunner = new LoadMonitorRemoveObserver(this);
     if (!NS_IsMainThread()) {
       NS_DispatchToMainThread(remObsRunner);
     } else {
@@ -532,10 +532,10 @@ nsresult RTCLoadInfo::UpdateProcessLoad() {
 
 // Note: This class can't be in the anonymous namespace, because then we can't
 // declare it as a friend of LoadMonitor.
-class LoadInfoCollectRunner : public nsRunnable
+class LoadInfoCollectRunner : public Runnable
 {
 public:
-  LoadInfoCollectRunner(nsRefPtr<LoadMonitor> loadMonitor,
+  LoadInfoCollectRunner(RefPtr<LoadMonitor> loadMonitor,
                         RefPtr<RTCLoadInfo> loadInfo,
                         nsIThread *loadInfoThread)
     : mThread(loadInfoThread),
@@ -586,7 +586,7 @@ public:
 private:
   nsCOMPtr<nsIThread> mThread;
   RefPtr<RTCLoadInfo> mLoadInfo;
-  nsRefPtr<LoadMonitor> mLoadMonitor;
+  RefPtr<LoadMonitor> mLoadMonitor;
   int mLoadUpdateInterval;
   int mLoadNoiseCounter;
 };
@@ -625,7 +625,7 @@ LoadMonitor::GetSystemLoad() {
 }
 
 nsresult
-LoadMonitor::Init(nsRefPtr<LoadMonitor> &self)
+LoadMonitor::Init(RefPtr<LoadMonitor> &self)
 {
   LOG(("Initializing LoadMonitor"));
 
@@ -637,12 +637,12 @@ LoadMonitor::Init(nsRefPtr<LoadMonitor> &self)
     return rv;
   }
 
-  nsRefPtr<LoadMonitorAddObserver> addObsRunner = new LoadMonitorAddObserver(self);
+  RefPtr<LoadMonitorAddObserver> addObsRunner = new LoadMonitorAddObserver(self);
   NS_DispatchToMainThread(addObsRunner);
 
   NS_NewNamedThread("Sys Load Info", getter_AddRefs(mLoadInfoThread));
 
-  nsRefPtr<LoadInfoCollectRunner> runner =
+  RefPtr<LoadInfoCollectRunner> runner =
     new LoadInfoCollectRunner(self, load_info, mLoadInfoThread);
   mLoadInfoThread->Dispatch(runner, NS_DISPATCH_NORMAL);
 

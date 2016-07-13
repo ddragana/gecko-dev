@@ -22,7 +22,8 @@ DeallocPCacheStorageChild(PCacheStorageChild* aActor)
   delete aActor;
 }
 
-CacheStorageChild::CacheStorageChild(CacheStorage* aListener, Feature* aFeature)
+CacheStorageChild::CacheStorageChild(CacheStorage* aListener,
+                                     CacheWorkerHolder* aWorkerHolder)
   : mListener(aListener)
   , mNumChildActors(0)
   , mDelayedDestroy(false)
@@ -30,7 +31,7 @@ CacheStorageChild::CacheStorageChild(CacheStorage* aListener, Feature* aFeature)
   MOZ_COUNT_CTOR(cache::CacheStorageChild);
   MOZ_ASSERT(mListener);
 
-  SetFeature(aFeature);
+  SetWorkerHolder(aWorkerHolder);
 }
 
 CacheStorageChild::~CacheStorageChild()
@@ -53,8 +54,8 @@ CacheStorageChild::ExecuteOp(nsIGlobalObject* aGlobal, Promise* aPromise,
                              nsISupports* aParent, const CacheOpArgs& aArgs)
 {
   mNumChildActors += 1;
-  unused << SendPCacheOpConstructor(
-    new CacheOpChild(GetFeature(), aGlobal, aParent, aPromise), aArgs);
+  Unused << SendPCacheOpConstructor(
+    new CacheOpChild(GetWorkerHolder(), aGlobal, aParent, aPromise), aArgs);
 }
 
 void
@@ -84,9 +85,10 @@ CacheStorageChild::StartDestroy()
     return;
   }
 
-  nsRefPtr<CacheStorage> listener = mListener;
+  RefPtr<CacheStorage> listener = mListener;
 
-  // StartDestroy() can get called from either CacheStorage or the Feature.
+  // StartDestroy() can get called from either CacheStorage or the
+  // CacheWorkerHolder.
   // Theoretically we can get double called if the right race happens.  Handle
   // that by just ignoring the second StartDestroy() call.
   if (!listener) {
@@ -99,21 +101,21 @@ CacheStorageChild::StartDestroy()
   MOZ_ASSERT(!mListener);
 
   // Start actor destruction from parent process
-  unused << SendTeardown();
+  Unused << SendTeardown();
 }
 
 void
 CacheStorageChild::ActorDestroy(ActorDestroyReason aReason)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorageChild);
-  nsRefPtr<CacheStorage> listener = mListener;
+  RefPtr<CacheStorage> listener = mListener;
   if (listener) {
     listener->DestroyInternal(this);
     // CacheStorage listener should call ClearListener() in DestroyInternal()
     MOZ_ASSERT(!mListener);
   }
 
-  RemoveFeature();
+  RemoveWorkerHolder();
 }
 
 PCacheOpChild*

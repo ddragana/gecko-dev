@@ -5,7 +5,9 @@
 
 #include "TextureClientPool.h"
 #include "CompositableClient.h"
-#include "mozilla/layers/ISurfaceAllocator.h"
+#include "mozilla/layers/CompositableForwarder.h"
+#include "mozilla/layers/TextureForwarder.h"
+#include "mozilla/layers/TiledContentClient.h"
 
 #include "gfxPrefs.h"
 
@@ -23,13 +25,17 @@ ShrinkCallback(nsITimer *aTimer, void *aClosure)
   static_cast<TextureClientPool*>(aClosure)->ShrinkToMinimumSize();
 }
 
-TextureClientPool::TextureClientPool(gfx::SurfaceFormat aFormat,
+TextureClientPool::TextureClientPool(LayersBackend aLayersBackend,
+                                     gfx::SurfaceFormat aFormat,
                                      gfx::IntSize aSize,
+                                     TextureFlags aFlags,
                                      uint32_t aMaxTextureClients,
                                      uint32_t aShrinkTimeoutMsec,
-                                     ISurfaceAllocator *aAllocator)
-  : mFormat(aFormat)
+                                     TextureForwarder* aAllocator)
+  : mBackend(aLayersBackend)
+  , mFormat(aFormat)
   , mSize(aSize)
+  , mFlags(aFlags)
   , mMaxTextureClients(aMaxTextureClients)
   , mShrinkTimeoutMsec(aShrinkTimeoutMsec)
   , mOutstandingClients(0)
@@ -69,12 +75,12 @@ static bool TestClientPool(const char* what,
                    << aPool << "-" << aPool->GetFormat() << ", "
                    << actual << "-" << actual->GetFormat() << ", "
                    << aClient->GetFormat();
-      MOZ_CRASH("Crashing with actual");
+      MOZ_CRASH("GFX: Crashing with actual");
     } else {
       gfxCriticalError() << "Pool error(" << what << "): "
                    << aPool << "-" << aPool->GetFormat() << ", nullptr, "
                    << aClient->GetFormat();
-      MOZ_CRASH("Crashing without actual");
+      MOZ_CRASH("GFX: Crashing without actual");
     }
   }
   return ok;
@@ -108,10 +114,10 @@ TextureClientPool::GetTextureClient()
     // gfx::BackendType::NONE means use the content backend
     textureClient = TextureClient::CreateForRawBufferAccess(mSurfaceAllocator,
       mFormat, mSize, gfx::BackendType::NONE,
-      TextureFlags::IMMEDIATE_UPLOAD, ALLOC_DEFAULT);
+      mFlags, ALLOC_DEFAULT);
   } else {
     textureClient = TextureClient::CreateForDrawing(mSurfaceAllocator,
-      mFormat, mSize, gfx::BackendType::NONE, TextureFlags::IMMEDIATE_UPLOAD);
+      mFormat, mSize, mBackend, BackendSelector::Content, mFlags);
   }
 
   mOutstandingClients++;
@@ -155,16 +161,17 @@ TextureClientPool::ReturnTextureClient(TextureClient *aClient)
 }
 
 void
-TextureClientPool::ReturnTextureClientDeferred(TextureClient *aClient)
+TextureClientPool::ReturnTextureClientDeferred(TextureClient* aClient)
 {
   if (!aClient) {
     return;
   }
+  MOZ_ASSERT(aClient->GetReadLock());
 #ifdef GFX_DEBUG_TRACK_CLIENTS_IN_POOL
   DebugOnly<bool> ok = TestClientPool("defer", aClient, this);
   MOZ_ASSERT(ok);
 #endif
-  mTextureClientsDeferred.push(aClient);
+  mTextureClientsDeferred.push_back(aClient);
   TCP_LOG("TexturePool %p had client %p defer-returned, size %u outstanding %u\n",
       this, aClient, mTextureClientsDeferred.size(), mOutstandingClients);
   ShrinkToMaximumSize();
@@ -186,15 +193,15 @@ TextureClientPool::ShrinkToMaximumSize()
       MOZ_ASSERT(mOutstandingClients > 0);
       mOutstandingClients--;
       TCP_LOG("TexturePool %p dropped deferred client %p; %u remaining\n",
-          this, mTextureClientsDeferred.top().get(),
+          this, mTextureClientsDeferred.front().get(),
           mTextureClientsDeferred.size() - 1);
-      mTextureClientsDeferred.pop();
+      mTextureClientsDeferred.pop_front();
     } else {
       if (!mTextureClients.size()) {
         // Getting here means we're over our desired number of TextureClients
-        // with none in the pool. This can happen for pathological cases, or
-        // it could mean that mMaxTextureClients needs adjusting for whatever
-        // device we're running on.
+        // with none in the pool. This can happen during shutdown, or for
+        // pathological cases, or it could mean that mMaxTextureClients needs
+        // adjusting for whatever device we're running on.
         TCP_LOG("TexturePool %p encountering pathological case!\n", this);
         break;
       }
@@ -209,6 +216,16 @@ TextureClientPool::ShrinkToMaximumSize()
 void
 TextureClientPool::ShrinkToMinimumSize()
 {
+  ReturnUnlockedClients();
+
+  while (!mTextureClientsDeferred.empty()) {
+    MOZ_ASSERT(mOutstandingClients > 0);
+    mOutstandingClients--;
+    TCP_LOG("TexturePool %p releasing deferred client %p\n",
+        this, mTextureClientsDeferred.front().get());
+    mTextureClientsDeferred.pop_front();
+  }
+
   TCP_LOG("TexturePool %p shrinking to minimum size %u\n", this, sMinCacheSize);
   while (mTextureClients.size() > sMinCacheSize) {
     TCP_LOG("TexturePool %p popped %p; shrunk to %u\n",
@@ -222,13 +239,12 @@ TextureClientPool::ReturnDeferredClients()
 {
   TCP_LOG("TexturePool %p returning %u deferred clients to pool\n",
       this, mTextureClientsDeferred.size());
-  while (!mTextureClientsDeferred.empty()) {
-    mTextureClients.push(mTextureClientsDeferred.top());
-    mTextureClientsDeferred.pop();
 
-    MOZ_ASSERT(mOutstandingClients > 0);
-    mOutstandingClients--;
+  if (mTextureClientsDeferred.empty()) {
+    return;
   }
+
+  ReturnUnlockedClients();
   ShrinkToMaximumSize();
 
   // Kick off the pool shrinking timer if there are still more unused texture
@@ -237,6 +253,24 @@ TextureClientPool::ReturnDeferredClients()
     TCP_LOG("TexturePool %p kicking off shrink-to-min timer\n", this);
     mTimer->InitWithFuncCallback(ShrinkCallback, this, mShrinkTimeoutMsec,
                                  nsITimer::TYPE_ONE_SHOT);
+  }
+}
+
+void
+TextureClientPool::ReturnUnlockedClients()
+{
+  for (auto it = mTextureClientsDeferred.begin(); it != mTextureClientsDeferred.end();) {
+    MOZ_ASSERT((*it)->GetReadLock()->GetReadCount() >= 1);
+    // Last count is held by the lock itself.
+    if (!(*it)->IsReadLocked()) {
+      mTextureClients.push(*it);
+      it = mTextureClientsDeferred.erase(it);
+
+      MOZ_ASSERT(mOutstandingClients > 0);
+      mOutstandingClients--;
+    } else {
+      it++;
+    }
   }
 }
 
@@ -262,9 +296,15 @@ TextureClientPool::Clear()
     MOZ_ASSERT(mOutstandingClients > 0);
     mOutstandingClients--;
     TCP_LOG("TexturePool %p releasing deferred client %p\n",
-        this, mTextureClientsDeferred.top().get());
-    mTextureClientsDeferred.pop();
+        this, mTextureClientsDeferred.front().get());
+    mTextureClientsDeferred.pop_front();
   }
+}
+
+void TextureClientPool::Destroy()
+{
+  Clear();
+  mMaxTextureClients = 0;
 }
 
 } // namespace layers

@@ -27,7 +27,7 @@ NS_NewSVGFilterFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGFilterFrame)
 
-class MOZ_STACK_CLASS nsSVGFilterFrame::AutoFilterReferencer
+class MOZ_RAII nsSVGFilterFrame::AutoFilterReferencer
 {
 public:
   explicit AutoFilterReferencer(nsSVGFilterFrame *aFrame MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
@@ -86,7 +86,7 @@ nsSVGFilterFrame::GetFilterContent(nsIContent *aDefault)
   for (nsIContent* child = mContent->GetFirstChild();
        child;
        child = child->GetNextSibling()) {
-    nsRefPtr<nsSVGFE> primitive;
+    RefPtr<nsSVGFE> primitive;
     CallQueryInterface(child, (nsSVGFE**)getter_AddRefs(primitive));
     if (primitive) {
       return static_cast<SVGFilterElement *>(mContent);
@@ -106,8 +106,8 @@ nsSVGFilterFrame::GetReferencedFilter()
   if (mNoHRefURI)
     return nullptr;
 
-  nsSVGPaintingProperty *property = static_cast<nsSVGPaintingProperty*>
-    (Properties().Get(nsSVGEffects::HrefProperty()));
+  nsSVGPaintingProperty *property =
+    Properties().Get(nsSVGEffects::HrefAsPaintingProperty());
 
   if (!property) {
     // Fetch our Filter element's xlink:href attribute
@@ -123,10 +123,11 @@ nsSVGFilterFrame::GetReferencedFilter()
     nsCOMPtr<nsIURI> targetURI;
     nsCOMPtr<nsIURI> base = mContent->GetBaseURI();
     nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), href,
-                                              mContent->GetCurrentDoc(), base);
+                                              mContent->GetUncomposedDoc(), base);
 
     property =
-      nsSVGEffects::GetPaintingProperty(targetURI, this, nsSVGEffects::HrefProperty());
+      nsSVGEffects::GetPaintingProperty(targetURI, this,
+                                        nsSVGEffects::HrefAsPaintingProperty());
     if (!property)
       return nullptr;
   }
@@ -174,13 +175,13 @@ nsSVGFilterFrame::AttributeChanged(int32_t  aNameSpaceID,
   } else if (aNameSpaceID == kNameSpaceID_XLink &&
              aAttribute == nsGkAtoms::href) {
     // Blow away our reference, if any
-    Properties().Delete(nsSVGEffects::HrefProperty());
+    Properties().Delete(nsSVGEffects::HrefAsPaintingProperty());
     mNoHRefURI = false;
     // And update whoever references us
     nsSVGEffects::InvalidateDirectRenderingObservers(this);
   }
-  return nsSVGFilterFrameBase::AttributeChanged(aNameSpaceID,
-                                                aAttribute, aModType);
+  return nsSVGContainerFrame::AttributeChanged(aNameSpaceID,
+                                               aAttribute, aModType);
 }
 
 #ifdef DEBUG
@@ -192,7 +193,7 @@ nsSVGFilterFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::filter),
                "Content is not an SVG filter");
 
-  nsSVGFilterFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 

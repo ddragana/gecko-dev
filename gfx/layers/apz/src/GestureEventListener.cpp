@@ -35,6 +35,8 @@ static const uint32_t MAX_TAP_TIME = 300;
  */
 static const float PINCH_START_THRESHOLD = 35.0f;
 
+static bool sLongTapEnabled = true;
+
 ParentLayerPoint GetCurrentFocus(const MultiTouchInput& aEvent)
 {
   const ParentLayerPoint& firstTouch = aEvent.mTouches[0].mLocalScreenPoint;
@@ -99,6 +101,13 @@ nsEventStatus GestureEventListener::HandleInputEvent(const MultiTouchInput& aEve
     }
     break;
   case MultiTouchInput::MULTITOUCH_MOVE:
+    for (size_t i = 0; i < aEvent.mTouches.Length(); i++) {
+      for (size_t j = 0; j < mTouches.Length(); j++) {
+        if (aEvent.mTouches[i].mIdentifier == mTouches[j].mIdentifier) {
+          mTouches[j].mScreenPoint = aEvent.mTouches[i].mScreenPoint;
+        }
+      }
+    }
     rv = HandleInputTouchMove();
     break;
   case MultiTouchInput::MULTITOUCH_END:
@@ -131,6 +140,11 @@ int32_t GestureEventListener::GetLastTouchIdentifier() const
   return mTouches.IsEmpty() ? -1 : mTouches[0].mIdentifier;
 }
 
+/* static */
+void GestureEventListener::SetLongTapEnabled(bool aLongTapEnabled)
+{
+  sLongTapEnabled = aLongTapEnabled;
+}
 
 nsEventStatus GestureEventListener::HandleInputTouchSingleStart()
 {
@@ -139,7 +153,9 @@ nsEventStatus GestureEventListener::HandleInputTouchSingleStart()
     SetState(GESTURE_FIRST_SINGLE_TOUCH_DOWN);
     mTouchStartPosition = mLastTouchInput.mTouches[0].mLocalScreenPoint;
 
-    CreateLongTapTimeoutTask();
+    if (sLongTapEnabled) {
+      CreateLongTapTimeoutTask();
+    }
     CreateMaxTapTimeoutTask();
     break;
   case GESTURE_FIRST_SINGLE_TOUCH_UP:
@@ -366,10 +382,16 @@ nsEventStatus GestureEventListener::HandleInputTouchEnd()
   case GESTURE_PINCH:
     if (mTouches.Length() < 2) {
       SetState(GESTURE_NONE);
+      ScreenPoint point(-1, -1);
+      if (mTouches.Length() == 1) {
+        // As user still keeps one finger down the event's focus point should
+        // contain meaningful data.
+        point = mTouches[0].mScreenPoint;
+      }
       PinchGestureInput pinchEvent(PinchGestureInput::PINCHGESTURE_END,
                                    mLastTouchInput.mTime,
                                    mLastTouchInput.mTimeStamp,
-                                   ScreenPoint(),
+                                   point,
                                    1.0f,
                                    1.0f,
                                    mLastTouchInput.modifiers);
@@ -408,6 +430,7 @@ void GestureEventListener::HandleInputTimeoutLongTap()
     // just in case MAX_TAP_TIME > ContextMenuDelay cancel MAX_TAP timer
     // and fall through
     CancelMaxTapTimeoutTask();
+    MOZ_FALLTHROUGH;
   case GESTURE_FIRST_SINGLE_TOUCH_MAX_TAP_DOWN: {
     SetState(GESTURE_LONG_TOUCH_DOWN);
     mAsyncPanZoomController->HandleGestureEvent(
@@ -421,7 +444,7 @@ void GestureEventListener::HandleInputTimeoutLongTap()
   }
 }
 
-void GestureEventListener::HandleInputTimeoutMaxTap()
+void GestureEventListener::HandleInputTimeoutMaxTap(bool aDuringFastFling)
 {
   GEL_LOG("Running max-tap timeout task in state %d\n", mState);
 
@@ -432,7 +455,9 @@ void GestureEventListener::HandleInputTimeoutMaxTap()
   } else if (mState == GESTURE_FIRST_SINGLE_TOUCH_UP ||
              mState == GESTURE_SECOND_SINGLE_TOUCH_DOWN) {
     SetState(GESTURE_NONE);
-    TriggerSingleTapConfirmedEvent();
+    if (!aDuringFastFling) {
+      TriggerSingleTapConfirmedEvent();
+    }
   } else {
     NS_WARNING("Unhandled state upon MAX_TAP timeout");
     SetState(GESTURE_NONE);
@@ -472,11 +497,12 @@ void GestureEventListener::CancelLongTapTimeoutTask()
 
 void GestureEventListener::CreateLongTapTimeoutTask()
 {
-  mLongTapTimeoutTask =
-    NewRunnableMethod(this, &GestureEventListener::HandleInputTimeoutLongTap);
+  RefPtr<CancelableRunnable> task =
+    NewCancelableRunnableMethod(this, &GestureEventListener::HandleInputTimeoutLongTap);
 
+  mLongTapTimeoutTask = task;
   mAsyncPanZoomController->PostDelayedTask(
-    mLongTapTimeoutTask,
+    task.forget(),
     gfxPrefs::UiClickHoldContextMenusDelay());
 }
 
@@ -497,11 +523,15 @@ void GestureEventListener::CreateMaxTapTimeoutTask()
 {
   mLastTapInput = mLastTouchInput;
 
-  mMaxTapTimeoutTask =
-    NewRunnableMethod(this, &GestureEventListener::HandleInputTimeoutMaxTap);
+  TouchBlockState* block = mAsyncPanZoomController->GetInputQueue()->CurrentTouchBlock();
+  RefPtr<CancelableRunnable> task =
+    NewCancelableRunnableMethod<bool>(this,
+                                      &GestureEventListener::HandleInputTimeoutMaxTap,
+                                      block->IsDuringFastFling());
 
+  mMaxTapTimeoutTask = task;
   mAsyncPanZoomController->PostDelayedTask(
-    mMaxTapTimeoutTask,
+    task.forget(),
     MAX_TAP_TIME);
 }
 

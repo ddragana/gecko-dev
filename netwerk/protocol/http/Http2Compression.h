@@ -12,6 +12,7 @@
 #include "mozilla/Attributes.h"
 #include "nsDeque.h"
 #include "nsString.h"
+#include "nsIMemoryReporter.h"
 
 namespace mozilla {
 namespace net {
@@ -29,6 +30,8 @@ nvPair(const nsACString &name, const nsACString &value)
   { }
 
   uint32_t Size() const { return mName.Length() + mValue.Length() + 32; }
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
   nsCString mName;
   nsCString mValue;
@@ -45,20 +48,23 @@ public:
   uint32_t ByteCount() const;
   uint32_t Length() const;
   uint32_t VariableLength() const;
-  uint32_t StaticLength() const;
+  size_t StaticLength() const;
   void Clear();
-  const nvPair *operator[] (int32_t index) const;
+  const nvPair *operator[] (size_t index) const;
 
 private:
   uint32_t mByteCount;
   nsDeque  mTable;
 };
 
+class HpackDynamicTableReporter;
+
 class Http2BaseCompressor
 {
 public:
   Http2BaseCompressor();
-  virtual ~Http2BaseCompressor() { };
+  virtual ~Http2BaseCompressor();
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
 protected:
   const static uint32_t kDefaultMaxBuffer = 4096;
@@ -71,6 +77,9 @@ protected:
   nvFIFO mHeaderTable;
 
   uint32_t mMaxBuffer;
+
+private:
+  RefPtr<HpackDynamicTableReporter> mDynamicReporter;
 };
 
 class Http2Compressor;
@@ -108,10 +117,10 @@ private:
   nsresult CopyStringFromInput(uint32_t index, nsACString &val);
   uint8_t ExtractByte(uint8_t bitsLeft, uint32_t &bytesConsumed);
   nsresult CopyHuffmanStringFromInput(uint32_t index, nsACString &val);
-  nsresult DecodeHuffmanCharacter(HuffmanIncomingTable *table, uint8_t &c,
+  nsresult DecodeHuffmanCharacter(const HuffmanIncomingTable *table, uint8_t &c,
                                   uint32_t &bytesConsumed, uint8_t &bitsLeft);
-  nsresult DecodeFinalHuffmanCharacter(HuffmanIncomingTable *table, uint8_t &c,
-                                       uint8_t &bitsLeft);
+  nsresult DecodeFinalHuffmanCharacter(const HuffmanIncomingTable *table,
+                                       uint8_t &c, uint8_t &bitsLeft);
 
   Http2Compressor *mCompressor;
 

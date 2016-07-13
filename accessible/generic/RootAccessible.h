@@ -22,8 +22,7 @@ class RootAccessible : public DocAccessibleWrap,
   NS_DECL_ISUPPORTS_INHERITED
 
 public:
-  RootAccessible(nsIDocument* aDocument, nsIContent* aRootContent,
-                 nsIPresShell* aPresShell);
+  RootAccessible(nsIDocument* aDocument, nsIPresShell* aPresShell);
 
   // nsIDOMEventListener
   NS_IMETHOD HandleEvent(nsIDOMEvent* aEvent) override;
@@ -41,6 +40,11 @@ public:
    * Notify that the sub document presshell was activated.
    */
   virtual void DocumentActivated(DocAccessible* aDocument);
+
+  /**
+   * Return the primary remote top level document if any.
+   */
+  ProxyAccessible* GetPrimaryRemoteTopLevelContentDoc() const;
 
 protected:
   virtual ~RootAccessible();

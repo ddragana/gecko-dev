@@ -6,10 +6,11 @@
 
 #include "DOMMobileMessageError.h"
 #include "mozilla/dom/DOMMobileMessageErrorBinding.h"
-#include "nsIDOMMozMmsMessage.h"
-#include "nsIDOMMozSmsMessage.h"
+#include "MmsMessage.h"
+#include "SmsMessage.h"
 
-using namespace mozilla::dom;
+namespace mozilla {
+namespace dom {
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(DOMMobileMessageError)
 
@@ -29,18 +30,18 @@ NS_INTERFACE_MAP_END_INHERITING(DOMError)
 NS_IMPL_ADDREF_INHERITED(DOMMobileMessageError, DOMError)
 NS_IMPL_RELEASE_INHERITED(DOMMobileMessageError, DOMError)
 
-DOMMobileMessageError::DOMMobileMessageError(nsPIDOMWindow* aWindow,
+DOMMobileMessageError::DOMMobileMessageError(nsPIDOMWindowInner* aWindow,
                                              const nsAString& aName,
-                                             nsIDOMMozSmsMessage* aSms)
+                                             SmsMessage* aSms)
   : DOMError(aWindow, aName)
   , mSms(aSms)
   , mMms(nullptr)
 {
 }
 
-DOMMobileMessageError::DOMMobileMessageError(nsPIDOMWindow* aWindow,
+DOMMobileMessageError::DOMMobileMessageError(nsPIDOMWindowInner* aWindow,
                                              const nsAString& aName,
-                                             nsIDOMMozMmsMessage* aMms)
+                                             MmsMessage* aMms)
   : DOMError(aWindow, aName)
   , mSms(nullptr)
   , mMms(aMms)
@@ -48,15 +49,15 @@ DOMMobileMessageError::DOMMobileMessageError(nsPIDOMWindow* aWindow,
 }
 
 void
-DOMMobileMessageError::GetData(OwningMozSmsMessageOrMozMmsMessage& aRetVal) const
+DOMMobileMessageError::GetData(OwningSmsMessageOrMmsMessage& aRetVal) const
 {
   if (mSms) {
-    aRetVal.SetAsMozSmsMessage() = mSms;
+    aRetVal.SetAsSmsMessage() = mSms;
     return;
   }
 
   if (mMms) {
-    aRetVal.SetAsMozMmsMessage() = mMms;
+    aRetVal.SetAsMmsMessage() = mMms;
     return;
   }
 
@@ -68,3 +69,6 @@ DOMMobileMessageError::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenPr
 {
   return DOMMobileMessageErrorBinding::Wrap(aCx, this, aGivenProto);
 }
+
+} // namespace dom
+} // namespace mozilla

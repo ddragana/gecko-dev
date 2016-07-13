@@ -10,7 +10,6 @@
 #include "nsIHTTPHeaderListener.h"
 #include "nsIRequest.h"
 #include "nsITimer.h"
-#include "nsAutoPtr.h"
 #include "nsCOMArray.h"
 #include "nsIOutputStream.h"
 #include "nsIPluginInstanceOwner.h"
@@ -125,7 +124,7 @@ protected:
 
   char* mStreamBuffer;
   char* mNotifyURL;
-  nsRefPtr<nsNPAPIPluginInstance> mInst;
+  RefPtr<nsNPAPIPluginInstance> mInst;
   nsNPAPIStreamWrapper *mNPStreamWrapper;
   uint32_t mStreamBufferSize;
   int32_t mStreamBufferByteCount;
@@ -144,7 +143,7 @@ protected:
   nsresult mPendingStopBindingStatus;
 
 public:
-  nsRefPtr<nsPluginStreamListenerPeer> mStreamListenerPeer;
+  RefPtr<nsPluginStreamListenerPeer> mStreamListenerPeer;
 };
 
 #endif // nsNPAPIPluginStreamListener_h_

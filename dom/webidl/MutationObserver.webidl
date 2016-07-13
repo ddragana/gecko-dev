@@ -7,6 +7,7 @@
  * http://dom.spec.whatwg.org
  */
 
+[ProbablyShortLivingObject]
 interface MutationRecord {
   [Constant]
   readonly attribute DOMString type;
@@ -47,6 +48,8 @@ interface MutationObserver {
   sequence<MutationObservingInfo?> getObservingInfo();
   [ChromeOnly]
   readonly attribute MutationCallback mutationCallback;
+  [ChromeOnly]
+  attribute boolean mergeAttributeRecords;
 };
 
 callback MutationCallback = void (sequence<MutationRecord> mutations, MutationObserver observer);
@@ -58,8 +61,10 @@ dictionary MutationObserverInit {
   boolean subtree = false;
   boolean attributeOldValue;
   boolean characterDataOldValue;
-  // [ChromeOnly]
-  boolean animations;
+  [ChromeOnly]
+  boolean nativeAnonymousChildList = false;
+  [ChromeOnly]
+  boolean animations = false;
   sequence<DOMString> attributeFilter;
 };
 

@@ -14,6 +14,7 @@
 #include <vorbis/codec.h>
 #endif
 #include "MediaDecoderReader.h"
+#include "MediaResource.h"
 #include "OggCodecState.h"
 #include "VideoUtils.h"
 #include "mozilla/Monitor.h"
@@ -49,48 +50,46 @@ protected:
   ~OggReader();
 
 public:
-  virtual nsresult Init(MediaDecoderReader* aCloneDonor) override;
-  virtual nsresult ResetDecode() override;
-  virtual bool DecodeAudioData() override;
+  nsresult Init() override;
+  nsresult ResetDecode(TrackSet aTracks = TrackSet(TrackInfo::kAudioTrack,
+                                                   TrackInfo::kVideoTrack)) override;
+  bool DecodeAudioData() override;
 
   // If the Theora granulepos has not been captured, it may read several packets
   // until one with a granulepos has been captured, to ensure that all packets
   // read have valid time info.
-  virtual bool DecodeVideoFrame(bool &aKeyframeSkip,
-                                int64_t aTimeThreshold) override;
+  bool DecodeVideoFrame(bool &aKeyframeSkip, int64_t aTimeThreshold) override;
 
-  virtual bool HasAudio() override {
+  nsresult ReadMetadata(MediaInfo* aInfo, MetadataTags** aTags) override;
+  RefPtr<SeekPromise> Seek(SeekTarget aTarget, int64_t aEndTime) override;
+  media::TimeIntervals GetBuffered() override;
+
+private:
+  bool HasAudio() {
     return (mVorbisState != 0 && mVorbisState->mActive) ||
            (mOpusState != 0 && mOpusState->mActive);
   }
 
-  virtual bool HasVideo() override {
+  bool HasVideo() {
     return mTheoraState != 0 && mTheoraState->mActive;
   }
 
-  virtual nsresult ReadMetadata(MediaInfo* aInfo,
-                                MetadataTags** aTags) override;
-  virtual nsRefPtr<SeekPromise>
-  Seek(int64_t aTime, int64_t aEndTime) override;
-  virtual media::TimeIntervals GetBuffered() override;
-
-  virtual bool IsMediaSeekable() override;
-
-private:
   // TODO: DEPRECATED. This uses synchronous decoding.
   // Stores the presentation time of the first frame we'd be able to play if
   // we started playback at the current position. Returns the first video
   // frame, if we have video.
-  VideoData* FindStartTime(int64_t& aOutStartTime);
-  AudioData* SyncDecodeToFirstAudioData();
-  VideoData* SyncDecodeToFirstVideoData();
+  void FindStartTime(int64_t& aOutStartTime);
+  RefPtr<AudioData> SyncDecodeToFirstAudioData();
+  RefPtr<VideoData> SyncDecodeToFirstVideoData();
 
   // This monitor should be taken when reading or writing to mIsChained.
   ReentrantMonitor mMonitor;
 
   // Specialized Reset() method to signal if the seek is
   // to the start of the stream.
-  nsresult ResetDecode(bool start);
+  nsresult ResetDecode(bool start,
+                       TrackSet aTracks = TrackSet(TrackInfo::kAudioTrack,
+                                                   TrackInfo::kVideoTrack));
 
   nsresult SeekInternal(int64_t aTime, int64_t aEndTime);
 
@@ -98,7 +97,7 @@ private:
     return mSkeletonState != 0 && mSkeletonState->mActive;
   }
 
-  // Seeks to the keyframe preceeding the target time using available
+  // Seeks to the keyframe preceding the target time using available
   // keyframe indexes.
   enum IndexedSeekResult {
     SEEK_OK,          // Success.
@@ -253,7 +252,7 @@ private:
 
   // Set this media as being a chain and notifies the state machine that the
   // media is no longer seekable.
-  void SetChained(bool aIsChained);
+  void SetChained();
 
   // Returns the next Ogg packet for an bitstream/codec state. Returns a
   // pointer to an ogg_packet on success, or nullptr if the read failed.
@@ -316,6 +315,8 @@ private:
 
   // Number of audio frames decoded so far.
   int64_t mDecodedAudioFrames;
+
+  MediaResourceIndex mResource;
 };
 
 } // namespace mozilla

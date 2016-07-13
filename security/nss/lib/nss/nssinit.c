@@ -20,9 +20,12 @@
 #include "secerr.h"
 #include "nssbase.h"
 #include "nssutil.h"
+
+#ifndef NSS_DISABLE_LIBPKIX
 #include "pkixt.h"
 #include "pkix.h"
 #include "pkix_tools.h"
+#endif /* NSS_DISABLE_LIBPKIX */
 
 #include "pki3hack.h"
 #include "certi.h"
@@ -481,7 +484,10 @@ loser:
 
 static PRBool          nssIsInitted = PR_FALSE;
 static NSSInitContext *nssInitContextList = NULL;
+
+#ifndef NSS_DISABLE_LIBPKIX
 static void*           plContext = NULL;
+#endif /* NSS_DISABLE_LIBPKIX */
 
 struct NSSInitContextStr {
     NSSInitContext *next;
@@ -490,10 +496,6 @@ struct NSSInitContextStr {
 
 #define NSS_INIT_MAGIC 0x1413A91C
 static SECStatus nss_InitShutdownList(void);
-
-#ifdef DEBUG
-static CERTCertificate dummyCert;
-#endif
 
 /* All initialized to zero in BSS */
 static PRCallOnceType nssInitOnce;
@@ -530,8 +532,10 @@ nss_Init(const char *configdir, const char *certPrefix, const char *keyPrefix,
 		 PRBool dontFinalizeModules)
 {
     SECStatus rv = SECFailure;
+#ifndef NSS_DISABLE_LIBPKIX
     PKIX_UInt32 actualMinorVersion = 0;
     PKIX_Error *pkixError = NULL;
+#endif /* NSS_DISABLE_LIBPKIX */
     PRBool isReallyInitted;
     char *configStrings = NULL;
     char *configName = NULL;
@@ -571,8 +575,11 @@ nss_Init(const char *configdir, const char *certPrefix, const char *keyPrefix,
      * functions */
 
     if (!isReallyInitted) {
+#ifdef DEBUG
+        CERTCertificate dummyCert;
 	/* New option bits must not change the size of CERTCertificate. */
 	PORT_Assert(sizeof(dummyCert.options) == sizeof(void *));
+#endif
 
 	if (SECSuccess != cert_InitLocks()) {
 	    goto loser;
@@ -685,6 +692,7 @@ nss_Init(const char *configdir, const char *certPrefix, const char *keyPrefix,
 	pk11sdr_Init();
 	cert_CreateSubjectKeyIDHashTable();
 
+#ifndef NSS_DISABLE_LIBPKIX
 	pkixError = PKIX_Initialize
 	    (PKIX_FALSE, PKIX_MAJOR_VERSION, PKIX_MINOR_VERSION,
 	    PKIX_MINOR_VERSION, &actualMinorVersion, &plContext);
@@ -692,13 +700,12 @@ nss_Init(const char *configdir, const char *certPrefix, const char *keyPrefix,
 	if (pkixError != NULL) {
 	    goto loser;
 	} else {
-            char *ev = getenv("NSS_ENABLE_PKIX_VERIFY");
+            char *ev = PR_GetEnvSecure("NSS_ENABLE_PKIX_VERIFY");
             if (ev && ev[0]) {
                 CERT_SetUsePKIXForValidation(PR_TRUE);
             }
         }
-
-
+#endif /* NSS_DISABLE_LIBPKIX */
     }
 
     /*
@@ -1081,7 +1088,9 @@ nss_Shutdown(void)
     cert_DestroyLocks();
     ShutdownCRLCache();
     OCSP_ShutdownGlobal();
+#ifndef NSS_DISABLE_LIBPKIX
     PKIX_Shutdown(plContext);
+#endif /* NSS_DISABLE_LIBPKIX */
     SECOID_Shutdown();
     status = STAN_Shutdown();
     cert_DestroySubjectKeyIDHashTable();
@@ -1230,8 +1239,7 @@ NSS_IsInitialized(void)
 }
 	
 
-extern const char __nss_base_rcsid[];
-extern const char __nss_base_sccsid[];
+extern const char __nss_base_version[];
 
 PRBool
 NSS_VersionCheck(const char *importedVersion)
@@ -1247,9 +1255,8 @@ NSS_VersionCheck(const char *importedVersion)
      */
     int vmajor = 0, vminor = 0, vpatch = 0, vbuild = 0;
     const char *ptr = importedVersion;
-    volatile char c; /* force a reference that won't get optimized away */
-
-    c = __nss_base_rcsid[0] + __nss_base_sccsid[0]; 
+#define NSS_VERSION_VARIABLE __nss_base_version
+#include "verref.h"
 
     while (isdigit(*ptr)) {
         vmajor = 10 * vmajor + *ptr - '0';

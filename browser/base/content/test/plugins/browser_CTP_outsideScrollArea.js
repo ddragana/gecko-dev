@@ -1,7 +1,7 @@
-let rootDir = getRootDirectory(gTestPath);
+var rootDir = getRootDirectory(gTestPath);
 const gTestRoot = rootDir.replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
-let gTestBrowser = null;
-let gPluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
+var gTestBrowser = null;
+var gPluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
 
 add_task(function* () {
   registerCleanupFunction(function () {
@@ -53,13 +53,13 @@ add_task(function* () {
 
   yield promisePopupNotification("click-to-play-plugins");
 
-  let result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
+  yield ContentTask.spawn(gTestBrowser, {}, function* () {
     let plugin = content.document.getElementById("test");
     let doc = content.document;
     let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
-    return overlay && overlay.classList.contains("visible");
+    Assert.ok(overlay && overlay.classList.contains("visible"),
+      "Test 2, overlay should be visible.");
   });
-  ok(result, "Test 2, overlay should be visible.");
 });
 
 add_task(function* () {
@@ -82,13 +82,13 @@ add_task(function* () {
 
   yield promisePopupNotification("click-to-play-plugins");
 
-  let result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
+  yield ContentTask.spawn(gTestBrowser, null, function* () {
     let plugin = content.document.getElementById("test");
     let doc = content.document;
     let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
-    return overlay && overlay.classList.contains("visible");
+    Assert.ok(overlay && overlay.classList.contains("visible"),
+      "Test 3, overlay should be visible.");
   });
-  ok(result, "Test 3, overlay should be visible.");
 });
 
 add_task(function* () {
@@ -110,11 +110,11 @@ add_task(function* () {
   yield promiseUpdatePluginBindings(gTestBrowser);
 
   yield promisePopupNotification("click-to-play-plugins");
-  let result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
+  yield ContentTask.spawn(gTestBrowser, null, function* () {
     let plugin = content.document.getElementById("test");
     let doc = content.document;
     let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
-    return overlay && overlay.classList.contains("visible");
+    Assert.ok(!(overlay && overlay.classList.contains("visible")),
+      "Test 4, overlay should be hidden.");
   });
-  ok(!result, "Test 4, overlay should be hidden.");
 });

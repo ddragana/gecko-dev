@@ -32,7 +32,7 @@ using mozilla::LogLevel;
 
 PRLogModuleInfo* gWin32SoundLog = nullptr;
 
-class nsSoundPlayer: public nsRunnable {
+class nsSoundPlayer: public mozilla::Runnable {
 public:
   nsSoundPlayer(nsSound *aSound, const wchar_t* aSoundName) :
     mSoundName(aSoundName), mSound(aSound)
@@ -60,7 +60,7 @@ protected:
     NS_IF_ADDREF(mSound);
   }
 
-  class SoundReleaser: public nsRunnable {
+  class SoundReleaser: public mozilla::Runnable {
   public:
     SoundReleaser(nsSound* aSound) :
       mSound(aSound)
@@ -124,10 +124,9 @@ nsSound::~nsSound()
 
 void nsSound::ShutdownOldPlayerThread()
 {
-  if (mPlayerThread) {
-    mPlayerThread->Shutdown();
-    mPlayerThread = nullptr;
-  }
+  nsCOMPtr<nsIThread> playerThread(mPlayerThread.forget());
+  if (playerThread)
+    playerThread->Shutdown();
 }
 
 void nsSound::PurgeLastSound() 
@@ -213,7 +212,7 @@ NS_IMETHODIMP nsSound::Play(nsIURL *aURL)
                           aURL,
                           this, // aObserver
                           nsContentUtils::GetSystemPrincipal(),
-                          nsILoadInfo::SEC_NORMAL,
+                          nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                           nsIContentPolicy::TYPE_OTHER);
   return rv;
 }

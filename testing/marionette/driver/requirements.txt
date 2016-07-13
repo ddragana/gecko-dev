@@ -1,2 +1,0 @@
-marionette-transport == 0.5
-mozrunner >= 6.2

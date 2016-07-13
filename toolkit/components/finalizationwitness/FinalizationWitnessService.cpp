@@ -32,7 +32,7 @@ namespace {
  * Important note: we maintain the invariant that these private data
  * slots are already addrefed.
  */
-class FinalizationEvent final: public nsRunnable
+class FinalizationEvent final: public Runnable
 {
 public:
   FinalizationEvent(const char* aTopic,
@@ -100,7 +100,7 @@ ExtractFinalizationEvent(JSObject *objSelf)
  */
 void Finalize(JSFreeOp *fop, JSObject *objSelf)
 {
-  nsRefPtr<FinalizationEvent> event = ExtractFinalizationEvent(objSelf);
+  RefPtr<FinalizationEvent> event = ExtractFinalizationEvent(objSelf);
   if (event == nullptr || gShuttingDown) {
     // NB: event will be null if Forget() has been called
     return;
@@ -116,9 +116,7 @@ void Finalize(JSFreeOp *fop, JSObject *objSelf)
   // during shutdown. In that case, there is not much we can do.
 }
 
-static const JSClass sWitnessClass = {
-  "FinalizationWitness",
-  JSCLASS_HAS_RESERVED_SLOTS(WITNESS_INSTANCES_SLOTS),
+static const JSClassOps sWitnessClassOps = {
   nullptr /* addProperty */,
   nullptr /* delProperty */,
   nullptr /* getProperty */,
@@ -126,8 +124,13 @@ static const JSClass sWitnessClass = {
   nullptr /* enumerate */,
   nullptr /* resolve */,
   nullptr /* mayResolve */,
-  nullptr /* convert */,
   Finalize /* finalize */
+};
+
+static const JSClass sWitnessClass = {
+  "FinalizationWitness",
+  JSCLASS_HAS_RESERVED_SLOTS(WITNESS_INSTANCES_SLOTS),
+  &sWitnessClassOps
 };
 
 bool IsWitness(JS::Handle<JS::Value> v)
@@ -144,7 +147,7 @@ bool IsWitness(JS::Handle<JS::Value> v)
  *  Neutralize the witness. Once this method is called, the witness will
  *  never report any error.
  */
-bool ForgetImpl(JSContext* cx, JS::CallArgs args)
+bool ForgetImpl(JSContext* cx, const JS::CallArgs& args)
 {
   if (args.length() != 0) {
     JS_ReportError(cx, "forget() takes no arguments");
@@ -153,7 +156,7 @@ bool ForgetImpl(JSContext* cx, JS::CallArgs args)
   JS::Rooted<JS::Value> valSelf(cx, args.thisv());
   JS::Rooted<JSObject*> objSelf(cx, &valSelf.toObject());
 
-  nsRefPtr<FinalizationEvent> event = ExtractFinalizationEvent(objSelf);
+  RefPtr<FinalizationEvent> event = ExtractFinalizationEvent(objSelf);
   if (event == nullptr) {
     JS_ReportError(cx, "forget() called twice");
     return false;
@@ -204,7 +207,7 @@ FinalizationWitnessService::Make(const char* aTopic,
     return NS_ERROR_FAILURE;
   }
 
-  nsRefPtr<FinalizationEvent> event = new FinalizationEvent(aTopic, aValue);
+  RefPtr<FinalizationEvent> event = new FinalizationEvent(aTopic, aValue);
 
   // Transfer ownership of the addrefed |event| to |objResult|.
   JS_SetReservedSlot(objResult, WITNESS_SLOT_EVENT,

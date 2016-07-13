@@ -51,6 +51,7 @@ nss_cmssignerinfo_create(NSSCMSMessage *cmsg, NSSCMSSignerIDSelector type,
     NSSCMSSignerInfo *signerinfo;
     int version;
     PLArenaPool *poolp;
+    SECStatus rv;
 
     poolp = cmsg->poolp;
 
@@ -80,8 +81,11 @@ nss_cmssignerinfo_create(NSSCMSMessage *cmsg, NSSCMSSignerIDSelector type,
             goto loser;
 
         signerinfo->signerIdentifier.id.subjectKeyID = PORT_ArenaNew(poolp, SECItem);
-        SECITEM_CopyItem(poolp, signerinfo->signerIdentifier.id.subjectKeyID,
-                         subjKeyID);
+        rv = SECITEM_CopyItem(poolp, signerinfo->signerIdentifier.id.subjectKeyID,
+                              subjKeyID);
+        if (rv != SECSuccess) {
+            goto loser;
+        }
         signerinfo->signingKey = SECKEY_CopyPrivateKey(signingKey);
         if (!signerinfo->signingKey)
             goto loser;
@@ -404,6 +408,7 @@ NSS_CMSSignerInfo_Verify(NSSCMSSignerInfo *signerinfo,
 	if (NSS_CMSAttributeArray_Encode(poolp, &(signerinfo->authAttr), 
 	                                 &encoded_attrs) == NULL ||
 		encoded_attrs.data == NULL || encoded_attrs.len == 0) {
+	    PORT_FreeArena(poolp, PR_FALSE);
 	    vs = NSSCMSVS_ProcessingError;
 	    goto loser;
 	}

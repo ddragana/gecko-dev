@@ -60,16 +60,25 @@ public:
       Init();
     }
 
-  virtual nsresult Allocate(const dom::MediaTrackConstraints &aConstraints,
-                            const MediaEnginePrefs &aPrefs,
-                            const nsString& aDeviceId) override;
-  virtual nsresult Deallocate() override;
-  virtual nsresult Start(SourceMediaStream* aStream, TrackID aID) override;
-  virtual nsresult Stop(SourceMediaStream* aSource, TrackID aID) override;
-  virtual void NotifyPull(MediaStreamGraph* aGraph,
-                          SourceMediaStream* aSource,
-                          TrackID aId,
-                          StreamTime aDesiredTime) override;
+  nsresult Allocate(const dom::MediaTrackConstraints &aConstraints,
+                    const MediaEnginePrefs &aPrefs,
+                    const nsString& aDeviceId,
+                    const nsACString& aOrigin) override;
+  nsresult Deallocate() override;
+  nsresult Start(SourceMediaStream* aStream, TrackID aID,
+                 const PrincipalHandle& aPrincipalHandle) override;
+  nsresult Stop(SourceMediaStream* aSource, TrackID aID) override;
+  nsresult Restart(const dom::MediaTrackConstraints& aConstraints,
+                   const MediaEnginePrefs &aPrefs,
+                   const nsString& aDeviceId) override;
+  void NotifyPull(MediaStreamGraph* aGraph,
+                  SourceMediaStream* aSource,
+                  TrackID aId,
+                  StreamTime aDesiredTime,
+                  const PrincipalHandle& aPrincipalHandle) override;
+  dom::MediaSourceEnum GetMediaSource() const override {
+    return dom::MediaSourceEnum::Camera;
+  }
 
   void OnHardwareStateChange(HardwareState aState, nsresult aReason) override;
   void GetRotation();
@@ -85,7 +94,7 @@ public:
   void RotateImage(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight);
   void Notify(const mozilla::hal::ScreenConfiguration& aConfiguration);
 
-  nsresult TakePhoto(PhotoCallback* aCallback) override;
+  nsresult TakePhoto(MediaEnginePhotoCallback* aCallback) override;
 
   // It sets the correct photo orientation via camera parameter according to
   // current screen orientation.
@@ -112,13 +121,13 @@ protected:
 
   mozilla::ReentrantMonitor mCallbackMonitor; // Monitor for camera callback handling
   // This is only modified on MainThread (AllocImpl and DeallocImpl)
-  nsRefPtr<ICameraControl> mCameraControl;
-  nsRefPtr<dom::File> mLastCapture;
+  RefPtr<ICameraControl> mCameraControl;
+  RefPtr<dom::File> mLastCapture;
 
   android::sp<android::GonkCameraSource> mCameraSource;
 
   // These are protected by mMonitor in parent class
-  nsTArray<nsRefPtr<PhotoCallback>> mPhotoCallbacks;
+  nsTArray<RefPtr<MediaEnginePhotoCallback>> mPhotoCallbacks;
   int mRotation;
   int mCameraAngle; // See dom/base/ScreenOrientation.h
   bool mBackCamera;

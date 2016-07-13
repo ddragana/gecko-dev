@@ -96,6 +96,9 @@ EXPORTS += [
     'nsTextRunTransformations.h',
     'RubyUtils.h',
     'ScrollbarActivity.h',
+    'ScrollSnap.h',
+    'Visibility.h',
+    'VisibilityIPC.h',
 ]
 
 EXPORTS.mozilla += [
@@ -112,9 +115,11 @@ EXPORTS.mozilla.layout += [
 
 UNIFIED_SOURCES += [
     'AsyncScrollBase.cpp',
+    'DetailsFrame.cpp',
     'FrameChildList.cpp',
     'MathMLTextRunFactory.cpp',
     'nsAbsoluteContainingBlock.cpp',
+    'nsBackdropFrame.cpp',
     'nsBlockFrame.cpp',
     'nsBlockReflowContext.cpp',
     'nsBlockReflowState.cpp',
@@ -163,6 +168,7 @@ UNIFIED_SOURCES += [
     'nsViewportFrame.cpp',
     'RubyUtils.cpp',
     'ScrollbarActivity.cpp',
+    'ScrollSnap.cpp',
     'ScrollVelocityQueue.cpp',
     'StickyScrollContainer.cpp',
     'TextOverflow.cpp',
@@ -174,8 +180,6 @@ SOURCES += [
     'nsLineLayout.cpp',
     'nsPluginFrame.cpp',
 ]
-
-FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -192,6 +196,7 @@ LOCAL_INCLUDES += [
     '/dom/base',
     '/dom/html',
     '/dom/xul',
+    '/editor/libeditor'
 ]
 
 JAR_MANIFESTS += ['jar.mn']
@@ -205,8 +210,11 @@ MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
 
 CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 
-if CONFIG['MOZ_WIDGET_GTK']:
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     CXXFLAGS += CONFIG['TK_CFLAGS']
 
 if CONFIG['MOZ_ENABLE_QT']:
     CXXFLAGS += CONFIG['MOZ_QT_CFLAGS']
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']

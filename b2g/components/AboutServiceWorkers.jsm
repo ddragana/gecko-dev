@@ -29,17 +29,12 @@ function serializeServiceWorkerInfo(aServiceWorkerInfo) {
 
   let result = {};
 
-  Object.keys(aServiceWorkerInfo).forEach(property => {
-    if (typeof aServiceWorkerInfo[property] == "function") {
-      return;
-    }
-    if (property === "principal") {
-      result.principal = {
-        origin: aServiceWorkerInfo.principal.origin,
-        originAttributes: aServiceWorkerInfo.principal.originAttributes
-      };
-      return;
-    }
+  result.principal = {
+    origin: aServiceWorkerInfo.principal.originNoSuffix,
+    originAttributes: aServiceWorkerInfo.principal.originAttributes
+  };
+
+  ["scope", "scriptSpec"].forEach(property => {
     result[property] = aServiceWorkerInfo[property];
   });
 
@@ -109,9 +104,9 @@ this.AboutServiceWorkers = {
         let registrations = [];
 
         for (let i = 0; i < data.length; i++) {
-          let info = data.queryElementAt(i, Ci.nsIServiceWorkerInfo);
+          let info = data.queryElementAt(i, Ci.nsIServiceWorkerRegistrationInfo);
           if (!info) {
-            dump("AboutServiceWorkers: Invalid nsIServiceWorkerInfo " +
+            dump("AboutServiceWorkers: Invalid nsIServiceWorkerRegistrationInfo " +
                  "interface.\n");
             continue;
           }
@@ -149,16 +144,15 @@ this.AboutServiceWorkers = {
             !message.principal.origin ||
             !message.principal.originAttributes ||
             !message.principal.originAttributes.appId ||
-            (message.principal.originAttributes.inBrowser == null)) {
+            (message.principal.originAttributes.inIsolatedMozBrowser == null)) {
           self.sendError(message.id, "MissingPrincipal");
           return;
         }
 
-        let principal = Services.scriptSecurityManager.getAppCodebasePrincipal(
+        let principal = Services.scriptSecurityManager.createCodebasePrincipal(
+          // TODO: Bug 1196652. use originNoSuffix
           Services.io.newURI(message.principal.origin, null, null),
-          message.principal.originAttributes.appId,
-          message.principal.originAttributes.inBrowser
-        );
+          message.principal.originAttributes);
 
         if (!message.scope) {
           self.sendError(message.id, "MissingScope");

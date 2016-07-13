@@ -16,9 +16,6 @@ Cu.import("resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
   "resource://gre/modules/FileUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "WebappOSUtils",
-  "resource://gre/modules/WebappOSUtils.jsm");
-
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
   "resource://gre/modules/NetUtil.jsm");
 
@@ -26,8 +23,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "appsService",
                                    "@mozilla.org/AppsService;1",
                                    "nsIAppsService");
 
-// Shared code for AppsServiceChild.jsm, TrustedHostedAppsUtils.jsm,
-// Webapps.jsm and Webapps.js
+// Shared code for AppsServiceChild.jsm, Webapps.jsm and Webapps.js
 
 this.EXPORTED_SYMBOLS =
   ["AppsUtils", "ManifestHelper", "isAbsoluteURI", "mozIApplication"];
@@ -74,11 +70,9 @@ mozIApplication.prototype = {
     this._principal = null;
 
     try {
-      this._principal = Services.scriptSecurityManager.getAppCodebasePrincipal(
+      this._principal = Services.scriptSecurityManager.createCodebasePrincipal(
         Services.io.newURI(this.origin, null, null),
-        this.localId,
-        false /* mozbrowser */
-      );
+        {appId: this.localId});
     } catch(e) {
       dump("Could not create app principal " + e + "\n");
     }
@@ -133,6 +127,11 @@ function _setAppProperties(aObj, aApp) {
   aObj.kind = aApp.kind;
   aObj.enabled = aApp.enabled !== undefined ? aApp.enabled : true;
   aObj.sideloaded = aApp.sideloaded;
+  aObj.extensionVersion = aApp.extensionVersion;
+  aObj.blockedStatus =
+    aApp.blockedStatus !== undefined ? aApp.blockedStatus
+                                     : Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
+  aObj.blocklistId = aApp.blocklistId;
 }
 
 this.AppsUtils = {
@@ -143,13 +142,18 @@ this.AppsUtils = {
     return obj;
   },
 
-  // Creates a nsILoadContext object with a given appId and isBrowser flag.
-  createLoadContext: function createLoadContext(aAppId, aIsBrowser) {
+  // Creates a nsILoadContext object with a given appId and inIsolatedMozBrowser
+  // flag.
+  createLoadContext: function createLoadContext(aAppId, aInIsolatedMozBrowser) {
     return {
        associatedWindow: null,
        topWindow : null,
        appId: aAppId,
-       isInBrowserElement: aIsBrowser,
+       isInIsolatedMozBrowserElement: aInIsolatedMozBrowser,
+       originAttributes: {
+         appId: aAppId,
+         inIsolatedMozBrowser: aInIsolatedMozBrowser
+       },
        usePrivateBrowsing: false,
        isContent: false,
 
@@ -216,7 +220,7 @@ this.AppsUtils = {
         deferred.resolve(file);
       }
     });
-    aRequestChannel.asyncOpen(listener, null);
+    aRequestChannel.asyncOpen2(listener);
 
     return deferred.promise;
   },
@@ -290,7 +294,7 @@ this.AppsUtils = {
     for (let id in aApps) {
       let app = aApps[id];
       if (app.localId == aLocalId) {
-        // Use the app kind and the app status to choose the right default CSP.
+        // Use the app status to choose the right default CSP.
         try {
           switch (app.appStatus) {
             case Ci.nsIPrincipal.APP_STATUS_CERTIFIED:
@@ -300,9 +304,7 @@ this.AppsUtils = {
               return Services.prefs.getCharPref("security.apps.privileged.CSP.default");
               break;
             case Ci.nsIPrincipal.APP_STATUS_INSTALLED:
-              return app.kind == "hosted-trusted"
-                ? Services.prefs.getCharPref("security.apps.trusted.CSP.default")
-                : "";
+              return "";
               break;
           }
         } catch(e) {}
@@ -336,6 +338,10 @@ this.AppsUtils = {
     return "";
   },
 
+  areAnyAppsInstalled: function(aApps) {
+    return Object.getOwnPropertyNames(aApps).length > 0;
+  },
+
   getCoreAppsBasePath: function getCoreAppsBasePath() {
     debug("getCoreAppsBasePath()");
     try {
@@ -363,16 +369,7 @@ this.AppsUtils = {
 #endif
     debug(app.basePath + " isCoreApp: " + isCoreApp);
 
-    // Before bug 910473, this is a temporary workaround to get correct path
-    // from child process in mochitest.
-    let prefName = "dom.mozApps.auto_confirm_install";
-    if (Services.prefs.prefHasUserValue(prefName) &&
-        Services.prefs.getBoolPref(prefName)) {
-      return { "path": app.basePath + "/" + app.id,
-               "isCoreApp": isCoreApp };
-    }
-
-    return { "path": WebappOSUtils.getPackagePath(app),
+    return { "path": app.basePath + "/" + app.id,
              "isCoreApp": isCoreApp };
   },
 
@@ -504,7 +501,7 @@ this.AppsUtils = {
     let hadCharset = { };
     let charset = { };
     let netutil = Cc["@mozilla.org/network/util;1"].getService(Ci.nsINetUtil);
-    let contentType = netutil.parseContentType(aContentType, charset, hadCharset);
+    let contentType = netutil.parseResponseContentType(aContentType, charset, hadCharset);
     if (aInstallOrigin != aWebappOrigin &&
         !(contentType == "application/x-web-app-manifest+json" ||
           contentType == "application/manifest+json")) {
@@ -605,7 +602,6 @@ this.AppsUtils = {
 
     switch(type) {
     case "web":
-    case "trusted":
       return Ci.nsIPrincipal.APP_STATUS_INSTALLED;
     case "privileged":
       return Ci.nsIPrincipal.APP_STATUS_PRIVILEGED;
@@ -622,20 +618,20 @@ this.AppsUtils = {
   isFirstRun: function isFirstRun(aPrefBranch) {
     let savedmstone = null;
     try {
-      savedmstone = aPrefBranch.getCharPref("gecko.mstone");
+      savedmstone = aPrefBranch.getCharPref("dom.apps.lastUpdate.mstone");
     } catch (e) {}
 
     let mstone = Services.appinfo.platformVersion;
 
     let savedBuildID = null;
     try {
-      savedBuildID = aPrefBranch.getCharPref("gecko.buildID");
+      savedBuildID = aPrefBranch.getCharPref("dom.apps.lastUpdate.buildID");
     } catch (e) {}
 
     let buildID = Services.appinfo.platformBuildID;
 
-    aPrefBranch.setCharPref("gecko.mstone", mstone);
-    aPrefBranch.setCharPref("gecko.buildID", buildID);
+    aPrefBranch.setCharPref("dom.apps.lastUpdate.mstone", mstone);
+    aPrefBranch.setCharPref("dom.apps.lastUpdate.buildID", buildID);
 
     if ((mstone != savedmstone) || (buildID != savedBuildID)) {
       aPrefBranch.setBoolPref("dom.apps.reset-permissions", false);
@@ -759,8 +755,8 @@ this.AppsUtils = {
     return deferred.promise;
   },
 
-  // Returns the MD5 hash of a string.
-  computeHash: function(aString) {
+  // Returns the hash of a string, with MD5 as a default hashing function.
+  computeHash: function(aString, aAlgorithm = "MD5") {
     let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
                       .createInstance(Ci.nsIScriptableUnicodeConverter);
     converter.charset = "UTF-8";
@@ -770,7 +766,7 @@ this.AppsUtils = {
 
     let hasher = Cc["@mozilla.org/security/hash;1"]
                    .createInstance(Ci.nsICryptoHash);
-    hasher.init(hasher.MD5);
+    hasher.initWithString(aAlgorithm);
     hasher.update(data, data.length);
     // We're passing false to get the binary hash and not base64.
     let hash = hasher.finish(false);
@@ -780,7 +776,7 @@ this.AppsUtils = {
     }
 
     // Convert the binary hash data to a hex string.
-    return [toHexString(hash.charCodeAt(i)) for (i in hash)].join("");
+    return Array.from(hash, (c, i) => toHexString(hash.charCodeAt(i))).join("");
   },
 
   // Returns the hash for a JS object.
@@ -843,7 +839,7 @@ ManifestHelper.prototype = {
   _localeProp: function(aProp) {
     if (this._localeRoot[aProp] != undefined)
       return this._localeRoot[aProp];
-    return this._manifest[aProp];
+    return (aProp in this._manifest) ? this._manifest[aProp] : undefined;
   },
 
   get name() {

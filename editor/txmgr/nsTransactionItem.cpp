@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/mozalloc.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsError.h"
@@ -146,7 +145,7 @@ nsTransactionItem::GetChild(int32_t aIndex, nsTransactionItem **aChild)
   if (numItems > 0 && aIndex < numItems) {
     NS_ENSURE_TRUE(mUndoStack, NS_ERROR_FAILURE);
 
-    nsRefPtr<nsTransactionItem> child = mUndoStack->GetItem(aIndex);
+    RefPtr<nsTransactionItem> child = mUndoStack->GetItem(aIndex);
     child.forget(aChild);
     return *aChild ? NS_OK : NS_ERROR_FAILURE;
   }
@@ -161,7 +160,7 @@ nsTransactionItem::GetChild(int32_t aIndex, nsTransactionItem **aChild)
 
   NS_ENSURE_TRUE(mRedoStack && numItems != 0 && aIndex < numItems, NS_ERROR_FAILURE);
 
-  nsRefPtr<nsTransactionItem> child = mRedoStack->GetItem(aIndex);
+  RefPtr<nsTransactionItem> child = mRedoStack->GetItem(aIndex);
   child.forget(aChild);
   return *aChild ? NS_OK : NS_ERROR_FAILURE;
 }
@@ -200,7 +199,7 @@ nsTransactionItem::UndoTransaction(nsTransactionManager *aTxMgr)
 nsresult
 nsTransactionItem::UndoChildren(nsTransactionManager *aTxMgr)
 {
-  nsRefPtr<nsTransactionItem> item;
+  RefPtr<nsTransactionItem> item;
   nsresult result = NS_OK;
   int32_t sz = 0;
 
@@ -237,7 +236,7 @@ nsTransactionItem::UndoChildren(nsTransactionManager *aTxMgr)
 
       if (NS_SUCCEEDED(result)) {
         item = mUndoStack->Pop();
-        mRedoStack->Push(item);
+        mRedoStack->Push(item.forget());
       }
 
       nsresult result2 = aTxMgr->DidUndoNotify(t, result);
@@ -276,7 +275,7 @@ nsTransactionItem::RedoTransaction(nsTransactionManager *aTxMgr)
 nsresult
 nsTransactionItem::RedoChildren(nsTransactionManager *aTxMgr)
 {
-  nsRefPtr<nsTransactionItem> item;
+  RefPtr<nsTransactionItem> item;
   nsresult result = NS_OK;
 
   if (!mRedoStack)
@@ -310,7 +309,7 @@ nsTransactionItem::RedoChildren(nsTransactionManager *aTxMgr)
 
     if (NS_SUCCEEDED(result)) {
       item = mRedoStack->Pop();
-      mUndoStack->Push(item);
+      mUndoStack->Push(item.forget());
     }
 
     nsresult result2 = aTxMgr->DidUndoNotify(t, result);

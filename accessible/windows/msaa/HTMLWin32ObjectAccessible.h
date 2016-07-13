@@ -32,12 +32,8 @@ public:
   virtual bool NativelyUnavailable() const;
 
 protected:
-
-  // Accessible
-  virtual void CacheChildren();
-
   void* mHwnd;
-  nsRefPtr<Accessible> mNativeAccessible;
+  RefPtr<Accessible> mNativeAccessible;
 };
 
 /**

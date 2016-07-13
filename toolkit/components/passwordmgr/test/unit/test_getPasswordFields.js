@@ -16,7 +16,8 @@ const TESTCASES = [
   {
     description: "Non-password input with no <form> present",
     document: `<input>`,
-    returnedFieldIDsByFormLike: [],
+    // Only the IDs of password fields should be in this array
+    returnedFieldIDsByFormLike: [[]],
     skipEmptyFields: undefined,
   },
   {
@@ -72,14 +73,14 @@ const TESTCASES = [
     description: "2 password fields outside of a <form> with 1 linked via @form + skipEmpty",
     document: `<input id="pw1" type=password><input id="pw2" type=password form="form1">
       <form id="form1"></form>`,
-    returnedFieldIDsByFormLike: [[],[]],
+    returnedFieldIDsByFormLike: [[], []],
     skipEmptyFields: true,
   },
   {
     description: "2 password fields outside of a <form> with 1 linked via @form + skipEmpty with 1 empty",
     document: `<input id="pw1" type=password value="pass1"><input id="pw2" type=password form="form1">
       <form id="form1"></form>`,
-    returnedFieldIDsByFormLike: [["pw1"],[]],
+    returnedFieldIDsByFormLike: [["pw1"], []],
     skipEmptyFields: true,
   },
 ];
@@ -96,11 +97,7 @@ for (let tc of TESTCASES) {
 
       let mapRootElementToFormLike = new Map();
       for (let input of document.querySelectorAll("input")) {
-        if (input.type != "password") {
-          continue;
-        }
-
-        let formLike = FormLikeFactory.createFromPasswordField(input);
+        let formLike = FormLikeFactory.createFromField(input);
         let existingFormLike = mapRootElementToFormLike.get(formLike.rootElement);
         if (!existingFormLike) {
           mapRootElementToFormLike.set(formLike.rootElement, formLike);

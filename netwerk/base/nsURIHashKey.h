@@ -5,7 +5,7 @@
 #ifndef nsURIHashKey_h__
 #define nsURIHashKey_h__
 
-#include "pldhash.h"
+#include "PLDHashTable.h"
 #include "nsCOMPtr.h"
 #include "nsIURI.h"
 #include "nsHashKeys.h"
@@ -29,6 +29,9 @@ public:
 
     bool KeyEquals(const nsIURI* aKey) const {
         bool eq;
+        if (!mKey) {
+            return !aKey;
+        }
         if (NS_SUCCEEDED(mKey->Equals(const_cast<nsIURI*>(aKey), &eq))) {
             return eq;
         }
@@ -37,11 +40,15 @@ public:
 
     static const nsIURI* KeyToPointer(nsIURI* aKey) { return aKey; }
     static PLDHashNumber HashKey(const nsIURI* aKey) {
+        if (!aKey) {
+            // If the key is null, return hash for empty string.
+            return mozilla::HashString(EmptyCString());
+        }
         nsAutoCString spec;
         const_cast<nsIURI*>(aKey)->GetSpec(spec);
         return mozilla::HashString(spec);
     }
-    
+
     enum { ALLOW_MEMMOVE = true };
 
 protected:

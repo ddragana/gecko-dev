@@ -10,7 +10,6 @@
 
 #include "imgIEncoder.h"
 
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "ICOFileHeaders.h"
 
@@ -51,8 +50,8 @@ public:
 protected:
   ~nsICOEncoder();
 
-  nsresult ParseOptions(const nsAString& aOptions, uint32_t* bpp,
-                        bool* usePNG);
+  nsresult ParseOptions(const nsAString& aOptions, uint32_t& aBppOut,
+                        bool& aUsePNGOut);
   void NotifyListener();
 
   // Initializes the icon file header mICOFileHeader

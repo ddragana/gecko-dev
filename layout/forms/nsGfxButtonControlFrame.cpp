@@ -6,8 +6,8 @@
 #include "nsGfxButtonControlFrame.h"
 #include "nsIFormControl.h"
 #include "nsGkAtoms.h"
-#include "nsAutoPtr.h"
-#include "nsStyleSet.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "nsContentUtils.h"
 // MouseEvent suppression in PP
 #include "nsContentList.h"
@@ -88,9 +88,9 @@ nsGfxButtonControlFrame::CreateFrameFor(nsIContent*      aContent)
     nsContainerFrame* parentFrame = do_QueryFrame(mFrames.FirstChild());
 
     nsPresContext* presContext = PresContext();
-    nsRefPtr<nsStyleContext> textStyleContext;
+    RefPtr<nsStyleContext> textStyleContext;
     textStyleContext = presContext->StyleSet()->
-      ResolveStyleForNonElement(mStyleContext);
+      ResolveStyleForText(mTextContent, mStyleContext);
 
     newFrame = NS_NewTextFrame(presContext->PresShell(), textStyleContext);
     // initialize the text frame

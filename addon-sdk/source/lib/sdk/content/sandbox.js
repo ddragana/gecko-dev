@@ -18,7 +18,7 @@ const timer = require('../timers');
 const { URL } = require('../url');
 const { sandbox, evaluate, load } = require('../loader/sandbox');
 const { merge } = require('../util/object');
-const { getTabForContentWindow } = require('../tabs/utils');
+const { getTabForContentWindowNoShim } = require('../tabs/utils');
 const { getInnerId } = require('../window/utils');
 const { PlainTextConsole } = require('../console/plain-text');
 const { data } = require('../self');const { isChildLoader } = require('../remote/core');
@@ -29,7 +29,7 @@ const sandboxes = new WeakMap();
   require('./content-worker.js');
   Then, retrieve URL of these files in the XPI:
 */
-let prefix = module.uri.split('sandbox.js')[0];
+var prefix = module.uri.split('sandbox.js')[0];
 const CONTENT_WORKER_URL = prefix + 'content-worker.js';
 const metadata = require('@loader/options').metadata;
 
@@ -53,11 +53,11 @@ function isWindowInTab(window) {
   if (isChildLoader) {
     let { frames } = require('../remote/child');
     let frame = frames.getFrameForWindow(window.top);
-    return frame.isTab;
+    return frame && frame.isTab;
   }
   else {
     // The deprecated sync worker API still does everything in the main process
-    return getTabForContentWindow(window);
+    return getTabForContentWindowNoShim(window);
   }
 }
 
@@ -162,9 +162,15 @@ const WorkerSandbox = Class({
     let parent = window.parent === window ? content : content.parent;
     merge(content, {
       // We need 'this === window === top' to be true in toplevel scope:
-      get window() content,
-      get top() top,
-      get parent() parent
+      get window() {
+        return content;
+      },
+      get top() {
+        return top;
+      },
+      get parent() {
+        return parent;
+      }
     });
 
     // Use the Greasemonkey naming convention to provide access to the

@@ -54,12 +54,9 @@ public:
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  static uint8_t*
-  GetRandomValues(uint32_t aLength);
-
 private:
   nsCOMPtr<nsIGlobalObject> mParent;
-  nsRefPtr<SubtleCrypto> mSubtle;
+  RefPtr<SubtleCrypto> mSubtle;
 };
 
 } // namespace dom

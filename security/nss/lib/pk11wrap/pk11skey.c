@@ -1775,8 +1775,7 @@ static PK11SymKey *pk11_ANSIX963Derive(PK11SymKey *sharedSecret,
     return intermediateResult;
 
 loser:
-    if (buffer != NULL)
-	PORT_ZFree(buffer, bufferLen);
+    PORT_ZFree(buffer, bufferLen);
     if (newSharedSecret != NULL)
 	PK11_FreeSymKey(newSharedSecret);
     if (intermediateResult != NULL)
@@ -1821,6 +1820,8 @@ PK11_PubDerive(SECKEYPrivateKey *privKey, SECKEYPublicKey *pubKey,
 
     switch (privKey->keyType) {
     case rsaKey:
+    case rsaPssKey:
+    case rsaOaepKey:
     case nullKey:
 	PORT_SetError(SEC_ERROR_BAD_KEY);
 	break;

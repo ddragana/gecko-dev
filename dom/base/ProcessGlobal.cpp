@@ -37,7 +37,6 @@ ProcessGlobal::Get()
   return static_cast<ProcessGlobal*>(service.get());
 }
 
-/* [notxpcom] boolean markForCC (); */
 // This method isn't automatically forwarded safely because it's notxpcom, so
 // the IDL binding doesn't know what value to return.
 NS_IMETHODIMP_(bool)
@@ -58,9 +57,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(ProcessGlobal)
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
-  for (uint32_t i = 0; i < tmp->mAnonymousGlobalScopes.Length(); ++i) {
-    NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mAnonymousGlobalScopes[i])
-  }
+  tmp->nsMessageManagerScriptExecutor::Trace(aCallbacks, aClosure);
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ProcessGlobal)

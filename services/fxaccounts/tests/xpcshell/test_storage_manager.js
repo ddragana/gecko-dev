@@ -14,6 +14,8 @@ Cu.import("resource://gre/modules/Log.jsm");
 initTestLogging("Trace");
 log.level = Log.Level.Trace;
 
+const DEVICE_REGISTRATION_VERSION = 42;
+
 // A couple of mocks we can use.
 function MockedPlainStorage(accountData) {
   let data = null;
@@ -51,9 +53,11 @@ function MockedSecureStorage(accountData) {
 }
 
 MockedSecureStorage.prototype = {
+  fetchCount: 0,
   locked: false,
   STORAGE_LOCKED: function() {},
   get: Task.async(function* (uid, email) {
+    this.fetchCount++;
     if (this.locked) {
       throw new this.STORAGE_LOCKED();
     }
@@ -85,7 +89,7 @@ add_storage_task(function* checkInitializedEmpty(sm) {
   }
   yield sm.initialize();
   Assert.strictEqual((yield sm.getAccountData()), null);
-  Assert.rejects(sm.updateAccountData({foo: "bar"}), "No user is logged in")
+  Assert.rejects(sm.updateAccountData({kA: "kA"}), "No user is logged in")
 });
 
 // Initialized with account data (ie, simulating a new user being logged in).
@@ -95,6 +99,7 @@ add_storage_task(function* checkNewUser(sm) {
     uid: "uid",
     email: "someone@somewhere.com",
     kA: "kA",
+    deviceId: "device id"
   };
   sm.plainStorage = new MockedPlainStorage()
   if (sm.secureStorage) {
@@ -105,10 +110,12 @@ add_storage_task(function* checkNewUser(sm) {
   Assert.equal(accountData.uid, initialAccountData.uid);
   Assert.equal(accountData.email, initialAccountData.email);
   Assert.equal(accountData.kA, initialAccountData.kA);
+  Assert.equal(accountData.deviceId, initialAccountData.deviceId);
 
   // and it should have been written to storage.
   Assert.equal(sm.plainStorage.data.accountData.uid, initialAccountData.uid);
   Assert.equal(sm.plainStorage.data.accountData.email, initialAccountData.email);
+  Assert.equal(sm.plainStorage.data.accountData.deviceId, initialAccountData.deviceId);
   // check secure
   if (sm.secureStorage) {
     Assert.equal(sm.secureStorage.data.accountData.kA, initialAccountData.kA);
@@ -119,7 +126,12 @@ add_storage_task(function* checkNewUser(sm) {
 
 // Initialized without account data but storage has it available.
 add_storage_task(function* checkEverythingRead(sm) {
-  sm.plainStorage = new MockedPlainStorage({uid: "uid", email: "someone@somewhere.com"})
+  sm.plainStorage = new MockedPlainStorage({
+    uid: "uid",
+    email: "someone@somewhere.com",
+    deviceId: "wibble",
+    deviceRegistrationVersion: null
+  });
   if (sm.secureStorage) {
     sm.secureStorage = new MockedSecureStorage(null);
   }
@@ -128,23 +140,34 @@ add_storage_task(function* checkEverythingRead(sm) {
   Assert.ok(accountData, "read account data");
   Assert.equal(accountData.uid, "uid");
   Assert.equal(accountData.email, "someone@somewhere.com");
+  Assert.equal(accountData.deviceId, "wibble");
+  Assert.equal(accountData.deviceRegistrationVersion, null);
   // Update the data - we should be able to fetch it back and it should appear
   // in our storage.
-  yield sm.updateAccountData({verified: true, foo: "bar", kA: "kA"});
+  yield sm.updateAccountData({
+    verified: true,
+    kA: "kA",
+    kB: "kB",
+    deviceRegistrationVersion: DEVICE_REGISTRATION_VERSION
+  });
   accountData = yield sm.getAccountData();
-  Assert.equal(accountData.foo, "bar");
+  Assert.equal(accountData.kB, "kB");
   Assert.equal(accountData.kA, "kA");
+  Assert.equal(accountData.deviceId, "wibble");
+  Assert.equal(accountData.deviceRegistrationVersion, DEVICE_REGISTRATION_VERSION);
   // Check the new value was written to storage.
   yield sm._promiseStorageComplete; // storage is written in the background.
-  // "verified" is a plain-text field.
+  // "verified", "deviceId" and "deviceRegistrationVersion" are plain-text fields.
   Assert.equal(sm.plainStorage.data.accountData.verified, true);
+  Assert.equal(sm.plainStorage.data.accountData.deviceId, "wibble");
+  Assert.equal(sm.plainStorage.data.accountData.deviceRegistrationVersion, DEVICE_REGISTRATION_VERSION);
   // "kA" and "foo" are secure
   if (sm.secureStorage) {
     Assert.equal(sm.secureStorage.data.accountData.kA, "kA");
-    Assert.equal(sm.secureStorage.data.accountData.foo, "bar");
+    Assert.equal(sm.secureStorage.data.accountData.kB, "kB");
   } else {
     Assert.equal(sm.plainStorage.data.accountData.kA, "kA");
-    Assert.equal(sm.plainStorage.data.accountData.foo, "bar");
+    Assert.equal(sm.plainStorage.data.accountData.kB, "kB");
   }
 });
 
@@ -231,6 +254,53 @@ add_task(function* checkEverythingReadSecure() {
   Assert.equal(accountData.kA, "kA");
 });
 
+add_task(function* checkMemoryFieldsNotReturnedByDefault() {
+  let sm = new FxAccountsStorageManager();
+  sm.plainStorage = new MockedPlainStorage({uid: "uid", email: "someone@somewhere.com"})
+  sm.secureStorage = new MockedSecureStorage({kA: "kA"});
+  yield sm.initialize();
+
+  // keyPair is a memory field.
+  yield sm.updateAccountData({keyPair: "the keypair value"});
+  let accountData = yield sm.getAccountData();
+
+  // Requesting everything should *not* return in memory fields.
+  Assert.strictEqual(accountData.keyPair, undefined);
+  // But requesting them specifically does get them.
+  accountData = yield sm.getAccountData("keyPair");
+  Assert.strictEqual(accountData.keyPair, "the keypair value");
+});
+
+add_task(function* checkExplicitGet() {
+  let sm = new FxAccountsStorageManager();
+  sm.plainStorage = new MockedPlainStorage({uid: "uid", email: "someone@somewhere.com"})
+  sm.secureStorage = new MockedSecureStorage({kA: "kA"});
+  yield sm.initialize();
+
+  let accountData = yield sm.getAccountData(["uid", "kA"]);
+  Assert.ok(accountData, "read account data");
+  Assert.equal(accountData.uid, "uid");
+  Assert.equal(accountData.kA, "kA");
+  // We didn't ask for email so shouldn't have got it.
+  Assert.strictEqual(accountData.email, undefined);
+});
+
+add_task(function* checkExplicitGetNoSecureRead() {
+  let sm = new FxAccountsStorageManager();
+  sm.plainStorage = new MockedPlainStorage({uid: "uid", email: "someone@somewhere.com"})
+  sm.secureStorage = new MockedSecureStorage({kA: "kA"});
+  yield sm.initialize();
+
+  Assert.equal(sm.secureStorage.fetchCount, 0);
+  // request 2 fields in secure storage - it should have caused a single fetch.
+  let accountData = yield sm.getAccountData(["email", "uid"]);
+  Assert.ok(accountData, "read account data");
+  Assert.equal(accountData.uid, "uid");
+  Assert.equal(accountData.email, "someone@somewhere.com");
+  Assert.strictEqual(accountData.kA, undefined);
+  Assert.equal(sm.secureStorage.fetchCount, 1);
+});
+
 add_task(function* checkLockedUpdates() {
   let sm = new FxAccountsStorageManager();
   sm.plainStorage = new MockedPlainStorage({uid: "uid", email: "someone@somewhere.com"})
@@ -262,7 +332,7 @@ add_task(function* checkLockedUpdates() {
 // A helper for our queued tests. It creates a StorageManager and then queues
 // an unresolved promise. The tests then do additional setup and checks, then
 // resolves or rejects the blocked promise.
-let setupStorageManagerForQueueTest = Task.async(function* () {
+var setupStorageManagerForQueueTest = Task.async(function* () {
   let sm = new FxAccountsStorageManager();
   sm.plainStorage = new MockedPlainStorage({uid: "uid", email: "someone@somewhere.com"})
   sm.secureStorage = new MockedSecureStorage({kA: "kA"});

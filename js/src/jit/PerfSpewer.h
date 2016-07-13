@@ -66,9 +66,9 @@ class PerfSpewer
     BasicBlocksVector basicBlocks_;
 
   public:
-    virtual bool startBasicBlock(MBasicBlock* blk, MacroAssembler& masm);
-    bool endBasicBlock(MacroAssembler& masm);
-    bool noteEndInlineCode(MacroAssembler& masm);
+    virtual MOZ_MUST_USE bool startBasicBlock(MBasicBlock* blk, MacroAssembler& masm);
+    virtual MOZ_MUST_USE bool endBasicBlock(MacroAssembler& masm);
+    MOZ_MUST_USE bool noteEndInlineCode(MacroAssembler& masm);
 
     void writeProfile(JSScript* script, JitCode* code, MacroAssembler& masm);
 };
@@ -76,24 +76,16 @@ class PerfSpewer
 void writePerfSpewerBaselineProfile(JSScript* script, JitCode* code);
 void writePerfSpewerJitCodeProfile(JitCode* code, const char* msg);
 
+// AsmJS doesn't support block annotations.
 class AsmJSPerfSpewer : public PerfSpewer
 {
   public:
-    bool startBasicBlock(MBasicBlock* blk, MacroAssembler& masm);
-
-    void noteBlocksOffsets();
-    BasicBlocksVector& basicBlocks() { return basicBlocks_; }
+    MOZ_MUST_USE bool startBasicBlock(MBasicBlock* blk, MacroAssembler& masm) { return true; }
+    MOZ_MUST_USE bool endBasicBlock(MacroAssembler& masm) { return true; }
 };
 
 void writePerfSpewerAsmJSFunctionMap(uintptr_t base, uintptr_t size, const char* filename,
                                      unsigned lineno, unsigned colIndex, const char* funcName);
-
-void writePerfSpewerAsmJSBlocksMap(uintptr_t baseAddress, size_t funcStartOffset,
-                                   size_t funcStartOOLOffset, size_t funcSize,
-                                   const char* filename, const char* funcName,
-                                   const BasicBlocksVector& basicBlocks);
-
-void writePerfSpewerAsmJSEntriesAndExits(uintptr_t base, size_t size);
 
 #endif // JS_ION_PERF
 

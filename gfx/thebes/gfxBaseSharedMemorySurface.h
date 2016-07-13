@@ -7,6 +7,7 @@
 #ifndef GFX_SHARED_MEMORYSURFACE_H
 #define GFX_SHARED_MEMORYSURFACE_H
 
+#include "mozilla/gfx/2D.h"
 #include "mozilla/ipc/Shmem.h"
 #include "mozilla/ipc/SharedMemory.h"
 
@@ -36,7 +37,6 @@ template <typename Base, typename Sub>
 class gfxBaseSharedMemorySurface : public Base {
     typedef mozilla::ipc::SharedMemory SharedMemory;
     typedef mozilla::ipc::Shmem Shmem;
-    friend class gfxReusableSharedImageSurfaceWrapper;
 
 protected:
     virtual ~gfxBaseSharedMemorySurface()
@@ -75,13 +75,13 @@ public:
     {
         SharedImageInfo* shmInfo = GetShmInfoPtr(aShmem);
         mozilla::gfx::IntSize size(shmInfo->width, shmInfo->height);
-        if (!gfxASurface::CheckSurfaceSize(size))
+        if (!mozilla::gfx::Factory::CheckSurfaceSize(size))
             return nullptr;
-       
-        gfxImageFormat format = (gfxImageFormat)shmInfo->format;
+
+        gfxImageFormat format = shmInfo->format;
         long stride = gfxImageSurface::ComputeStride(size, format);
 
-        nsRefPtr<Sub> s =
+        RefPtr<Sub> s =
             new Sub(size,
                     stride,
                     format,
@@ -165,7 +165,7 @@ private:
            gfxImageFormat aFormat,
            SharedMemory::SharedMemoryType aShmType)
     {
-        if (!gfxASurface::CheckSurfaceSize(aSize))
+        if (!mozilla::gfx::Factory::CheckSurfaceSize(aSize))
             return nullptr;
 
         Shmem shmem;
@@ -179,7 +179,7 @@ private:
                 return nullptr;
         }
 
-        nsRefPtr<Sub> s =
+        RefPtr<Sub> s =
             new Sub(aSize, stride, aFormat, shmem);
         if (s->CairoStatus() != 0) {
             aAllocator->DeallocShmem(shmem);

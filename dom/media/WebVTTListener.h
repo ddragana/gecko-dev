@@ -9,7 +9,6 @@
 #include "nsIWebVTTListener.h"
 #include "nsIStreamListener.h"
 #include "nsIChannelEventSink.h"
-#include "nsAutoPtr.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsCycleCollectionParticipant.h"
 
@@ -55,7 +54,7 @@ private:
                               const char* aFromSegment, uint32_t aToOffset,
                               uint32_t aCount, uint32_t* aWriteCount);
 
-  nsRefPtr<HTMLTrackElement> mElement;
+  RefPtr<HTMLTrackElement> mElement;
   nsCOMPtr<nsIWebVTTParserWrapper> mParserWrapper;
 };
 

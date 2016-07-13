@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict;"
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
@@ -38,12 +38,12 @@ const DEFAULT_MAX_ERROR_AGE = 20 * 24 * 60 * 60; // 20 days
 // times, which would cause messages to appear twice.
 
 // Singletons used by each instance.
-let formatter;
-let dumpAppender;
-let consoleAppender;
+var formatter;
+var dumpAppender;
+var consoleAppender;
 
 // A set of all preference roots used by all instances.
-let allBranches = new Set();
+var allBranches = new Set();
 
 // A storage appender that is flushable to a file on disk.  Policies for
 // when to flush, to what file, log rotation etc are up to the consumer
@@ -196,12 +196,6 @@ LogManager.prototype = {
     // now attach the appenders to all our logs.
     for (let logName of logNames) {
       let log = Log.repository.getLogger(logName);
-      // Set all of the logs themselves to log all messages, and rely on the
-      // more restrictive levels on the appenders to restrict what is seen.
-      // (We possibly could find the smallest appender level and set the logs
-      // to that, but that gets tricky when we consider a singe log might end
-      // up being managed by multiple log managers - so this is fine for now.)
-      log.level = Log.Level.All;
       for (let appender of [fapp, dumpAppender, consoleAppender]) {
         log.addAppender(appender);
       }
@@ -230,6 +224,10 @@ LogManager.prototype = {
     // This returns an array of the the relative directory entries below the
     // profile dir, and is the directory about:sync-log uses.
     return ["weave", "logs"];
+  },
+
+  get sawError() {
+    return this._fileAppender.sawError;
   },
 
   // Result values for resetFileLog.
@@ -322,6 +320,7 @@ LogManager.prototype = {
                         + entry.name, ex);
       }
     }.bind(this)));
+    iterator.close();
     this._cleaningUpFileLogs = false;
     this._log.debug("Done deleting files.");
     // This notification is used only for tests.

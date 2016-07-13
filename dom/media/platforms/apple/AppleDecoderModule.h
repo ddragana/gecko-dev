@@ -16,35 +16,32 @@ public:
   AppleDecoderModule();
   virtual ~AppleDecoderModule();
 
-  virtual nsresult Startup() override;
+  nsresult Startup() override;
 
   // Decode thread.
-  virtual already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const VideoInfo& aConfig,
-                     layers::LayersBackend aLayersBackend,
-                     layers::ImageContainer* aImageContainer,
-                     FlushableTaskQueue* aVideoTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override;
+  already_AddRefed<MediaDataDecoder>
+  CreateVideoDecoder(const CreateDecoderParams& aParams) override;
 
   // Decode thread.
-  virtual already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override;
+  already_AddRefed<MediaDataDecoder>
+  CreateAudioDecoder(const CreateDecoderParams& aParams) override;
 
-  virtual bool SupportsMimeType(const nsACString& aMimeType) override;
+  bool SupportsMimeType(const nsACString& aMimeType,
+                        DecoderDoctorDiagnostics* aDiagnostics) const override;
 
-  virtual ConversionRequired
+  ConversionRequired
   DecoderNeedsConversion(const TrackInfo& aConfig) const override;
 
   static void Init();
 
+  static bool sCanUseHardwareVideoDecoder;
+
 private:
   static bool sInitialized;
+  static bool sIsCoreMediaAvailable;
   static bool sIsVTAvailable;
   static bool sIsVTHWAvailable;
   static bool sIsVDAAvailable;
-  static bool sForceVDA;
 };
 
 } // namespace mozilla

@@ -4,52 +4,40 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/AutoGlobalTimelineMarker.h"
+#include "AutoGlobalTimelineMarker.h"
 
-#include "mozilla/TimelineConsumers.h"
+#include "TimelineConsumers.h"
 #include "MainThreadUtils.h"
-#include "nsDocShell.h"
 
 namespace mozilla {
 
-AutoGlobalTimelineMarker::AutoGlobalTimelineMarker(const char* aName
+AutoGlobalTimelineMarker::AutoGlobalTimelineMarker(const char* aName,
+                                                   MarkerStackRequest aStackRequest /* = STACK */
                                                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : mName(aName)
-  , mDocShells()
-  , mDocShellsRetrieved(false)
+  , mStackRequest(aStackRequest)
 {
   MOZ_GUARD_OBJECT_NOTIFIER_INIT;
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (TimelineConsumers::IsEmpty()) {
+  RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
+  if (!timelines || timelines->IsEmpty()) {
     return;
   }
 
-  mDocShellsRetrieved = TimelineConsumers::GetKnownDocShells(mDocShells);
-  if (!mDocShellsRetrieved) {
-    // If we don't successfully populate our vector with *all* docshells being
-    // observed, don't add markers to *any* of them.
-    return;
-  }
-
-  for (Vector<nsRefPtr<nsDocShell>>::Range range = mDocShells.all();
-       !range.empty();
-       range.popFront()) {
-    range.front()->AddProfileTimelineMarker(mName, TRACING_INTERVAL_START);
-  }
+  timelines->AddMarkerForAllObservedDocShells(mName, MarkerTracingType::START, mStackRequest);
 }
 
 AutoGlobalTimelineMarker::~AutoGlobalTimelineMarker()
 {
-  if (!mDocShellsRetrieved) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
+  if (!timelines || timelines->IsEmpty()) {
     return;
   }
 
-  for (Vector<nsRefPtr<nsDocShell>>::Range range = mDocShells.all();
-       !range.empty();
-       range.popFront()) {
-    range.front()->AddProfileTimelineMarker(mName, TRACING_INTERVAL_END);
-  }
+  timelines->AddMarkerForAllObservedDocShells(mName, MarkerTracingType::END, mStackRequest);
 }
 
 } // namespace mozilla

@@ -8,11 +8,37 @@
 
 #include "mozilla/RefPtr.h"
 #include "ImageContainer.h"
-#include "nsAutoPtr.h"
 #include "d3d9.h"
+#include "mozilla/layers/TextureClientRecycleAllocator.h"
 
 namespace mozilla {
 namespace layers {
+
+class TextureClient;
+
+class D3D9RecycleAllocator : public TextureClientRecycleAllocator
+{
+public:
+  explicit D3D9RecycleAllocator(CompositableForwarder* aAllocator,
+                                IDirect3DDevice9* aDevice)
+    : TextureClientRecycleAllocator(aAllocator)
+    , mDevice(aDevice)
+  {}
+
+  already_AddRefed<TextureClient>
+  CreateOrRecycleClient(gfx::SurfaceFormat aFormat,
+                        const gfx::IntSize& aSize);
+
+protected:
+  virtual already_AddRefed<TextureClient>
+  Allocate(gfx::SurfaceFormat aFormat,
+           gfx::IntSize aSize,
+           BackendSelector aSelector,
+           TextureFlags aTextureFlags,
+           TextureAllocationFlags aAllocFlags) override;
+
+  RefPtr<IDirect3DDevice9> mDevice;
+};
 
 // Image class that wraps a IDirect3DSurface9. This class copies the image
 // passed into SetData(), so that it can be accessed from other D3D devices.
@@ -20,20 +46,12 @@ namespace layers {
 // resource is ready to use.
 class D3D9SurfaceImage : public Image {
 public:
-
-  struct Data {
-    Data(IDirect3DSurface9* aSurface, const gfx::IntRect& aRegion)
-      : mSurface(aSurface), mRegion(aRegion) {}
-    RefPtr<IDirect3DSurface9> mSurface;
-    gfx::IntRect mRegion;
-  };
-
-  D3D9SurfaceImage();
+  explicit D3D9SurfaceImage();
   virtual ~D3D9SurfaceImage();
 
-  // Copies the surface into a sharable texture's surface, and initializes
-  // the image.
-  HRESULT SetData(const Data& aData);
+  HRESULT AllocateAndCopy(D3D9RecycleAllocator* aAllocator,
+                          IDirect3DSurface9* aSurface,
+                          const gfx::IntRect& aRegion);
 
   // Returns the description of the shared surface.
   const D3DSURFACE_DESC& GetDesc() const;
@@ -44,20 +62,16 @@ public:
 
   virtual TextureClient* GetTextureClient(CompositableClient* aClient) override;
 
-  virtual bool IsValid() override;
+  already_AddRefed<IDirect3DSurface9> GetD3D9Surface();
+
+  virtual bool IsValid() override { return mValid; }
+
+  void Invalidate() { mValid = false; }
 
 private:
 
-  // Blocks the calling thread until the copy operation started in SetData()
-  // is complete, whereupon the texture is safe to use.
-  void EnsureSynchronized();
-
   gfx::IntSize mSize;
-  RefPtr<IDirect3DTexture9> mTexture;
-  RefPtr<IDirect3DQuery9> mQuery;
   RefPtr<TextureClient> mTextureClient;
-  HANDLE mShareHandle;
-  D3DSURFACE_DESC mDesc;
   bool mValid;
 };
 

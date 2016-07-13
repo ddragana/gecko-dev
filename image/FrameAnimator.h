@@ -7,6 +7,7 @@
 #ifndef mozilla_image_FrameAnimator_h
 #define mozilla_image_FrameAnimator_h
 
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/TimeStamp.h"
 #include "gfx2DGlue.h"
@@ -33,9 +34,17 @@ public:
     , mLoopRemainingCount(-1)
     , mLastCompositedFrameIndex(-1)
     , mLoopCount(-1)
+    , mFirstFrameTimeout(0)
     , mAnimationMode(aAnimationMode)
     , mDoneDecoding(false)
-  { }
+  {
+     MOZ_COUNT_CTOR(FrameAnimator);
+  }
+
+  ~FrameAnimator()
+  {
+    MOZ_COUNT_DTOR(FrameAnimator);
+  }
 
   /**
    * Return value from RequestRefresh. Tells callers what happened in that call
@@ -148,6 +157,12 @@ public:
   void SetLoopCount(int32_t aLoopCount) { mLoopCount = aLoopCount; }
   int32_t LoopCount() const { return mLoopCount; }
 
+  /*
+   * Set the timeout for the first frame. This is used to allow animation
+   * scheduling even before a full decode runs for this image.
+   */
+  void SetFirstFrameTimeout(int32_t aTimeout) { mFirstFrameTimeout = aTimeout; }
+
   /**
    * Collect an accounting of the memory occupied by the compositing surfaces we
    * use during animation playback. All of the actual animation frames are
@@ -232,7 +247,8 @@ private: // methods
                               const nsIntRect& aSrcRect,
                               uint32_t aSrcPaletteLength, bool aSrcHasAlpha,
                               uint8_t* aDstPixels, const nsIntRect& aDstRect,
-                              BlendMethod aBlendMethod);
+                              BlendMethod aBlendMethod,
+                              const Maybe<nsIntRect>& aBlendRect);
 
 private: // data
   //! A weak pointer to our owning image.
@@ -276,6 +292,9 @@ private: // data
 
   //! The total number of loops for the image.
   int32_t mLoopCount;
+
+  //! The timeout for the first frame of this image.
+  int32_t mFirstFrameTimeout;
 
   //! The animation mode of this image. Constants defined in imgIContainer.
   uint16_t mAnimationMode;

@@ -101,8 +101,8 @@ private:
   // Build a comma-separated list of tables to check
   void BuildTables(bool trackingProtectionEnabled, nsCString& tables);
 
-  nsRefPtr<nsUrlClassifierDBServiceWorker> mWorker;
-  nsRefPtr<UrlClassifierDBServiceWorkerProxy> mWorkerProxy;
+  RefPtr<nsUrlClassifierDBServiceWorker> mWorker;
+  RefPtr<UrlClassifierDBServiceWorkerProxy> mWorkerProxy;
 
   nsInterfaceHashtable<nsCStringHashKey, nsIUrlClassifierHashCompleter> mCompleters;
 
@@ -117,6 +117,14 @@ private:
   // TRUE if the nsURIClassifier implementation should check for tracking
   // uris on document loads.
   bool mCheckTracking;
+
+  // TRUE if the nsURIClassifier implementation should check for forbidden
+  // uris on document loads.
+  bool mCheckForbiddenURIs;
+
+  // TRUE if the nsURIClassifier implementation should check for blocked
+  // uris on document loads.
+  bool mCheckBlockedURIs;
 
   // TRUE if a BeginUpdate() has been called without an accompanying
   // CancelUpdate()/FinishUpdate().  This is used to prevent competing
@@ -207,6 +215,9 @@ private:
   // Entries that cannot be completed. We expect them to die at
   // the next update
   PrefixArray mMissCache;
+
+  // Stores the last results that triggered a table update.
+  CacheResultArray mLastResults;
 
   nsresult mUpdateStatus;
   nsTArray<nsCString> mUpdateTables;

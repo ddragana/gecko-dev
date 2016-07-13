@@ -14,7 +14,6 @@
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/layers/LayersMessages.h"  // for CanvasLayerAttributes, etc
 #include "mozilla/mozalloc.h"           // for operator delete
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsRegion.h"                   // for nsIntRegion
@@ -44,7 +43,7 @@ protected:
   virtual ~ClientCanvasLayer();
 
 public:
-  virtual void SetVisibleRegion(const nsIntRegion& aRegion) override
+  virtual void SetVisibleRegion(const LayerIntRegion& aRegion) override
   {
     NS_ASSERTION(ClientManager()->InConstruction(),
                  "Can only set properties in construction phase");
@@ -62,9 +61,16 @@ public:
     }
   }
 
+  virtual void HandleMemoryPressure() override
+  {
+    if (mCanvasClient) {
+      mCanvasClient->HandleMemoryPressure();
+    }
+  }
+
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs) override
   {
-    aAttrs = CanvasLayerAttributes(mFilter, mBounds);
+    aAttrs = CanvasLayerAttributes(mSamplingFilter, mBounds);
   }
 
   virtual Layer* AsLayer()  override { return this; }
@@ -97,7 +103,6 @@ protected:
 
   TextureFlags mFlags;
 
-  friend class DeprecatedCanvasClient2D;
   friend class CanvasClient2D;
   friend class CanvasClientSharedSurface;
 };

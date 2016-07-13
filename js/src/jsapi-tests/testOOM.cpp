@@ -22,13 +22,13 @@ virtual JSRuntime * createRuntime() override
     JSRuntime* rt = JS_NewRuntime(0);
     if (!rt)
         return nullptr;
-    JS_SetGCParameter(rt, JSGC_MAX_BYTES, (uint32_t)-1);
-    setNativeStackQuota(rt);
+    JS_SetGCParameter(JS_GetContext(rt), JSGC_MAX_BYTES, (uint32_t)-1);
+    setNativeStackQuota(JS_GetContext(rt));
     return rt;
 }
 END_TEST(testOOM)
 
-#ifdef DEBUG  // OOM_maxAllocations is only available in debug builds.
+#ifdef DEBUG  // js::oom functions are only available in debug builds.
 
 const uint32_t maxAllocsPerTest = 100;
 
@@ -36,18 +36,18 @@ const uint32_t maxAllocsPerTest = 100;
     testName = name;                                                          \
     printf("Test %s: started\n", testName);                                   \
     for (oomAfter = 1; oomAfter < maxAllocsPerTest; ++oomAfter) {             \
-        setOOMAfter(oomAfter)
+    js::oom::SimulateOOMAfter(oomAfter, js::oom::THREAD_TYPE_MAIN, true)
 
 #define OOM_TEST_FINISHED                                                     \
     {                                                                         \
-        printf("Test %s: finished with %d allocations\n",                     \
+        printf("Test %s: finished with %" PRIu64 " allocations\n",            \
                testName, oomAfter - 1);                                       \
         break;                                                                \
     }
 
 #define END_OOM_TEST                                                          \
     }                                                                         \
-    cancelOOMAfter();                                                         \
+    js::oom::ResetSimulatedOOM();                                             \
     CHECK(oomAfter != maxAllocsPerTest)
 
 BEGIN_TEST(testNewRuntime)
@@ -65,19 +65,7 @@ BEGIN_TEST(testNewRuntime)
 }
 
 const char* testName;
-uint32_t oomAfter;
-
-void
-setOOMAfter(uint32_t numAllocs)
-{
-    OOM_maxAllocations = OOM_counter + numAllocs;
-}
-
-void
-cancelOOMAfter()
-{
-    OOM_maxAllocations = UINT32_MAX;
-}
+uint64_t oomAfter;
 END_TEST(testNewRuntime)
 
 #endif

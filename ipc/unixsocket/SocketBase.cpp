@@ -125,6 +125,15 @@ UnixSocketRawData::UnixSocketRawData(const void* aData, size_t aSize)
               0, aSize, aSize);
 }
 
+UnixSocketRawData::UnixSocketRawData(UniquePtr<uint8_t[]> aData, size_t aSize)
+{
+  MOZ_ASSERT(aData || !aSize);
+
+  MOZ_COUNT_CTOR_INHERITED(UnixSocketRawData, UnixSocketIOBuffer);
+
+  ResetBuffer(aData.release(), 0, aSize, aSize);
+}
+
 UnixSocketRawData::UnixSocketRawData(size_t aSize)
 {
   MOZ_COUNT_CTOR_INHERITED(UnixSocketRawData, UnixSocketIOBuffer);
@@ -136,7 +145,7 @@ UnixSocketRawData::~UnixSocketRawData()
 {
   MOZ_COUNT_DTOR_INHERITED(UnixSocketRawData, UnixSocketIOBuffer);
 
-  nsAutoArrayPtr<uint8_t> data(GetBuffer());
+  UniquePtr<uint8_t[]> data(GetBuffer());
   ResetBuffer(nullptr, 0, 0, 0);
 }
 
@@ -317,7 +326,7 @@ SocketEventTask::~SocketEventTask()
   MOZ_COUNT_DTOR(SocketEventTask);
 }
 
-void
+NS_IMETHODIMP
 SocketEventTask::Run()
 {
   SocketIOBase* io = SocketTask<SocketIOBase>::GetIO();
@@ -327,7 +336,7 @@ SocketEventTask::Run()
   if (NS_WARN_IF(io->IsShutdownOnConsumerThread())) {
     // Since we've already explicitly closed and the close
     // happened before this, this isn't really an error.
-    return;
+    return NS_OK;
   }
 
   SocketBase* socketBase = io->GetSocketBase();
@@ -340,6 +349,8 @@ SocketEventTask::Run()
   } else if (mEvent == DISCONNECT) {
     socketBase->NotifyDisconnect();
   }
+
+  return NS_OK;
 }
 
 //
@@ -357,7 +368,7 @@ SocketRequestClosingTask::~SocketRequestClosingTask()
   MOZ_COUNT_DTOR(SocketRequestClosingTask);
 }
 
-void
+NS_IMETHODIMP
 SocketRequestClosingTask::Run()
 {
   SocketIOBase* io = SocketTask<SocketIOBase>::GetIO();
@@ -367,13 +378,15 @@ SocketRequestClosingTask::Run()
   if (NS_WARN_IF(io->IsShutdownOnConsumerThread())) {
     // Since we've already explicitly closed and the close
     // happened before this, this isn't really an error.
-    return;
+    return NS_OK;
   }
 
   SocketBase* socketBase = io->GetSocketBase();
   MOZ_ASSERT(socketBase);
 
   socketBase->Close();
+
+  return NS_OK;
 }
 
 //
@@ -391,10 +404,11 @@ SocketDeleteInstanceTask::~SocketDeleteInstanceTask()
   MOZ_COUNT_DTOR(SocketDeleteInstanceTask);
 }
 
-void
+NS_IMETHODIMP
 SocketDeleteInstanceTask::Run()
 {
-  mIO = nullptr; // delete instance
+  mIO.reset(); // delete instance
+  return NS_OK;
 }
 
 //
@@ -412,7 +426,7 @@ SocketIOShutdownTask::~SocketIOShutdownTask()
   MOZ_COUNT_DTOR(SocketIOShutdownTask);
 }
 
-void
+NS_IMETHODIMP
 SocketIOShutdownTask::Run()
 {
   SocketIOBase* io = SocketIOTask<SocketIOBase>::GetIO();
@@ -426,8 +440,9 @@ SocketIOShutdownTask::Run()
   // shut down, so we can send a message to the consumer thread to
   // delete |io| safely knowing that it's not reference any longer.
   io->ShutdownOnIOThread();
-  io->GetConsumerThread()->PostTask(FROM_HERE,
-                                    new SocketDeleteInstanceTask(io));
+  io->GetConsumerThread()->PostTask(
+    MakeAndAddRef<SocketDeleteInstanceTask>(io));
+  return NS_OK;
 }
 
 }

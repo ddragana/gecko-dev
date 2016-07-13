@@ -22,6 +22,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/Tokenizer.h"
 #include "nsIObserverService.h"
 #include "nsXULAppAPI.h"
 
@@ -47,7 +48,6 @@ nsDefaultURIFixup::~nsDefaultURIFixup()
 {
 }
 
-/* nsIURI createExposableURI (in nsIURI aURI); */
 NS_IMETHODIMP
 nsDefaultURIFixup::CreateExposableURI(nsIURI* aURI, nsIURI** aReturn)
 {
@@ -111,7 +111,6 @@ nsDefaultURIFixup::CreateExposableURI(nsIURI* aURI, nsIURI** aReturn)
   return NS_OK;
 }
 
-/* nsIURI createFixupURI (in nsAUTF8String aURIText, in unsigned long aFixupFlags); */
 NS_IMETHODIMP
 nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI,
                                   uint32_t aFixupFlags,
@@ -124,6 +123,35 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI,
 
   fixupInfo->GetPreferredURI(aURI);
   return rv;
+}
+
+// Returns true if the URL contains a user:password@ or user@
+static bool
+HasUserPassword(const nsACString& aStringURI)
+{
+  mozilla::Tokenizer parser(aStringURI);
+  mozilla::Tokenizer::Token token;
+
+  // May start with any of "protocol:", "protocol://",  "//", "://"
+  if (parser.Check(Tokenizer::TOKEN_WORD, token)) { // Skip protocol if any
+  }
+  if (parser.CheckChar(':')) { // Skip colon if found
+  }
+  while (parser.CheckChar('/')) { // Skip all of the following slashes
+  }
+
+  while (parser.Next(token)) {
+    if (token.Type() == Tokenizer::TOKEN_CHAR) {
+      if (token.AsChar() == '/') {
+        return false;
+      }
+      if (token.AsChar() == '@') {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 NS_IMETHODIMP
@@ -145,7 +173,7 @@ nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
 
   NS_ENSURE_TRUE(!uriString.IsEmpty(), NS_ERROR_FAILURE);
 
-  nsRefPtr<nsDefaultURIFixupInfo> info = new nsDefaultURIFixupInfo(uriString);
+  RefPtr<nsDefaultURIFixupInfo> info = new nsDefaultURIFixupInfo(uriString);
   NS_ADDREF(*aInfo = info);
 
   nsCOMPtr<nsIIOService> ioService =
@@ -194,45 +222,6 @@ nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
       info->mFixupChangedProtocol = true;
       return NS_OK;
     }
-
-#if defined(XP_WIN)
-    // Not a file URL, so translate '\' to '/' for convenience in the common
-    // protocols. E.g. catch
-    //
-    //   http:\\broken.com\address
-    //   http:\\broken.com/blah
-    //   broken.com\blah
-    //
-    // Code will also do partial fix up the following urls
-    //
-    //   http:\\broken.com\address/somewhere\image.jpg (stops at first forward slash)
-    //   http:\\broken.com\blah?arg=somearg\foo.jpg (stops at question mark)
-    //   http:\\broken.com#odd\ref (stops at hash)
-    //
-    if (scheme.IsEmpty() ||
-        scheme.LowerCaseEqualsLiteral("http") ||
-        scheme.LowerCaseEqualsLiteral("https") ||
-        scheme.LowerCaseEqualsLiteral("ftp")) {
-      // Walk the string replacing backslashes with forward slashes until
-      // the end is reached, or a question mark, or a hash, or a forward
-      // slash. The forward slash test is to stop before trampling over
-      // URIs which legitimately contain a mix of both forward and
-      // backward slashes.
-      nsAutoCString::iterator start;
-      nsAutoCString::iterator end;
-      uriString.BeginWriting(start);
-      uriString.EndWriting(end);
-      while (start != end) {
-        if (*start == '?' || *start == '#' || *start == '/') {
-          break;
-        }
-        if (*start == '\\') {
-          *start = '/';
-        }
-        ++start;
-      }
-    }
-#endif
   }
 
   if (!sInitializedPrefCaches) {
@@ -329,7 +318,14 @@ nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
       // It's more likely the user wants to search, and so we
       // chuck this over to their preferred search provider instead:
       if (!handlerExists) {
-        TryKeywordFixupForURIInfo(uriString, info, aPostData);
+        bool hasUserPassword = HasUserPassword(uriString);
+        if (!hasUserPassword) {
+          TryKeywordFixupForURIInfo(uriString, info, aPostData);
+        } else {
+          // If the given URL has a user:password we can't just pass it to the
+          // external protocol handler; we'll try using it with http instead later
+          info->mFixedURI = nullptr;
+        }
       }
     }
   }
@@ -406,7 +402,7 @@ nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
                                 nsIInputStream** aPostData,
                                 nsIURIFixupInfo** aInfo)
 {
-  nsRefPtr<nsDefaultURIFixupInfo> info = new nsDefaultURIFixupInfo(aKeyword);
+  RefPtr<nsDefaultURIFixupInfo> info = new nsDefaultURIFixupInfo(aKeyword);
   NS_ADDREF(*aInfo = info);
 
   if (aPostData) {
@@ -608,42 +604,6 @@ nsDefaultURIFixup::MakeAlternateURI(nsIURI* aURI)
   return true;
 }
 
-/**
- * Check if the host name starts with ftp\d*\. and it's not directly followed
- * by the tld.
- */
-bool
-nsDefaultURIFixup::IsLikelyFTP(const nsCString& aHostSpec)
-{
-  bool likelyFTP = false;
-  if (aHostSpec.EqualsIgnoreCase("ftp", 3)) {
-    nsACString::const_iterator iter;
-    nsACString::const_iterator end;
-    aHostSpec.BeginReading(iter);
-    aHostSpec.EndReading(end);
-    iter.advance(3); // move past the "ftp" part
-
-    while (iter != end) {
-      if (*iter == '.') {
-        // now make sure the name has at least one more dot in it
-        ++iter;
-        while (iter != end) {
-          if (*iter == '.') {
-            likelyFTP = true;
-            break;
-          }
-          ++iter;
-        }
-        break;
-      } else if (!nsCRT::IsAsciiDigit(*iter)) {
-        break;
-      }
-      ++iter;
-    }
-  }
-  return likelyFTP;
-}
-
 nsresult
 nsDefaultURIFixup::FileURIFixup(const nsACString& aStringURI, nsIURI** aURI)
 {
@@ -667,7 +627,7 @@ nsDefaultURIFixup::ConvertFileToStringURI(const nsACString& aIn,
 
 #if defined(XP_WIN)
   // Check for \ in the url-string or just a drive (PC)
-  if (kNotFound != aIn.FindChar('\\') ||
+  if (aIn.Contains('\\') ||
       (aIn.Length() == 2 && (aIn.Last() == ':' || aIn.Last() == '|'))) {
     attemptFixup = true;
   }
@@ -751,6 +711,7 @@ nsDefaultURIFixup::FixupURIProtocol(const nsACString& aURIString,
   //   ftp.no-scheme.com
   //   ftp4.no-scheme.com
   //   no-scheme.com/query?foo=http://www.foo.com
+  //   user:pass@no-scheme.com
   //
   int32_t schemeDelim = uriString.Find("://", 0);
   int32_t firstDelim = uriString.FindCharInSet("/:");
@@ -767,11 +728,7 @@ nsDefaultURIFixup::FixupURIProtocol(const nsACString& aURIString,
     uriString.Left(hostSpec, hostPos);
 
     // insert url spec corresponding to host name
-    if (IsLikelyFTP(hostSpec)) {
-      uriString.InsertLiteral("ftp://", 0);
-    } else {
-      uriString.InsertLiteral("http://", 0);
-    }
+    uriString.InsertLiteral("http://", 0);
     aFixupInfo->mFixupChangedProtocol = true;
   } // end if checkprotocol
 
@@ -1074,7 +1031,7 @@ nsDefaultURIFixup::KeywordURIFixup(const nsACString& aURIString,
 }
 
 bool
-nsDefaultURIFixup::IsDomainWhitelisted(const nsAutoCString aAsciiHost,
+nsDefaultURIFixup::IsDomainWhitelisted(const nsACString& aAsciiHost,
                                        const uint32_t aDotLoc)
 {
   if (sDNSFirstForSingleWords) {
@@ -1101,7 +1058,7 @@ nsDefaultURIFixup::IsDomainWhitelisted(const nsACString& aDomain,
                                        const uint32_t aDotLoc,
                                        bool* aResult)
 {
-  *aResult = IsDomainWhitelisted(nsAutoCString(aDomain), aDotLoc);
+  *aResult = IsDomainWhitelisted(aDomain, aDotLoc);
   return NS_OK;
 }
 

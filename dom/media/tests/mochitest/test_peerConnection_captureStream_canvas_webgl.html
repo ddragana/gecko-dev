@@ -31,9 +31,10 @@ runNetworkTest(() => {
   var canvas = document.createElement('canvas');
   canvas.id = 'source_canvas';
   canvas.width = canvas.height = 10;
+  canvas.style.display = 'none';
   document.getElementById('content').appendChild(canvas);
 
-  var gl = WebGLUtil.getWebGL(canvas.id, false, { preserveDrawingBuffer: true });
+  var gl = WebGLUtil.getWebGL(canvas.id, false);
   if (!gl) {
     todo(false, "WebGL unavailable.");
     networkTestFinished();
@@ -79,25 +80,30 @@ runNetworkTest(() => {
     function PC_LOCAL_CANVAS_CAPTURESTREAM(test) {
       test.pcLocal.canvasStream = canvas.captureStream(0.0);
       is(test.pcLocal.canvasStream.canvas, canvas, "Canvas attribute is correct");
-      test.pcLocal.attachMedia(test.pcLocal.canvasStream, 'video', 'local');
+      test.pcLocal.attachLocalStream(test.pcLocal.canvasStream);
     }
   ]);
   test.chain.append([
     function FIND_REMOTE_VIDEO() {
-      vremote = document.getElementById('pcRemote_remote1_video');
+      vremote = test.pcRemote.remoteMediaElements[0];
       ok(!!vremote, "Should have remote video element for pcRemote");
     },
     function WAIT_FOR_REMOTE_GREEN() {
-      return h.waitForPixel(vremote, h.green, 128, "pcRemote's remote should become green");
+      return h.waitForPixelColor(vremote, h.green, 128,
+                                 "pcRemote's remote should become green");
+    },
+    function REQUEST_FRAME(test) {
+      // After requesting a frame it will be captured at the time of next render.
+      // Next render will happen at next stable state, at the earliest,
+      // i.e., this order of `requestFrame(); draw();` should work.
+      test.pcLocal.canvasStream.requestFrame();
     },
     function DRAW_LOCAL_RED() {
       h.drawColor(canvas, h.red);
     },
-    function REQUEST_FRAME(test) {
-      test.pcLocal.canvasStream.requestFrame();
-    },
     function WAIT_FOR_REMOTE_RED() {
-      return h.waitForPixel(vremote, h.red, 128, "pcRemote's remote should become red");
+      return h.waitForPixelColor(vremote, h.red, 128,
+                                 "pcRemote's remote should become red");
     }
   ]);
   test.run();

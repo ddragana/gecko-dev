@@ -1,6 +1,6 @@
 "use strict";
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 const PREF_INTRO_COUNT = "privacy.trackingprotection.introCount";
 const PREF_TP_ENABLED = "privacy.trackingprotection.enabled";
 const BENIGN_PAGE = "http://tracking.example.org/browser/browser/base/content/test/general/benignPage.html";
@@ -8,7 +8,7 @@ const TRACKING_PAGE = "http://tracking.example.org/browser/browser/base/content/
 const TOOLTIP_PANEL = document.getElementById("UITourTooltip");
 const TOOLTIP_ANCHOR = document.getElementById("tracking-protection-icon");
 
-let {UrlClassifierTestUtils} = Cu.import("resource://testing-common/UrlClassifierTestUtils.jsm", {});
+var {UrlClassifierTestUtils} = Cu.import("resource://testing-common/UrlClassifierTestUtils.jsm", {});
 
 registerCleanupFunction(function() {
   UrlClassifierTestUtils.cleanupTestTrackers();
@@ -52,7 +52,7 @@ add_task(function* test_trackingPages() {
     is(Services.prefs.getIntPref(PREF_INTRO_COUNT), TrackingProtection.MAX_INTROS, "Check intro count increased");
 
     let step2URL = Services.urlFormatter.formatURLPref("privacy.trackingprotection.introURL") +
-                    "#step2";
+                   "?step=2&newtab=true";
     let buttons = document.getElementById("UITourTooltipButtons");
 
     info("Click the step text and nothing should happen");

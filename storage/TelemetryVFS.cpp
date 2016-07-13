@@ -78,10 +78,10 @@ public:
    * IOInterposer. Filename will be reported as NULL, and reference will be
    * either "sqlite-mainthread" or "sqlite-otherthread".
    */
-  explicit IOThreadAutoTimer(Telemetry::ID id,
+  explicit IOThreadAutoTimer(Telemetry::ID aId,
     IOInterposeObserver::Operation aOp = IOInterposeObserver::OpNone)
     : start(TimeStamp::Now()),
-      id(id),
+      id(aId),
       op(aOp)
   {
   }
@@ -138,7 +138,7 @@ struct telemetry_file {
   Histograms *histograms;
 
   // quota object for this file
-  nsRefPtr<QuotaObject> quotaObject;
+  RefPtr<QuotaObject> quotaObject;
 
   // The chunk size for this file. See the documentation for
   // sqlite3_file_control() and FCNTL_CHUNK_SIZE.
@@ -706,7 +706,7 @@ xDelete(sqlite3_vfs* vfs, const char *zName, int syncDir)
 {
   sqlite3_vfs *orig_vfs = static_cast<sqlite3_vfs*>(vfs->pAppData);
   int rc;
-  nsRefPtr<QuotaObject> quotaObject;
+  RefPtr<QuotaObject> quotaObject;
 
   if (StringEndsWith(nsDependentCString(zName), NS_LITERAL_CSTRING("-wal"))) {
     const char *zURIParameterKey = DatabasePathFromWALPath(zName);
@@ -886,6 +886,16 @@ sqlite3_vfs* ConstructTelemetryVFS()
     tvfs->xNextSystemCall = xNextSystemCall;
   }
   return tvfs;
+}
+
+already_AddRefed<QuotaObject>
+GetQuotaObjectForFile(sqlite3_file *pFile)
+{
+  MOZ_ASSERT(pFile);
+
+  telemetry_file *p = (telemetry_file *)pFile;
+  RefPtr<QuotaObject> result = p->quotaObject;
+  return result.forget();
 }
 
 } // namespace storage

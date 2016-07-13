@@ -4,11 +4,11 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import __main__
 import argparse
 import logging
 import mozpack.path as mozpath
 import os
-import which
 
 from mozbuild.base import (
     MachCommandBase,
@@ -19,17 +19,6 @@ from mach.decorators import (
     CommandProvider,
     Command,
 )
-
-
-ESLINT_NOT_FOUND_MESSAGE = '''
-Could not find eslint!  We looked at the --binary option, at the ESLINT
-environment variable, and then at your path.  Install eslint and needed plugins
-with
-
-npm install -g eslint eslint-plugin-react
-
-and try again.
-'''.strip()
 
 
 @CommandProvider
@@ -50,7 +39,7 @@ class MachCommands(MachCommandBase):
             append_env={b'PYTHONDONTWRITEBYTECODE': str('1')})
 
     @Command('python-test', category='testing',
-        description='Run Python unit tests.')
+        description='Run Python unit tests with an appropriate test runner.')
     @CommandArgument('--verbose',
         default=False,
         action='store_true',
@@ -59,53 +48,86 @@ class MachCommands(MachCommandBase):
         default=False,
         action='store_true',
         help='Stop running tests after the first error or failure.')
-    @CommandArgument('tests', nargs='+',
+    @CommandArgument('--path-only',
+        default=False,
+        action='store_true',
+        help=('Collect all tests under given path instead of default '
+              'test resolution. Supports pytest-style tests.'))
+    @CommandArgument('tests', nargs='*',
         metavar='TEST',
-        help='Tests to run. Each test can be a single file or a directory.')
-    def python_test(self, tests, verbose=False, stop=False):
+        help=('Tests to run. Each test can be a single file or a directory. '
+              'Default test resolution relies on PYTHON_UNIT_TESTS.'))
+    def python_test(self,
+                    tests=[],
+                    test_objects=None,
+                    subsuite=None,
+                    verbose=False,
+                    path_only=False,
+                    stop=False):
         self._activate_virtualenv()
-        import glob
+
+        def find_tests_by_path():
+            import glob
+            files = []
+            for t in tests:
+                if t.endswith('.py') and os.path.isfile(t):
+                    files.append(t)
+                elif os.path.isdir(t):
+                    for root, _, _ in os.walk(t):
+                        files += glob.glob(mozpath.join(root, 'test*.py'))
+                        files += glob.glob(mozpath.join(root, 'unit*.py'))
+                else:
+                    self.log(logging.WARN, 'python-test',
+                                 {'test': t},
+                                 'TEST-UNEXPECTED-FAIL | Invalid test: {test}')
+                    if stop:
+                        break
+            return files
 
         # Python's unittest, and in particular discover, has problems with
         # clashing namespaces when importing multiple test modules. What follows
         # is a simple way to keep environments separate, at the price of
-        # launching Python multiple times. This also runs tests via mozunit,
+        # launching Python multiple times. Most tests are run via mozunit,
         # which produces output in the format Mozilla infrastructure expects.
+        # Some tests are run via pytest, and these should be equipped with a
+        # local mozunit_report plugin to meet output expectations.
         return_code = 0
-        files = []
-        # We search for files in both the current directory (for people running
-        # from topsrcdir or cd'd into their test directory) and topsrcdir (to
-        # support people running mach from the objdir).  The |break|s in the
-        # loop below ensure that we don't run tests twice if we're running mach
-        # from topsrcdir
-        search_dirs = ['.', self.topsrcdir]
-        last_search_dir = search_dirs[-1]
-        for t in tests:
-            for d in search_dirs:
-                test = mozpath.join(d, t)
-                if test.endswith('.py') and os.path.isfile(test):
-                    files.append(test)
-                    break
-                elif os.path.isfile(test + '.py'):
-                    files.append(test + '.py')
-                    break
-                elif os.path.isdir(test):
-                    files += glob.glob(mozpath.join(test, 'test*.py'))
-                    files += glob.glob(mozpath.join(test, 'unit*.py'))
-                    break
-                elif d == last_search_dir:
-                    self.log(logging.WARN, 'python-test',
-                             {'test': t},
-                             'TEST-UNEXPECTED-FAIL | Invalid test: {test}')
-                    if stop:
-                        return 1
+        found_tests = False
+        if test_objects is None:
+            # If we're not being called from `mach test`, do our own
+            # test resolution.
+            if path_only:
+                if tests:
+                    self.virtualenv_manager.install_pip_package(
+                       'pytest==2.9.1'
+                    )
+                    test_objects = [{'path': p} for p in find_tests_by_path()]
+                else:
+                    self.log(logging.WARN, 'python-test', {},
+                             'TEST-UNEXPECTED-FAIL | No tests specified')
+                    test_objects = []
+            else:
+                from mozbuild.testing import TestResolver
+                resolver = self._spawn(TestResolver)
+                if tests:
+                    # If we were given test paths, try to find tests matching them.
+                    test_objects = resolver.resolve_tests(paths=tests,
+                                                          flavor='python')
+                else:
+                    # Otherwise just run everything in PYTHON_UNIT_TESTS
+                    test_objects = resolver.resolve_tests(flavor='python')
 
-        for f in files:
+        for test in test_objects:
+            found_tests = True
+            f = test['path']
             file_displayed_test = []  # Used as a boolean.
 
             def _line_handler(line):
-                if not file_displayed_test and line.startswith('TEST-'):
-                    file_displayed_test.append(True)
+                if not file_displayed_test:
+                    output = ('Ran' in line or 'collected' in line or
+                              line.startswith('TEST-'))
+                    if output:
+                        file_displayed_test.append(True)
 
             inner_return_code = self.run_process(
                 [self.virtualenv_manager.python_path, f],
@@ -130,55 +152,12 @@ class MachCommands(MachCommandBase):
             if stop and return_code > 0:
                 return 1
 
-        return 0 if return_code == 0 else 1
-
-    @Command('eslint', category='devenv')
-    @CommandArgument('path', nargs='?', default='.',
-        help='Path to files to lint, like "browser/components/loop" '
-            'or "mobile/android". '
-            'Defaults to the current directory if not given.')
-    @CommandArgument('-e', '--ext', default='[.js,.jsm,.jsx]',
-        help='Filename extensions to lint, default: "[.js,.jsm,.jsx]".')
-    @CommandArgument('-b', '--binary', default=None,
-        help='Path to eslint binary.')
-    @CommandArgument('args', nargs=argparse.REMAINDER)  # Passed through to eslint.
-    def eslint(self, path, ext=None, binary=None, args=[]):
-        '''Run eslint.'''
-
-        if not binary:
-            binary = os.environ.get('ESLINT', None)
-            if not binary:
-                try:
-                    binary = which.which('eslint')
-                except which.WhichError:
-                    pass
-
-        if not binary:
-            print(ESLINT_NOT_FOUND_MESSAGE)
+        if not found_tests:
+            message = 'TEST-UNEXPECTED-FAIL | No tests collected'
+            if not path_only:
+                 message += ' (Not in PYTHON_UNIT_TESTS? Try --path-only?)'
+            self.log(logging.WARN, 'python-test', {}, message)
             return 1
 
-        # The cwd below is unfortunate.  eslint --config=PATH/TO/.eslintrc works,
-        # but --ignore-path=PATH/TO/.eslintignore treats paths as relative to
-        # the current directory, rather than as relative to the location of
-        # .eslintignore (see https://github.com/eslint/eslint/issues/1382).
-        # mach commands always execute in the topsrcdir, so we could make all
-        # paths in .eslint relative to the topsrcdir, but it's not clear if
-        # that's a good choice for future eslint and IDE integrations.
-        # Unfortunately, running after chdir does not print the full path to
-        # files (convenient for opening with copy-and-paste).  In the meantime,
-        # we just print the active path.
+        return 0 if return_code == 0 else 1
 
-        self.log(logging.INFO, 'eslint', {'binary': binary, 'path': path},
-            'Running {binary} in {path}')
-
-        cmd_args = [binary,
-            '--ext', ext,  # This keeps ext as a single argument.
-        ] + args
-        # Path must come after arguments.  Path is '.' due to cwd below.
-        cmd_args += ['.']
-
-        return self.run_process(cmd_args,
-            cwd=path,
-            pass_thru=True,  # Allow user to run eslint interactively.
-            ensure_exit_code=False,  # Don't throw on non-zero exit code.
-        )

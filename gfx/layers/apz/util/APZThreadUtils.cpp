@@ -53,33 +53,44 @@ APZThreadUtils::AssertOnCompositorThread()
 }
 
 /*static*/ void
-APZThreadUtils::RunOnControllerThread(Task* aTask)
+APZThreadUtils::RunOnControllerThread(already_AddRefed<Runnable> aTask)
 {
+  RefPtr<Runnable> task = aTask;
+
 #ifdef MOZ_ANDROID_APZ
   // This is needed while nsWindow::ConfigureAPZControllerThread is not propper
   // implemented.
   if (AndroidBridge::IsJavaUiThread()) {
-    aTask->Run();
-    delete aTask;
+    task->Run();
   } else {
-    AndroidBridge::Bridge()->PostTaskToUiThread(aTask, 0);
+    AndroidBridge::Bridge()->PostTaskToUiThread(task.forget(), 0);
   }
 #else
   if (!sControllerThread) {
     // Could happen on startup
     NS_WARNING("Dropping task posted to controller thread");
-    delete aTask;
     return;
   }
 
   if (sControllerThread == MessageLoop::current()) {
-    aTask->Run();
-    delete aTask;
+    task->Run();
   } else {
-    sControllerThread->PostTask(FROM_HERE, aTask);
+    sControllerThread->PostTask(task.forget());
   }
 #endif
 }
+
+/*static*/ bool
+APZThreadUtils::IsControllerThread()
+{
+#ifdef MOZ_ANDROID_APZ
+  return AndroidBridge::IsJavaUiThread();
+#else
+  return sControllerThread == MessageLoop::current();
+#endif
+}
+
+NS_IMPL_ISUPPORTS(GenericTimerCallbackBase, nsITimerCallback)
 
 } // namespace layers
 } // namespace mozilla

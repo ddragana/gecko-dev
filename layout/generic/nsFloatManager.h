@@ -101,7 +101,6 @@ public:
    * Translate the current origin by the specified offsets. This
    * creates a new local coordinate space relative to the current
    * coordinate space.
-   * @returns previous writing mode
    */
   void Translate(nscoord aLineLeft, nscoord aBlockStart)
   {
@@ -209,10 +208,6 @@ public:
    */
   nsresult RemoveTrailingRegions(nsIFrame* aFrameList);
 
-private:
-  struct FloatInfo;
-public:
-
   bool HasAnyFloats() const { return !mFloats.IsEmpty(); }
 
   /**
@@ -224,15 +219,13 @@ public:
     return !mFloatDamage.IsEmpty();
   }
 
-  void IncludeInDamage(mozilla::WritingMode aWM,
-                       nscoord aIntervalBegin, nscoord aIntervalEnd)
+  void IncludeInDamage(nscoord aIntervalBegin, nscoord aIntervalEnd)
   {
     mFloatDamage.IncludeInterval(aIntervalBegin + mBlockStart,
                                  aIntervalEnd + mBlockStart);
   }
 
-  bool IntersectsDamage(mozilla::WritingMode aWM,
-                        nscoord aIntervalBegin, nscoord aIntervalEnd) const
+  bool IntersectsDamage(nscoord aIntervalBegin, nscoord aIntervalEnd) const
   {
     return mFloatDamage.Intersects(aIntervalBegin + mBlockStart,
                                    aIntervalEnd + mBlockStart);
@@ -245,7 +238,7 @@ public:
 
   /**
    * Restores the float manager to the saved state.
-   * 
+   *
    * These states must be managed using stack discipline. PopState can only
    * be used after PushState has been used to save the state, and it can only
    * be used once --- although it can be omitted; saved states can be ignored.
@@ -332,7 +325,6 @@ private:
     ~FloatInfo();
 #endif
 
-  private:
     // NB! This is really a logical rect in a writing mode suitable for
     // placing floats, which is not necessarily the actual writing mode
     // either of the block which created the frame manager or the block
@@ -342,7 +334,9 @@ private:
     nsRect mRect;
   };
 
-  mozilla::DebugOnly<mozilla::WritingMode> mWritingMode;
+#ifdef DEBUG
+  mozilla::WritingMode mWritingMode;
+#endif
 
   // Translation from local to global coordinate space.
   nscoord mLineLeft, mBlockStart;

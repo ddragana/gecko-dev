@@ -11,7 +11,7 @@ const SCHEDULE_UPDATE_TIMEOUT_MS = 1000;
  * This singleton represents the whole 'New Tab Page' and takes care of
  * initializing all its components.
  */
-let gPage = {
+var gPage = {
   /**
    * Initializes the page.
    */
@@ -36,9 +36,6 @@ let gPage = {
 
     // Initialize customize controls.
     gCustomize.init();
-
-    // Initialize intro panel.
-    gIntro.init();
   },
 
   /**
@@ -54,7 +51,6 @@ let gPage = {
       // Update thumbnails to the new enhanced setting
       if (aData == "browser.newtabpage.enhanced") {
         this.update();
-        gIntro.showIfNecessary();
       }
 
       // Initialize the whole page if we haven't done that, yet.
@@ -171,7 +167,7 @@ let gPage = {
     gAllPages.unregister(this);
     // compute page life-span and send telemetry probe: using milli-seconds will leave
     // many low buckets empty. Instead we use half-second precision to make low end
-    // of histogram linear and not loose the change in user attention
+    // of histogram linear and not lose the change in user attention
     let delta = Math.round((Date.now() - this._firstVisibleTime) / 500);
     if (this._suggestedTilePresent) {
       Services.telemetry.getHistogramById("NEWTAB_PAGE_LIFE_SPAN_SUGGESTED").add(delta);
@@ -255,9 +251,6 @@ let gPage = {
   onPageVisibleAndLoaded() {
     // Send the index of the last visible tile.
     this.reportLastVisibleTileIndex();
-
-    // Show the panel now that anchors are sized
-    gIntro.showIfNecessary();
   },
 
   reportLastVisibleTileIndex() {

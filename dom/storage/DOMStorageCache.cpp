@@ -11,6 +11,7 @@
 #include "DOMStorageIPC.h"
 #include "DOMStorageManager.h"
 
+#include "nsAutoPtr.h"
 #include "nsDOMString.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/unused.h"
@@ -76,8 +77,8 @@ NS_IMETHODIMP_(void) DOMStorageCacheBridge::Release(void)
 
 // DOMStorageCache
 
-DOMStorageCache::DOMStorageCache(const nsACString* aScope)
-: mScope(*aScope)
+DOMStorageCache::DOMStorageCache(const nsACString* aOriginNoSuffix)
+: mOriginNoSuffix(*aOriginNoSuffix)
 , mMonitor("DOMStorageCache")
 , mLoaded(false)
 , mLoadResult(NS_OK)
@@ -109,9 +110,9 @@ DOMStorageCache::Release(void)
     return;
   }
 
-  nsRefPtr<nsRunnableMethod<DOMStorageCacheBridge, void, false> > event =
-    NS_NewNonOwningRunnableMethod(static_cast<DOMStorageCacheBridge*>(this),
-                                  &DOMStorageCacheBridge::Release);
+  RefPtr<nsRunnableMethod<DOMStorageCacheBridge, void, false> > event =
+    NewNonOwningRunnableMethod(static_cast<DOMStorageCacheBridge*>(this),
+                               &DOMStorageCacheBridge::Release);
 
   nsresult rv = NS_DispatchToMainThread(event);
   if (NS_FAILED(rv)) {
@@ -124,7 +125,7 @@ void
 DOMStorageCache::Init(DOMStorageManager* aManager,
                       bool aPersistent,
                       nsIPrincipal* aPrincipal,
-                      const nsACString& aQuotaScope)
+                      const nsACString& aQuotaOriginScope)
 {
   if (mInitialized) {
     return;
@@ -132,15 +133,26 @@ DOMStorageCache::Init(DOMStorageManager* aManager,
 
   mInitialized = true;
   mPrincipal = aPrincipal;
+  BasePrincipal::Cast(aPrincipal)->OriginAttributesRef().CreateSuffix(mOriginSuffix);
   mPersistent = aPersistent;
-  mQuotaScope = aQuotaScope.IsEmpty() ? mScope : aQuotaScope;
+  if (aQuotaOriginScope.IsEmpty()) {
+    mQuotaOriginScope = Origin();
+  } else {
+    mQuotaOriginScope = aQuotaOriginScope;
+  }
 
   if (mPersistent) {
     mManager = aManager;
     Preload();
   }
 
-  mUsage = aManager->GetScopeUsage(mQuotaScope);
+  // Check the quota string has (or has not) the identical origin suffix as
+  // this storage cache is bound to.
+  MOZ_ASSERT(StringBeginsWith(mQuotaOriginScope, mOriginSuffix));
+  MOZ_ASSERT(mOriginSuffix.IsEmpty() != StringBeginsWith(mQuotaOriginScope, 
+                                                         NS_LITERAL_CSTRING("^")));
+
+  mUsage = aManager->GetOriginUsage(mQuotaOriginScope);
 }
 
 inline bool
@@ -151,18 +163,11 @@ DOMStorageCache::Persist(const DOMStorage* aStorage) const
          !aStorage->IsPrivate();
 }
 
-namespace {
-
-PLDHashOperator
-CloneSetData(const nsAString& aKey, const nsString aValue, void* aArg)
+const nsCString
+DOMStorageCache::Origin() const
 {
-  DOMStorageCache::Data* target = static_cast<DOMStorageCache::Data*>(aArg);
-  target->mKeys.Put(aKey, aValue);
-
-  return PL_DHASH_NEXT;
+  return DOMStorageManager::CreateOrigin(mOriginSuffix, mOriginNoSuffix);
 }
-
-} // namespace
 
 DOMStorageCache::Data&
 DOMStorageCache::DataSet(const DOMStorage* aStorage)
@@ -178,7 +183,9 @@ DOMStorageCache::DataSet(const DOMStorage* aStorage)
     Data& defaultSet = mData[kDefaultSet];
     Data& sessionSet = mData[kSessionSet];
 
-    defaultSet.mKeys.EnumerateRead(CloneSetData, &sessionSet);
+    for (auto iter = defaultSet.mKeys.Iter(); !iter.Done(); iter.Next()) {
+      sessionSet.mKeys.Put(iter.Key(), iter.UserData());
+    }
 
     mSessionOnlyDataSetActive = true;
 
@@ -254,7 +261,7 @@ class DOMStorageCacheHolder : public nsITimerCallback
     return NS_OK;
   }
 
-  nsRefPtr<DOMStorageCache> mCache;
+  RefPtr<DOMStorageCache> mCache;
 
 public:
   explicit DOMStorageCacheHolder(DOMStorageCache* aCache) : mCache(aCache) {}
@@ -275,10 +282,7 @@ DOMStorageCache::KeepAlive()
 
   if (!NS_IsMainThread()) {
     // Timer and the holder must be initialized on the main thread.
-    nsRefPtr<nsRunnableMethod<DOMStorageCache> > event =
-      NS_NewRunnableMethod(this, &DOMStorageCache::KeepAlive);
-
-    NS_DispatchToMainThread(event);
+    NS_DispatchToMainThread(NewRunnableMethod(this, &DOMStorageCache::KeepAlive));
     return;
   }
 
@@ -287,7 +291,7 @@ DOMStorageCache::KeepAlive()
     return;
   }
 
-  nsRefPtr<DOMStorageCacheHolder> holder = new DOMStorageCacheHolder(this);
+  RefPtr<DOMStorageCacheHolder> holder = new DOMStorageCacheHolder(this);
   timer->InitWithCallback(holder, DOM_STORAGE_CACHE_KEEP_ALIVE_TIME_MS,
                           nsITimer::TYPE_ONE_SHOT);
 
@@ -363,36 +367,6 @@ DOMStorageCache::GetLength(const DOMStorage* aStorage, uint32_t* aRetval)
   return NS_OK;
 }
 
-namespace {
-
-class IndexFinderData
-{
-public:
-  IndexFinderData(uint32_t aIndex, nsAString& aRetval)
-    : mIndex(aIndex), mKey(aRetval)
-  {
-    mKey.SetIsVoid(true);
-  }
-
-  uint32_t mIndex;
-  nsAString& mKey;
-};
-
-PLDHashOperator
-FindKeyOrder(const nsAString& aKey, const nsString aValue, void* aArg)
-{
-  IndexFinderData* data = static_cast<IndexFinderData*>(aArg);
-
-  if (data->mIndex--) {
-    return PL_DHASH_NEXT;
-  }
-
-  data->mKey = aKey;
-  return PL_DHASH_STOP;
-}
-
-} // namespace
-
 nsresult
 DOMStorageCache::GetKey(const DOMStorage* aStorage, uint32_t aIndex, nsAString& aRetval)
 {
@@ -407,23 +381,17 @@ DOMStorageCache::GetKey(const DOMStorage* aStorage, uint32_t aIndex, nsAString& 
     }
   }
 
-  IndexFinderData data(aIndex, aRetval);
-  DataSet(aStorage).mKeys.EnumerateRead(FindKeyOrder, &data);
+  aRetval.SetIsVoid(true);
+  for (auto iter = DataSet(aStorage).mKeys.Iter(); !iter.Done(); iter.Next()) {
+    if (aIndex == 0) {
+      aRetval = iter.Key();
+      break;
+    }
+    aIndex--;
+  }
+
   return NS_OK;
 }
-
-namespace {
-
-static PLDHashOperator
-KeysArrayBuilder(const nsAString& aKey, const nsString aValue, void* aArg)
-{
-  nsTArray<nsString>* keys = static_cast<nsTArray<nsString>* >(aArg);
-
-  keys->AppendElement(aKey);
-  return PL_DHASH_NEXT;
-}
-
-} // namespace
 
 void
 DOMStorageCache::GetKeys(const DOMStorage* aStorage, nsTArray<nsString>& aKeys)
@@ -436,7 +404,9 @@ DOMStorageCache::GetKeys(const DOMStorage* aStorage, nsTArray<nsString>& aKeys)
     return;
   }
 
-  DataSet(aStorage).mKeys.EnumerateRead(KeysArrayBuilder, &aKeys);
+  for (auto iter = DataSet(aStorage).mKeys.Iter(); !iter.Done(); iter.Next()) {
+    aKeys.AppendElement(iter.Key());
+  }
 }
 
 nsresult
@@ -465,6 +435,9 @@ nsresult
 DOMStorageCache::SetItem(const DOMStorage* aStorage, const nsAString& aKey,
                          const nsString& aValue, nsString& aOld)
 {
+  // Size of the cache that will change after this action.
+  int64_t delta = 0;
+
   if (Persist(aStorage)) {
     WaitForPreload(Telemetry::LOCALDOMSTORAGE_SETVALUE_BLOCKING_MS);
     if (NS_FAILED(mLoadResult)) {
@@ -475,11 +448,14 @@ DOMStorageCache::SetItem(const DOMStorage* aStorage, const nsAString& aKey,
   Data& data = DataSet(aStorage);
   if (!data.mKeys.Get(aKey, &aOld)) {
     SetDOMStringToNull(aOld);
+
+    // We only consider key size if the key doesn't exist before.
+    delta += static_cast<int64_t>(aKey.Length());
   }
 
-  // Check the quota first
-  const int64_t delta = static_cast<int64_t>(aValue.Length()) -
-                        static_cast<int64_t>(aOld.Length());
+  delta += static_cast<int64_t>(aValue.Length()) -
+           static_cast<int64_t>(aOld.Length());
+
   if (!ProcessUsageDelta(aStorage, delta)) {
     return NS_ERROR_DOM_QUOTA_REACHED;
   }
@@ -525,8 +501,9 @@ DOMStorageCache::RemoveItem(const DOMStorage* aStorage, const nsAString& aKey,
   }
 
   // Recalculate the cached data size
-  const int64_t delta = -(static_cast<int64_t>(aOld.Length()));
-  unused << ProcessUsageDelta(aStorage, delta);
+  const int64_t delta = -(static_cast<int64_t>(aOld.Length()) +
+                          static_cast<int64_t>(aKey.Length()));
+  Unused << ProcessUsageDelta(aStorage, delta);
   data.mKeys.Remove(aKey);
 
   if (Persist(aStorage)) {
@@ -565,7 +542,7 @@ DOMStorageCache::Clear(const DOMStorage* aStorage)
   bool hadData = !!data.mKeys.Count();
 
   if (hadData) {
-    unused << ProcessUsageDelta(aStorage, -data.mOriginQuotaUsage);
+    Unused << ProcessUsageDelta(aStorage, -data.mOriginQuotaUsage);
     data.mKeys.Clear();
   }
 
@@ -585,13 +562,22 @@ DOMStorageCache::Clear(const DOMStorage* aStorage)
 void
 DOMStorageCache::CloneFrom(const DOMStorageCache* aThat)
 {
-  mLoaded = aThat->mLoaded;
+  // This will never be called on anything else than SessionStorage.
+  // This means mData will never be touched on any other thread than
+  // the main thread and it never went through the loading process.
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mPersistent);
+  MOZ_ASSERT(!(bool)aThat->mLoaded);
+
+  mLoaded = false;
   mInitialized = aThat->mInitialized;
-  mPersistent = aThat->mPersistent;
+  mPersistent = false;
   mSessionOnlyDataSetActive = aThat->mSessionOnlyDataSetActive;
 
   for (uint32_t i = 0; i < kDataSetCount; ++i) {
-    aThat->mData[i].mKeys.EnumerateRead(CloneSetData, &mData[i]);
+    for (auto it = aThat->mData[i].mKeys.ConstIter(); !it.Done(); it.Next()) {
+      mData[i].mKeys.Put(it.Key(), it.UserData());
+    }
     ProcessUsageDelta(i, aThat->mData[i].mOriginQuotaUsage);
   }
 }
@@ -694,15 +680,15 @@ DOMStorageCache::LoadWait()
 
 // DOMStorageUsage
 
-DOMStorageUsage::DOMStorageUsage(const nsACString& aScope)
-  : mScope(aScope)
+DOMStorageUsage::DOMStorageUsage(const nsACString& aOriginScope)
+  : mOriginScope(aOriginScope)
 {
   mUsage[kDefaultSet] = mUsage[kPrivateSet] = mUsage[kSessionSet] = 0LL;
 }
 
 namespace {
 
-class LoadUsageRunnable : public nsRunnable
+class LoadUsageRunnable : public Runnable
 {
 public:
   LoadUsageRunnable(int64_t* aUsage, const int64_t aDelta)
@@ -726,7 +712,7 @@ DOMStorageUsage::LoadUsage(const int64_t aUsage)
   // stored in the database we have just loaded usage for.
   if (!NS_IsMainThread()) {
     // In single process scenario we get this call from the DB thread
-    nsRefPtr<LoadUsageRunnable> r =
+    RefPtr<LoadUsageRunnable> r =
       new LoadUsageRunnable(mUsage + kDefaultSet, aUsage);
     NS_DispatchToMainThread(r);
   } else {
@@ -774,7 +760,7 @@ DOMStorageCache::StartDatabase()
     // Use DOMLocalStorageManager::Ensure in case we're called from
     // DOMSessionStorageManager's initializer and we haven't yet initialized the
     // local storage manager.
-    nsRefPtr<DOMStorageDBChild> db = new DOMStorageDBChild(
+    RefPtr<DOMStorageDBChild> db = new DOMStorageDBChild(
         DOMLocalStorageManager::Ensure());
 
     nsresult rv = db->Init();

@@ -33,10 +33,9 @@ public:
 protected:
   // Accessible
   virtual ENameValueFlag NativeName(nsString& aName) override;
-  virtual void CacheChildren() override;
 
 private:
-  nsRefPtr<XULLabelTextLeafAccessible> mValueTextLeaf;
+  RefPtr<XULLabelTextLeafAccessible> mValueTextLeaf;
 };
 
 inline XULLabelAccessible*

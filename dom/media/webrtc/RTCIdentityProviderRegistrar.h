@@ -6,7 +6,7 @@
 #ifndef RTCIDENTITYPROVIDER_H_
 #define RTCIDENTITYPROVIDER_H_
 
-#include "nsRefPtr.h"
+#include "mozilla/RefPtr.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsImpl.h"
 #include "nsIGlobalObject.h"
@@ -14,11 +14,12 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/RTCIdentityProviderBinding.h"
 
 namespace mozilla {
 namespace dom {
 
-class RTCIdentityProvider;
+struct RTCIdentityProvider;
 
 class RTCIdentityProviderRegistrar final : public nsISupports,
                                            public nsWrapperCache
@@ -33,9 +34,9 @@ public:
   nsIGlobalObject* GetParentObject() const;
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  // setter and getter
-  void Register(RTCIdentityProvider& aIdp);
-  already_AddRefed<RTCIdentityProvider> GetIdp();
+  // setter and checker
+  void Register(const RTCIdentityProvider& aIdp);
+  bool HasIdp() const;
 
   already_AddRefed<Promise>
   GenerateAssertion(const nsAString& aContents, const nsAString& aOrigin,
@@ -48,7 +49,8 @@ private:
   ~RTCIdentityProviderRegistrar();
 
   nsCOMPtr<nsIGlobalObject> mGlobal;
-  nsRefPtr<RTCIdentityProvider> mIdp;
+  RefPtr<GenerateAssertionCallback> mGenerateAssertionCallback;
+  RefPtr<ValidateAssertionCallback> mValidateAssertionCallback;
 };
 
 } // namespace dom

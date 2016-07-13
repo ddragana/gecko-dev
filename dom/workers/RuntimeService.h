@@ -17,7 +17,7 @@
 #include "nsTArray.h"
 
 class nsITimer;
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 BEGIN_WORKERS_NAMESPACE
 
@@ -42,48 +42,25 @@ class RuntimeService final : public nsIObserver
   struct WorkerDomainInfo
   {
     nsCString mDomain;
-    nsTArray<WorkerPrivate*> mActiveWorkers;
-    nsTArray<WorkerPrivate*> mActiveServiceWorkers;
-    nsTArray<WorkerPrivate*> mQueuedWorkers;
+    nsTArray<WorkerPrivate*> mWorkers;
+    nsTArray<WorkerPrivate*> mServiceWorkers;
     nsClassHashtable<nsCStringHashKey, SharedWorkerInfo> mSharedWorkerInfos;
     uint32_t mChildWorkerCount;
 
     WorkerDomainInfo()
-    : mActiveWorkers(1), mChildWorkerCount(0)
+    : mWorkers(1), mChildWorkerCount(0)
     { }
-
-    uint32_t
-    ActiveWorkerCount() const
-    {
-      return mActiveWorkers.Length() +
-             mChildWorkerCount;
-    }
-
-    uint32_t
-    ActiveServiceWorkerCount() const
-    {
-      return mActiveServiceWorkers.Length();
-    }
 
     bool
     HasNoWorkers() const
     {
-      return ActiveWorkerCount() == 0 &&
-             ActiveServiceWorkerCount() == 0;
+      return mWorkers.IsEmpty() &&
+             mServiceWorkers.IsEmpty() &&
+             !mChildWorkerCount;
     }
   };
 
   struct IdleThreadInfo;
-
-  struct MatchSharedWorkerInfo
-  {
-    WorkerPrivate* mWorkerPrivate;
-    SharedWorkerInfo* mSharedWorkerInfo;
-
-    explicit MatchSharedWorkerInfo(WorkerPrivate* aWorkerPrivate)
-    : mWorkerPrivate(aWorkerPrivate), mSharedWorkerInfo(nullptr)
-    { }
-  };
 
   mozilla::Mutex mMutex;
 
@@ -94,7 +71,7 @@ class RuntimeService final : public nsIObserver
   nsTArray<IdleThreadInfo> mIdleThreadArray;
 
   // *Not* protected by mMutex.
-  nsClassHashtable<nsPtrHashKey<nsPIDOMWindow>,
+  nsClassHashtable<nsPtrHashKey<nsPIDOMWindowInner>,
                    nsTArray<WorkerPrivate*> > mWindowMap;
 
   // Only used on the main thread.
@@ -134,40 +111,35 @@ public:
   GetService();
 
   bool
-  RegisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate);
+  RegisterWorker(WorkerPrivate* aWorkerPrivate);
 
   void
-  UnregisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate);
+  UnregisterWorker(WorkerPrivate* aWorkerPrivate);
 
   void
-  CancelWorkersForWindow(nsPIDOMWindow* aWindow);
+  RemoveSharedWorker(WorkerDomainInfo* aDomainInfo,
+                     WorkerPrivate* aWorkerPrivate);
 
   void
-  FreezeWorkersForWindow(nsPIDOMWindow* aWindow);
+  CancelWorkersForWindow(nsPIDOMWindowInner* aWindow);
 
   void
-  ThawWorkersForWindow(nsPIDOMWindow* aWindow);
+  FreezeWorkersForWindow(nsPIDOMWindowInner* aWindow);
+
+  void
+  ThawWorkersForWindow(nsPIDOMWindowInner* aWindow);
+
+  void
+  SuspendWorkersForWindow(nsPIDOMWindowInner* aWindow);
+
+  void
+  ResumeWorkersForWindow(nsPIDOMWindowInner* aWindow);
 
   nsresult
   CreateSharedWorker(const GlobalObject& aGlobal,
                      const nsAString& aScriptURL,
                      const nsACString& aName,
-                     SharedWorker** aSharedWorker)
-  {
-    return CreateSharedWorkerInternal(aGlobal, aScriptURL, aName,
-                                      WorkerTypeShared, aSharedWorker);
-  }
-
-  nsresult
-  CreateSharedWorkerForServiceWorkerFromLoadInfo(JSContext* aCx,
-                                                 WorkerLoadInfo* aLoadInfo,
-                                                 const nsAString& aScriptURL,
-                                                 const nsACString& aScope,
-                                                 SharedWorker** aSharedWorker)
-  {
-    return CreateSharedWorkerFromLoadInfo(aCx, aLoadInfo, aScriptURL, aScope,
-                                          WorkerTypeService, aSharedWorker);
-  }
+                     SharedWorker** aSharedWorker);
 
   void
   ForgetSharedWorker(WorkerPrivate* aWorkerPrivate);
@@ -196,10 +168,10 @@ public:
   }
 
   static void
-  SetDefaultRuntimeOptions(const JS::RuntimeOptions& aRuntimeOptions)
+  SetDefaultContextOptions(const JS::ContextOptions& aContextOptions)
   {
     AssertIsOnMainThread();
-    sDefaultJSSettings.runtimeOptions = aRuntimeOptions;
+    sDefaultJSSettings.contextOptions = aContextOptions;
   }
 
   void
@@ -212,7 +184,7 @@ public:
   UpdatePlatformOverridePreference(const nsAString& aValue);
 
   void
-  UpdateAllWorkerRuntimeOptions();
+  UpdateAllWorkerContextOptions();
 
   void
   UpdateAllWorkerLanguages(const nsTArray<nsString>& aLanguages);
@@ -264,6 +236,11 @@ public:
   void
   SendOfflineStatusChangeEventToAllWorkers(bool aIsOffline);
 
+  void
+  MemoryPressureAllWorkers();
+
+  uint32_t ClampedHardwareConcurrency() const;
+
 private:
   RuntimeService();
   ~RuntimeService();
@@ -277,27 +254,15 @@ private:
   void
   Cleanup();
 
-  static PLDHashOperator
-  AddAllTopLevelWorkersToArray(const nsACString& aKey,
-                               WorkerDomainInfo* aData,
-                               void* aUserArg);
-
-  static PLDHashOperator
-  RemoveSharedWorkerFromWindowMap(nsPIDOMWindow* aKey,
-                                  nsAutoPtr<nsTArray<WorkerPrivate*> >& aData,
-                                  void* aUserArg);
-
-  static PLDHashOperator
-  FindSharedWorkerInfo(const nsACString& aKey,
-                       SharedWorkerInfo* aData,
-                       void* aUserArg);
+  void
+  AddAllTopLevelWorkersToArray(nsTArray<WorkerPrivate*>& aWorkers);
 
   void
-  GetWorkersForWindow(nsPIDOMWindow* aWindow,
+  GetWorkersForWindow(nsPIDOMWindowInner* aWindow,
                       nsTArray<WorkerPrivate*>& aWorkers);
 
   bool
-  ScheduleWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate);
+  ScheduleWorker(WorkerPrivate* aWorkerPrivate);
 
   static void
   ShutdownIdleThreads(nsITimer* aTimer, void* aClosure);
@@ -309,18 +274,10 @@ private:
   JSVersionChanged(const char* aPrefName, void* aClosure);
 
   nsresult
-  CreateSharedWorkerInternal(const GlobalObject& aGlobal,
-                             const nsAString& aScriptURL,
-                             const nsACString& aName,
-                             WorkerType aType,
-                             SharedWorker** aSharedWorker);
-
-  nsresult
   CreateSharedWorkerFromLoadInfo(JSContext* aCx,
                                  WorkerLoadInfo* aLoadInfo,
                                  const nsAString& aScriptURL,
                                  const nsACString& aName,
-                                 WorkerType aType,
                                  SharedWorker** aSharedWorker);
 };
 

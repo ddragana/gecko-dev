@@ -22,6 +22,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Prefetcher",
 XPCOMUtils.defineLazyModuleGetter(this, "CompatWarning",
                                   "resource://gre/modules/CompatWarning.jsm");
 
+Cu.permitCPOWsInScope(this);
+
 // Similar to Python. Returns dict[key] if it exists. Otherwise,
 // sets dict[key] to default_ and returns default_.
 function setDefault(dict, key, default_)
@@ -39,7 +41,7 @@ function setDefault(dict, key, default_)
 // children can request the current set of paths. The purpose is to
 // keep track of all the observers and events that the child should
 // monitor for the parent.
-let NotificationTracker = {
+var NotificationTracker = {
   // _paths is a multi-level dictionary. Let's add paths [A, B] and
   // [A, C]. Then _paths will look like this:
   //   { 'A': { 'B': { '_count': 1 }, 'C': { '_count': 1 } } }
@@ -84,6 +86,7 @@ let NotificationTracker = {
     if (msg.name == "Addons:GetNotifications") {
       return this._paths;
     }
+    return undefined;
   }
 };
 NotificationTracker.init();
@@ -109,7 +112,7 @@ function Interposition(name, base)
 // This object is responsible for notifying the child when a new
 // content policy is added or removed. It also runs all the registered
 // add-on content policies when the child asks it to do so.
-let ContentPolicyParent = {
+var ContentPolicyParent = {
   init: function() {
     let ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
                .getService(Ci.nsIMessageBroadcaster);
@@ -134,6 +137,7 @@ let ContentPolicyParent = {
         return this.shouldLoad(aMessage.data, aMessage.objects);
         break;
     }
+    return undefined;
   },
 
   shouldLoad: function(aData, aObjects) {
@@ -172,7 +176,7 @@ ContentPolicyParent.init();
 
 // This interposition intercepts calls to add or remove new content
 // policies and forwards these requests to ContentPolicyParent.
-let CategoryManagerInterposition = new Interposition("CategoryManagerInterposition");
+var CategoryManagerInterposition = new Interposition("CategoryManagerInterposition");
 
 CategoryManagerInterposition.methods.addCategoryEntry =
   function(addon, target, category, entry, value, persist, replace) {
@@ -199,7 +203,7 @@ CategoryManagerInterposition.methods.deleteCategoryEntry =
 // This shim handles the case where an add-on registers an about:
 // protocol handler in the parent and we want the child to be able to
 // use it. This code is pretty specific to Adblock's usage.
-let AboutProtocolParent = {
+var AboutProtocolParent = {
   init: function() {
     let ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
                .getService(Ci.nsIMessageBroadcaster);
@@ -231,6 +235,7 @@ let AboutProtocolParent = {
         return this.openChannel(msg);
         break;
     }
+    return undefined;
   },
 
   getURIFlags: function(msg) {
@@ -241,6 +246,7 @@ let AboutProtocolParent = {
       return module.getURIFlags(uri);
     } catch (e) {
       Cu.reportError(e);
+      return undefined;
     }
   },
 
@@ -254,12 +260,33 @@ let AboutProtocolParent = {
     }
 
     let uri = BrowserUtils.makeURI(msg.data.uri);
-    let contractID = msg.data.contractID;
-    let loadingPrincipal = msg.data.loadingPrincipal;
-    let securityFlags = msg.data.securityFlags;
-    let contentPolicyType = msg.data.contentPolicyType;
+    let channelParams;
+    if (msg.data.contentPolicyType === Ci.nsIContentPolicy.TYPE_DOCUMENT) {
+      // For TYPE_DOCUMENT loads, we cannot recreate the loadinfo here in the
+      // parent. In that case, treat this as a chrome (addon)-requested
+      // subload. When we use the data in the child, we'll load it into the
+      // correctly-principaled document.
+      channelParams = {
+        uri,
+        contractID: msg.data.contractID,
+        loadingPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+        securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+        contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER
+      };
+    } else {
+      // We can recreate the loadinfo here in the parent for non TYPE_DOCUMENT
+      // loads.
+      channelParams = {
+        uri,
+        contractID: msg.data.contractID,
+        loadingPrincipal: msg.data.loadingPrincipal,
+        securityFlags: msg.data.securityFlags,
+        contentPolicyType: msg.data.contentPolicyType
+      };
+    }
+
     try {
-      let channel = NetUtil.newChannel({uri, loadingPrincipal, securityFlags, contentPolicyType});
+      let channel = NetUtil.newChannel(channelParams);
 
       // We're not allowed to set channel.notificationCallbacks to a
       // CPOW, since the setter for notificationCallbacks is in C++,
@@ -271,7 +298,7 @@ let AboutProtocolParent = {
       } else {
         channel.loadGroup = null;
       }
-      let stream = channel.open();
+      let stream = channel.open2();
       let data = NetUtil.readInputStreamToString(stream, stream.available(), {});
       return {
         data: data,
@@ -279,12 +306,13 @@ let AboutProtocolParent = {
       };
     } catch (e) {
       Cu.reportError(e);
+      return undefined;
     }
   },
 };
 AboutProtocolParent.init();
 
-let ComponentRegistrarInterposition = new Interposition("ComponentRegistrarInterposition");
+var ComponentRegistrarInterposition = new Interposition("ComponentRegistrarInterposition");
 
 ComponentRegistrarInterposition.methods.registerFactory =
   function(addon, target, class_, className, contractID, factory) {
@@ -314,7 +342,7 @@ ComponentRegistrarInterposition.methods.unregisterFactory =
 // passing them CPOWs for the subject and data. We don't want to use T
 // in the parent because there might be non-add-on T observers that
 // won't expect to get notified in this case.
-let ObserverParent = {
+var ObserverParent = {
   init: function() {
     let ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
                .getService(Ci.nsIMessageBroadcaster);
@@ -354,7 +382,7 @@ let ObserverParent = {
 ObserverParent.init();
 
 // We only forward observers for these topics.
-let TOPIC_WHITELIST = [
+var TOPIC_WHITELIST = [
   "content-document-global-created",
   "document-element-inserted",
   "dom-window-destroyed",
@@ -365,7 +393,7 @@ let TOPIC_WHITELIST = [
 
 // This interposition listens for
 // nsIObserverService.{add,remove}Observer.
-let ObserverInterposition = new Interposition("ObserverInterposition");
+var ObserverInterposition = new Interposition("ObserverInterposition");
 
 ObserverInterposition.methods.addObserver =
   function(addon, target, observer, topic, ownsWeak) {
@@ -390,7 +418,7 @@ ObserverInterposition.methods.removeObserver =
 
 // This object is responsible for forwarding events from the child to
 // the parent.
-let EventTargetParent = {
+var EventTargetParent = {
   init: function() {
     // The _listeners map goes from targets (either <browser> elements
     // or windows) to a dictionary from event types to listeners.
@@ -577,18 +605,18 @@ EventTargetParent.init();
 // the target is a remote xul:browser element itself. We'd rather let
 // the child process handle the event and pass it up via
 // EventTargetParent.
-let filteringListeners = new WeakMap();
+var filteringListeners = new WeakMap();
 function makeFilteringListener(eventType, listener)
 {
-  if (filteringListeners.has(listener)) {
-    return filteringListeners.get(listener);
-  }
-
   // Some events are actually targeted at the <browser> element
   // itself, so we only handle the ones where know that won't happen.
   let eventTypes = ["mousedown", "mouseup", "click"];
   if (eventTypes.indexOf(eventType) == -1) {
     return listener;
+  }
+
+  if (filteringListeners.has(listener)) {
+    return filteringListeners.get(listener);
   }
 
   function filter(event) {
@@ -611,7 +639,7 @@ function makeFilteringListener(eventType, listener)
 
 // This interposition redirects addEventListener and
 // removeEventListener to EventTargetParent.
-let EventTargetInterposition = new Interposition("EventTargetInterposition");
+var EventTargetInterposition = new Interposition("EventTargetInterposition");
 
 EventTargetInterposition.methods.addEventListener =
   function(addon, target, type, listener, useCapture, wantsUntrusted) {
@@ -634,7 +662,7 @@ EventTargetInterposition.methods.removeEventListener =
 // process docshell. In the child, each docshell is its own
 // root. However, add-ons expect the root to be the chrome docshell,
 // so we make that happen here.
-let ContentDocShellTreeItemInterposition = new Interposition("ContentDocShellTreeItemInterposition");
+var ContentDocShellTreeItemInterposition = new Interposition("ContentDocShellTreeItemInterposition");
 
 ContentDocShellTreeItemInterposition.getters.rootTreeItem =
   function(addon, target) {
@@ -675,7 +703,7 @@ function chromeGlobalForContentWindow(window)
 // the parent. We actually create these sandboxes in the child process
 // so that the code loaded into them runs there. The resulting sandbox
 // object is a CPOW. This is primarly useful for Greasemonkey.
-let SandboxParent = {
+var SandboxParent = {
   componentsMap: new WeakMap(),
 
   makeContentSandbox: function(addon, chromeGlobal, principals, ...rest) {
@@ -722,7 +750,7 @@ let SandboxParent = {
 // This interposition redirects calls to Cu.Sandbox and
 // Cu.evalInSandbox to SandboxParent if the principals are content
 // principals.
-let ComponentsUtilsInterposition = new Interposition("ComponentsUtilsInterposition");
+var ComponentsUtilsInterposition = new Interposition("ComponentsUtilsInterposition");
 
 ComponentsUtilsInterposition.methods.Sandbox =
   function(addon, target, principals, ...rest) {
@@ -766,7 +794,7 @@ ComponentsUtilsInterposition.methods.evalInSandbox =
 // chrome XUL node into a content document. It doesn't actually do the
 // import, which we can't support. It just avoids throwing an
 // exception.
-let ContentDocumentInterposition = new Interposition("ContentDocumentInterposition");
+var ContentDocumentInterposition = new Interposition("ContentDocumentInterposition");
 
 ContentDocumentInterposition.methods.importNode =
   function(addon, target, node, deep) {
@@ -784,7 +812,7 @@ ContentDocumentInterposition.methods.importNode =
 
 // This interposition ensures that calling browser.docShell from an
 // add-on returns a CPOW around the dochell.
-let RemoteBrowserElementInterposition = new Interposition("RemoteBrowserElementInterposition",
+var RemoteBrowserElementInterposition = new Interposition("RemoteBrowserElementInterposition",
                                                           EventTargetInterposition);
 
 RemoteBrowserElementInterposition.getters.docShell = function(addon, target) {
@@ -797,6 +825,14 @@ RemoteBrowserElementInterposition.getters.docShell = function(addon, target) {
   }
   return remoteChromeGlobal.docShell;
 };
+
+RemoteBrowserElementInterposition.getters.sessionHistory = function(addon, target) {
+  CompatWarning.warn("Direct access to browser.sessionHistory will no longer " +
+                     "work in the chrome process.",
+                     addon, CompatWarning.warnings.content);
+
+  return getSessionHistory(target);
+}
 
 // We use this in place of the real browser.contentWindow if we
 // haven't yet received a CPOW for the child process's window. This
@@ -843,7 +879,17 @@ function getContentDocument(addon, browser)
     return doc;
   }
 
-  return browser.contentDocumentAsCPOW;
+  return browser.contentWindowAsCPOW.document;
+}
+
+function getSessionHistory(browser) {
+  let remoteChromeGlobal = RemoteAddonsParent.browserToGlobal.get(browser);
+  if (!remoteChromeGlobal) {
+    CompatWarning.warn("CPOW for the remote browser docShell hasn't been received yet.");
+    // We may not have any messages from this tab yet.
+    return null;
+  }
+  return remoteChromeGlobal.docShell.QueryInterface(Ci.nsIWebNavigation).sessionHistory;
 }
 
 RemoteBrowserElementInterposition.getters.contentDocument = function(addon, target) {
@@ -853,7 +899,7 @@ RemoteBrowserElementInterposition.getters.contentDocument = function(addon, targ
   return getContentDocument(addon, target);
 };
 
-let TabBrowserElementInterposition = new Interposition("TabBrowserElementInterposition",
+var TabBrowserElementInterposition = new Interposition("TabBrowserElementInterposition",
                                                        EventTargetInterposition);
 
 TabBrowserElementInterposition.getters.contentWindow = function(addon, target) {
@@ -874,11 +920,22 @@ TabBrowserElementInterposition.getters.contentDocument = function(addon, target)
   return getContentDocument(addon, browser);
 };
 
+TabBrowserElementInterposition.getters.sessionHistory = function(addon, target) {
+  CompatWarning.warn("Direct access to gBrowser.sessionHistory will no " +
+                     "longer work in the chrome process.",
+                     addon, CompatWarning.warnings.content);
+  let browser = target.selectedBrowser;
+  if (!browser.isRemoteBrowser) {
+    return browser.sessionHistory;
+  }
+  return getSessionHistory(browser);
+};
+
 // This function returns a wrapper around an
 // nsIWebProgressListener. When the wrapper is invoked, it calls the
 // real listener but passes CPOWs for the nsIWebProgress and
 // nsIRequest arguments.
-let progressListeners = {global: new WeakMap(), tabs: new WeakMap()};
+var progressListeners = {global: new WeakMap(), tabs: new WeakMap()};
 function wrapProgressListener(kind, listener)
 {
   if (progressListeners[kind].has(listener)) {
@@ -938,7 +995,7 @@ TabBrowserElementInterposition.methods.removeTabsProgressListener = function(add
   return target.removeTabsProgressListener(wrapProgressListener("tabs", listener));
 };
 
-let ChromeWindowInterposition = new Interposition("ChromeWindowInterposition",
+var ChromeWindowInterposition = new Interposition("ChromeWindowInterposition",
                                                   EventTargetInterposition);
 
 // _content is for older add-ons like pinboard and all-in-one gestures
@@ -955,7 +1012,30 @@ ChromeWindowInterposition.getters._content = function(addon, target) {
   return browser.contentWindowAsCPOW;
 };
 
-let RemoteAddonsParent = {
+var RemoteWebNavigationInterposition = new Interposition("RemoteWebNavigation");
+
+RemoteWebNavigationInterposition.getters.sessionHistory = function(addon, target) {
+  CompatWarning.warn("Direct access to webNavigation.sessionHistory will no longer " +
+                     "work in the chrome process.",
+                     addon, CompatWarning.warnings.content);
+
+  if (target instanceof Ci.nsIDocShell) {
+    // We must have a non-remote browser, so we can go ahead
+    // and just return the real sessionHistory.
+    return target.sessionHistory;
+  }
+
+  let impl = target.wrappedJSObject;
+  if (!impl) {
+    return null;
+  }
+
+  let browser = impl._browser;
+
+  return getSessionHistory(browser);
+}
+
+var RemoteAddonsParent = {
   init: function() {
     let mm = Cc["@mozilla.org/globalmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
     mm.addMessageListener("Addons:RegisterGlobal", this);
@@ -977,6 +1057,7 @@ let RemoteAddonsParent = {
     register(Ci.nsIComponentRegistrar, ComponentRegistrarInterposition);
     register(Ci.nsIObserverService, ObserverInterposition);
     register(Ci.nsIXPCComponents_Utils, ComponentsUtilsInterposition);
+    register(Ci.nsIWebNavigation, RemoteWebNavigationInterposition);
 
     return result;
   },

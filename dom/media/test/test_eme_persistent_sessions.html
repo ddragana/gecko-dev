@@ -86,7 +86,7 @@ function startTest(test, token)
 
         // Once the session is closed, reload the MediaKeys and reload the session
         .then(function() {
-          return navigator.requestMediaKeySystemAccess(KEYSYSTEM_TYPE);
+          return navigator.requestMediaKeySystemAccess(KEYSYSTEM_TYPE, [{initDataTypes:["cenc"]}]);
         })
 
         .then(function(requestedKeySystemAccess) {
@@ -147,7 +147,7 @@ function startTest(test, token)
   );
 
   LoadTestWithManagedLoadToken(test, v, manager, token,
-                               { onlyLoadFirstFragments:2, noEndOfStream:true });
+                               { onlyLoadFirstFragments:2, noEndOfStream:false });
 }
 
 function beginTest() {

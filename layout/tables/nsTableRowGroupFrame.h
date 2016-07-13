@@ -113,7 +113,7 @@ public:
                       const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
-  virtual bool UpdateOverflow() override;
+  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
 
   /**
    * Get the "type" of the frame
@@ -155,8 +155,7 @@ public:
    * @param aHeaderFooterFrame the original header or footer row group frame
    * that was repeated
    */
-  nsresult  InitRepeatedFrame(nsPresContext*        aPresContext,
-                              nsTableRowGroupFrame* aHeaderFooterFrame);
+  nsresult  InitRepeatedFrame(nsTableRowGroupFrame* aHeaderFooterFrame);
 
 
   /**

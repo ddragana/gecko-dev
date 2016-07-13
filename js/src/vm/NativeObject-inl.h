@@ -79,7 +79,10 @@ inline void
 NativeObject::initDenseElementWithType(ExclusiveContext* cx, uint32_t index, const Value& val)
 {
     MOZ_ASSERT(!shouldConvertDoubleElements());
-    AddTypePropertyId(cx, this, JSID_VOID, val);
+    if (val.isMagic(JS_ELEMENTS_HOLE))
+        markDenseElementsNotPacked(cx);
+    else
+        AddTypePropertyId(cx, this, JSID_VOID, val);
     initDenseElement(index, val);
 }
 
@@ -235,8 +238,6 @@ NativeObject::getDenseOrTypedArrayElement(uint32_t idx)
 {
     if (is<TypedArrayObject>())
         return as<TypedArrayObject>().getElement(idx);
-    if (is<SharedTypedArrayObject>())
-        return as<SharedTypedArrayObject>().getElement(idx);
     return getDenseElement(idx);
 }
 
@@ -283,6 +284,14 @@ NativeObject::setSlotWithType(ExclusiveContext* cx, Shape* shape,
         shape->setOverwritten();
 
     AddTypePropertyId(cx, this, shape->propid(), value);
+}
+
+inline void
+NativeObject::updateShapeAfterMovingGC()
+{
+    Shape* shape = shape_.unbarrieredGet();
+    if (IsForwarded(shape))
+        shape_.unsafeSet(Forwarded(shape));
 }
 
 /* Make an object with pregenerated shape from a NEWOBJECT bytecode. */
@@ -385,7 +394,7 @@ CallResolveOp(JSContext* cx, HandleNativeObject obj, HandleId id, MutableHandleS
     *recursedp = false;
 
     bool resolved = false;
-    if (!obj->getClass()->resolve(cx, obj, id, &resolved))
+    if (!obj->getClass()->getResolve()(cx, obj, id, &resolved))
         return false;
 
     if (!resolved)
@@ -393,15 +402,15 @@ CallResolveOp(JSContext* cx, HandleNativeObject obj, HandleId id, MutableHandleS
 
     // Assert the mayResolve hook, if there is one, returns true for this
     // property.
-    MOZ_ASSERT_IF(obj->getClass()->mayResolve,
-                  obj->getClass()->mayResolve(cx->names(), id, obj));
+    MOZ_ASSERT_IF(obj->getClass()->getMayResolve(),
+                  obj->getClass()->getMayResolve()(cx->names(), id, obj));
 
     if (JSID_IS_INT(id) && obj->containsDenseElement(JSID_TO_INT(id))) {
         MarkDenseOrTypedArrayElementFound<CanGC>(propp);
         return true;
     }
 
-    MOZ_ASSERT(!IsAnyTypedArray(obj));
+    MOZ_ASSERT(!obj->is<TypedArrayObject>());
 
     propp.set(obj->lookup(cx, id));
     return true;
@@ -412,17 +421,17 @@ ClassMayResolveId(const JSAtomState& names, const Class* clasp, jsid id, JSObjec
 {
     MOZ_ASSERT_IF(maybeObj, maybeObj->getClass() == clasp);
 
-    if (!clasp->resolve) {
+    if (!clasp->getResolve()) {
         // Sanity check: we should only have a mayResolve hook if we have a
         // resolve hook.
-        MOZ_ASSERT(!clasp->mayResolve, "Class with mayResolve hook but no resolve hook");
+        MOZ_ASSERT(!clasp->getMayResolve(), "Class with mayResolve hook but no resolve hook");
         return false;
     }
 
-    if (clasp->mayResolve) {
+    if (JSMayResolveOp mayResolve = clasp->getMayResolve()) {
         // Tell the analysis our mayResolve hooks won't trigger GC.
         JS::AutoSuppressGCAnalysis nogc;
-        if (!clasp->mayResolve(names, id, maybeObj))
+        if (!mayResolve(names, id, maybeObj))
             return false;
     }
 
@@ -447,10 +456,10 @@ LookupOwnPropertyInline(ExclusiveContext* cx,
     // Check for a typed array element. Integer lookups always finish here
     // so that integer properties on the prototype are ignored even for out
     // of bounds accesses.
-    if (IsAnyTypedArray(obj)) {
+    if (obj->template is<TypedArrayObject>()) {
         uint64_t index;
         if (IsTypedArrayIndex(id, &index)) {
-            if (index < AnyTypedArrayLength(obj)) {
+            if (index < obj->template as<TypedArrayObject>().length()) {
                 MarkDenseOrTypedArrayElementFound<allowGC>(propp);
             } else {
                 propp.set(nullptr);
@@ -468,8 +477,7 @@ LookupOwnPropertyInline(ExclusiveContext* cx,
     }
 
     // id was not found in obj. Try obj's resolve hook, if any.
-    if (obj->getClass()->resolve)
-    {
+    if (obj->getClass()->getResolve()) {
         if (!cx->shouldBeJSContext() || !allowGC)
             return false;
 
@@ -515,10 +523,10 @@ NativeLookupOwnPropertyNoResolve(ExclusiveContext* cx, HandleNativeObject obj, H
     }
 
     // Check for a typed array element.
-    if (IsAnyTypedArray(obj)) {
+    if (obj->is<TypedArrayObject>()) {
         uint64_t index;
         if (IsTypedArrayIndex(id, &index)) {
-            if (index < AnyTypedArrayLength(obj))
+            if (index < obj->as<TypedArrayObject>().length())
                 MarkDenseOrTypedArrayElementFound<CanGC>(result);
             else
                 result.set(nullptr);
@@ -558,7 +566,7 @@ LookupPropertyInline(ExclusiveContext* cx,
             return true;
         }
 
-        typename MaybeRooted<JSObject*, allowGC>::RootType proto(cx, current->getProto());
+        typename MaybeRooted<JSObject*, allowGC>::RootType proto(cx, current->staticPrototype());
 
         if (!proto)
             break;
@@ -581,21 +589,20 @@ LookupPropertyInline(ExclusiveContext* cx,
 }
 
 inline bool
-WarnIfNotConstructing(JSContext* cx, const CallArgs& args, const char* builtinName)
-{
-    if (args.isConstructing())
-        return true;
-    return JS_ReportErrorFlagsAndNumber(cx, JSREPORT_WARNING, GetErrorMessage, nullptr,
-                                        JSMSG_BUILTIN_CTOR_NO_NEW, builtinName);
-}
-
-inline bool
 ThrowIfNotConstructing(JSContext *cx, const CallArgs &args, const char *builtinName)
 {
     if (args.isConstructing())
         return true;
     return JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR, GetErrorMessage, nullptr,
-                                        JSMSG_BUILTIN_CTOR_NO_NEW_FATAL, builtinName);
+                                        JSMSG_BUILTIN_CTOR_NO_NEW, builtinName);
+}
+
+inline bool
+IsPackedArray(JSObject* obj)
+{
+    return obj->is<ArrayObject>() && !obj->hasLazyGroup() &&
+           !obj->group()->hasAllFlags(OBJECT_FLAG_NON_PACKED) &&
+           obj->as<ArrayObject>().getDenseInitializedLength() == obj->as<ArrayObject>().length();
 }
 
 } // namespace js

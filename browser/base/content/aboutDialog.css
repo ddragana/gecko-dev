@@ -4,6 +4,10 @@
 
 #aboutDialog {
   width: 620px;
+  /* Set an explicit line-height to avoid discrepancies in 'auto' spacing
+     across screens with different device DPI, which may cause font metrics
+     to round differently. */
+  line-height: 1.5;
 }
 
 #rightBox {
@@ -25,10 +29,20 @@
 #version {
   font-weight: bold;
   margin-top: 10px;
-  -moz-margin-start: 0;
+  margin-inline-start: 0;
   -moz-user-select: text;
   -moz-user-focus: normal;
   cursor: text;
+}
+
+#version:-moz-locale-dir(rtl) {
+  direction: ltr;
+  text-align: right;
+  margin-right: 0;
+}
+
+#releasenotes {
+  margin-top: 10px;
 }
 
 #distribution,
@@ -40,21 +54,27 @@
 
 .text-blurb {
   margin-bottom: 10px;
-  -moz-margin-start: 0;
-  -moz-padding-start: 0;
+  margin-inline-start: 0;
+  padding-inline-start: 0;
 }
 
 #updateButton,
 #updateDeck > hbox > label {
-  -moz-margin-start: 0;
-  -moz-padding-start: 0;
+  margin-inline-start: 0;
+  padding-inline-start: 0;
 }
 
 .update-throbber {
   width: 16px;
   min-height: 16px;
-  -moz-margin-end: 3px;
-  list-style-image: url("chrome://global/skin/icons/loading_16.png");
+  margin-inline-end: 3px;
+  list-style-image: url("chrome://global/skin/icons/loading.png");
+}
+
+@media (min-resolution: 1.1dppx) {
+  .update-throbber {
+    list-style-image: url("chrome://global/skin/icons/loading@2x.png");
+  }
 }
 
 .text-link,

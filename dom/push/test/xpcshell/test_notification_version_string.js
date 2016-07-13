@@ -5,12 +5,13 @@
 
 const {PushDB, PushService, PushServiceWebSocket} = serviceExports;
 
+const userAgentID = 'ba31ac13-88d4-4984-8e6b-8731315a7cf8';
+
 function run_test() {
   do_get_profile();
-  setPrefs();
-  disableServiceWorkerEvents(
-    'https://example.net/case'
-  );
+  setPrefs({
+    userAgentID: userAgentID,
+  });
   run_next_test();
 }
 
@@ -24,14 +25,15 @@ add_task(function* test_notification_version_string() {
     originAttributes: '',
     version: 2,
     quota: Infinity,
+    systemRecord: true,
   });
 
-  let notifyPromise = promiseObserverNotification('push-notification');
+  let notifyPromise = promiseObserverNotification(PushServiceComponent.pushTopic);
 
-  let ackDefer = Promise.defer();
+  let ackDone;
+  let ackPromise = new Promise(resolve => ackDone = resolve);
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -39,7 +41,7 @@ add_task(function* test_notification_version_string() {
           this.serverSendMsg(JSON.stringify({
             messageType: 'hello',
             status: 200,
-            uaid: 'ba31ac13-88d4-4984-8e6b-8731315a7cf8'
+            uaid: userAgentID,
           }));
           this.serverSendMsg(JSON.stringify({
             messageType: 'notification',
@@ -49,24 +51,16 @@ add_task(function* test_notification_version_string() {
             }]
           }));
         },
-        onACK: ackDefer.resolve
+        onACK: ackDone
       });
     }
   });
 
-  let {subject: notification, data: scope} = yield waitForPromise(
-    notifyPromise,
-    DEFAULT_TIMEOUT,
-    'Timed out waiting for string notification'
-  );
-  let message = notification.QueryInterface(Ci.nsIPushObserverNotification);
-  equal(scope, 'https://example.com/page/1', 'Wrong scope');
-  equal(message.pushEndpoint, 'https://example.org/updates/1',
-    'Wrong push endpoint');
-  strictEqual(message.version, 4, 'Wrong version');
+  let {subject: message, data: scope} = yield notifyPromise;
+  equal(message.QueryInterface(Ci.nsIPushMessage).data, null,
+    'Unexpected data for Simple Push message');
 
-  yield waitForPromise(ackDefer.promise, DEFAULT_TIMEOUT,
-    'Timed out waiting for string acknowledgement');
+  yield ackPromise;
 
   let storeRecord = yield db.getByKeyID(
     '6ff97d56-d0c0-43bc-8f5b-61b855e1d93b');

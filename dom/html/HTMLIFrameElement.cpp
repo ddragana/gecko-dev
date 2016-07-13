@@ -12,11 +12,20 @@
 #include "nsRuleData.h"
 #include "nsStyleConsts.h"
 #include "nsContentUtils.h"
+#include "nsSandboxFlags.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(IFrame)
 
 namespace mozilla {
 namespace dom {
+
+// static
+const DOMTokenListSupportedToken HTMLIFrameElement::sSupportedSandboxTokens[] = {
+#define SANDBOX_KEYWORD(string, atom, flags) string,
+#include "IframeSandboxKeywordList.h"
+#undef SANDBOX_KEYWORD
+  nullptr
+};
 
 HTMLIFrameElement::HTMLIFrameElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
                                      FromParser aFromParser)
@@ -46,28 +55,10 @@ NS_IMPL_STRING_ATTR(HTMLIFrameElement, Width, width)
 NS_IMPL_BOOL_ATTR(HTMLIFrameElement, AllowFullscreen, allowfullscreen)
 NS_IMPL_STRING_ATTR(HTMLIFrameElement, Srcdoc, srcdoc)
 
-void
-HTMLIFrameElement::GetItemValueText(DOMString& aValue)
-{
-  GetSrc(aValue);
-}
-
-void
-HTMLIFrameElement::SetItemValueText(const nsAString& aValue)
-{
-  SetSrc(aValue);
-}
-
 NS_IMETHODIMP
 HTMLIFrameElement::GetContentDocument(nsIDOMDocument** aContentDocument)
 {
   return nsGenericHTMLFrameElement::GetContentDocument(aContentDocument);
-}
-
-NS_IMETHODIMP
-HTMLIFrameElement::GetContentWindow(nsIDOMWindow** aContentWindow)
-{
-  return nsGenericHTMLFrameElement::GetContentWindow(aContentWindow);
 }
 
 bool
@@ -213,7 +204,12 @@ HTMLIFrameElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                                 const nsAttrValue* aValue,
                                 bool aNotify)
 {
-  if (aName == nsGkAtoms::sandbox && aNameSpaceID == kNameSpaceID_None && mFrameLoader) {
+  if ((aName == nsGkAtoms::sandbox ||
+       // The allowfullscreen attribute affects the sandboxed fullscreen
+       // flag, thus we should also reapply it if that is changed.
+       aName == nsGkAtoms::allowfullscreen ||
+       aName == nsGkAtoms::mozallowfullscreen) &&
+      aNameSpaceID == kNameSpaceID_None && mFrameLoader) {
     // If we have an nsFrameLoader, apply the new sandbox flags.
     // Since this is called after the setter, the sandbox flags have
     // alreay been updated.
@@ -244,7 +240,19 @@ uint32_t
 HTMLIFrameElement::GetSandboxFlags()
 {
   const nsAttrValue* sandboxAttr = GetParsedAttr(nsGkAtoms::sandbox);
-  return nsContentUtils::ParseSandboxAttributeToFlags(sandboxAttr);
+  // No sandbox attribute, no sandbox flags.
+  if (!sandboxAttr) {
+    return SANDBOXED_NONE;
+  }
+
+  uint32_t out = nsContentUtils::ParseSandboxAttributeToFlags(sandboxAttr);
+
+  if (GetParsedAttr(nsGkAtoms::allowfullscreen) ||
+      GetParsedAttr(nsGkAtoms::mozallowfullscreen)) {
+    out &= ~SANDBOXED_FULLSCREEN;
+  }
+
+  return out;
 }
 
 JSObject*

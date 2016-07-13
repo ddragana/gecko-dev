@@ -14,43 +14,16 @@
 
 using namespace mozilla;
 
-/***************************************************************************/
-// Debug Instrumentation...
-
-#ifdef SHOW_INFO_COUNT_STATS
-static int DEBUG_TotalInfos = 0;
-static int DEBUG_CurrentInfos = 0;
-static int DEBUG_MaxInfos = 0;
-static int DEBUG_ReentrantMonitorEntryCount = 0;
-
-#define LOG_INFO_CREATE(t)                                                  \
-    DEBUG_TotalInfos++;                                                     \
-    DEBUG_CurrentInfos++;                                                   \
-    if(DEBUG_MaxInfos < DEBUG_CurrentInfos)                                 \
-        DEBUG_MaxInfos = DEBUG_CurrentInfos /* no ';' */
-
-#define LOG_INFO_DESTROY(t)                                                 \
-    DEBUG_CurrentInfos-- /* no ';' */
-
-#define LOG_INFO_MONITOR_ENTRY                                              \
-    DEBUG_ReentrantMonitorEntryCount++ /* no ';' */
-
-#else /* SHOW_INFO_COUNT_STATS */
-
-#define LOG_INFO_CREATE(t)     ((void)0)
-#define LOG_INFO_DESTROY(t)    ((void)0)
-#define LOG_INFO_MONITOR_ENTRY ((void)0)
-#endif /* SHOW_INFO_COUNT_STATS */
-
 /* static */ xptiInterfaceEntry*
 xptiInterfaceEntry::Create(const char* name, const nsID& iid,
                            XPTInterfaceDescriptor* aDescriptor,
                            xptiTypelibGuts* aTypelib)
 {
     int namelen = strlen(name);
-    return new (XPT_MALLOC(gXPTIStructArena,
-                           sizeof(xptiInterfaceEntry) + namelen))
-        xptiInterfaceEntry(name, namelen, iid, aDescriptor, aTypelib);
+    void* place =
+        XPT_CALLOC8(gXPTIStructArena, sizeof(xptiInterfaceEntry) + namelen);
+    return new (place) xptiInterfaceEntry(name, namelen, iid, aDescriptor,
+                                          aTypelib);
 }
 
 xptiInterfaceEntry::xptiInterfaceEntry(const char* name,
@@ -60,11 +33,11 @@ xptiInterfaceEntry::xptiInterfaceEntry(const char* name,
                                        xptiTypelibGuts* aTypelib)
     : mIID(iid)
     , mDescriptor(aDescriptor)
-    , mMethodBaseIndex(0)
-    , mConstantBaseIndex(0)
     , mTypelib(aTypelib)
     , mParent(nullptr)
     , mInfo(nullptr)
+    , mMethodBaseIndex(0)
+    , mConstantBaseIndex(0)
     , mFlags(0)
 {
     memcpy(mName, name, nameLength);
@@ -343,7 +316,7 @@ xptiInterfaceEntry::GetInterfaceIndexForParam(uint16_t methodIndex,
     const XPTTypeDescriptor *td = &param->type;
 
     while (XPT_TDP_TAG(td->prefix) == TD_ARRAY) {
-        td = &mDescriptor->additional_types[td->type.additional_type];
+        td = &mDescriptor->additional_types[td->u.array.additional_type];
     }
 
     if(XPT_TDP_TAG(td->prefix) != TD_INTERFACE_TYPE) {
@@ -351,7 +324,7 @@ xptiInterfaceEntry::GetInterfaceIndexForParam(uint16_t methodIndex,
         return NS_ERROR_INVALID_ARG;
     }
 
-    *interfaceIndex = td->type.iface;
+    *interfaceIndex = (td->u.iface.iface_hi8 << 8) | td->u.iface.iface_lo8;
     return NS_OK;
 }
 
@@ -390,6 +363,10 @@ already_AddRefed<ShimInterfaceInfo>
 xptiInterfaceEntry::GetShimForParam(uint16_t methodIndex,
                                     const nsXPTParamInfo* param)
 {
+    if(methodIndex < mMethodBaseIndex) {
+        return mParent->GetShimForParam(methodIndex, param);
+    }
+
     uint16_t interfaceIndex = 0;
     nsresult rv = GetInterfaceIndexForParam(methodIndex, param,
                                             &interfaceIndex);
@@ -398,7 +375,7 @@ xptiInterfaceEntry::GetShimForParam(uint16_t methodIndex,
     }
 
     const char* shimName = mTypelib->GetEntryNameAt(interfaceIndex - 1);
-    nsRefPtr<ShimInterfaceInfo> shim =
+    RefPtr<ShimInterfaceInfo> shim =
         ShimInterfaceInfo::MaybeConstruct(shimName, nullptr);
     return shim.forget();
 }
@@ -411,7 +388,7 @@ xptiInterfaceEntry::GetInfoForParam(uint16_t methodIndex,
     xptiInterfaceEntry* entry;
     nsresult rv = GetEntryForParam(methodIndex, param, &entry);
     if (NS_FAILED(rv)) {
-        nsRefPtr<ShimInterfaceInfo> shim = GetShimForParam(methodIndex, param);
+        RefPtr<ShimInterfaceInfo> shim = GetShimForParam(methodIndex, param);
         if (!shim) {
             return rv;
         }
@@ -432,7 +409,7 @@ xptiInterfaceEntry::GetIIDForParam(uint16_t methodIndex,
     xptiInterfaceEntry* entry;
     nsresult rv = GetEntryForParam(methodIndex, param, &entry);
     if (NS_FAILED(rv)) {
-        nsRefPtr<ShimInterfaceInfo> shim = GetShimForParam(methodIndex, param);
+        RefPtr<ShimInterfaceInfo> shim = GetShimForParam(methodIndex, param);
         if (!shim) {
             return rv;
         }
@@ -450,7 +427,7 @@ xptiInterfaceEntry::GetIIDForParamNoAlloc(uint16_t methodIndex,
     xptiInterfaceEntry* entry;
     nsresult rv = GetEntryForParam(methodIndex, param, &entry);
     if (NS_FAILED(rv)) {
-        nsRefPtr<ShimInterfaceInfo> shim = GetShimForParam(methodIndex, param);
+        RefPtr<ShimInterfaceInfo> shim = GetShimForParam(methodIndex, param);
         if (!shim) {
             return rv;
         }
@@ -482,7 +459,7 @@ xptiInterfaceEntry::GetTypeInArray(const nsXPTParamInfo* param,
             NS_ERROR("bad dimension");
             return NS_ERROR_INVALID_ARG;
         }
-        td = &additional_types[td->type.additional_type];
+        td = &additional_types[td->u.array.additional_type];
     }
 
     *type = td;
@@ -556,15 +533,17 @@ xptiInterfaceEntry::GetSizeIsArgNumberForParam(uint16_t methodIndex,
     // verify that this is a type that has size_is
     switch (XPT_TDP_TAG(td->prefix)) {
       case TD_ARRAY:
+        *argnum = td->u.array.argnum;
+        break;
       case TD_PSTRING_SIZE_IS:
       case TD_PWSTRING_SIZE_IS:
+        *argnum = td->u.pstring_is.argnum;
         break;
       default:
         NS_ERROR("not a size_is");
         return NS_ERROR_INVALID_ARG;
     }
 
-    *argnum = td->argnum;
     return NS_OK;
 }
 
@@ -590,8 +569,7 @@ xptiInterfaceEntry::GetInterfaceIsArgNumberForParam(uint16_t methodIndex,
     const XPTTypeDescriptor *td = &param->type;
 
     while (XPT_TDP_TAG(td->prefix) == TD_ARRAY) {
-        td = &mDescriptor->
-                                additional_types[td->type.additional_type];
+        td = &mDescriptor->additional_types[td->u.array.additional_type];
     }
 
     if(XPT_TDP_TAG(td->prefix) != TD_INTERFACE_IS_TYPE) {
@@ -599,20 +577,18 @@ xptiInterfaceEntry::GetInterfaceIsArgNumberForParam(uint16_t methodIndex,
         return NS_ERROR_INVALID_ARG;
     }
 
-    *argnum = td->argnum;
+    *argnum = td->u.interface_is.argnum;
     return NS_OK;
 }
 
-/* bool isIID (in nsIIDPtr IID); */
-nsresult 
-xptiInterfaceEntry::IsIID(const nsIID * IID, bool *_retval)
+nsresult
+xptiInterfaceEntry::IsIID(const nsIID * iid, bool *_retval)
 {
     // It is not necessary to Resolve because this info is read from manifest.
-    *_retval = mIID.Equals(*IID);
+    *_retval = mIID.Equals(*iid);
     return NS_OK;
 }
 
-/* void getNameShared ([shared, retval] out string name); */
 nsresult 
 xptiInterfaceEntry::GetNameShared(const char **name)
 {
@@ -621,7 +597,6 @@ xptiInterfaceEntry::GetNameShared(const char **name)
     return NS_OK;
 }
 
-/* void getIIDShared ([shared, retval] out nsIIDPtrShared iid); */
 nsresult 
 xptiInterfaceEntry::GetIIDShared(const nsIID * *iid)
 {
@@ -630,7 +605,6 @@ xptiInterfaceEntry::GetIIDShared(const nsIID * *iid)
     return NS_OK;
 }
 
-/* bool hasAncestor (in nsIIDPtr iid); */
 nsresult 
 xptiInterfaceEntry::HasAncestor(const nsIID * iid, bool *_retval)
 {
@@ -661,14 +635,13 @@ xptiInterfaceEntry::InterfaceInfo()
     XPTInterfaceInfoManager::GetSingleton()->mWorkingSet.mTableReentrantMonitor.
         AssertCurrentThreadIn();
 #endif
-    LOG_INFO_MONITOR_ENTRY;
 
     if(!mInfo)
     {
         mInfo = new xptiInterfaceInfo(this);
     }
     
-    nsRefPtr<xptiInterfaceInfo> info = mInfo;
+    RefPtr<xptiInterfaceInfo> info = mInfo;
     return info.forget();
 }
     
@@ -703,12 +676,10 @@ NS_IMPL_QUERY_INTERFACE(xptiInterfaceInfo, nsIInterfaceInfo)
 xptiInterfaceInfo::xptiInterfaceInfo(xptiInterfaceEntry* entry)
     : mEntry(entry)
 {
-    LOG_INFO_CREATE(this);
 }
 
 xptiInterfaceInfo::~xptiInterfaceInfo() 
 {
-    LOG_INFO_DESTROY(this);
     NS_ASSERTION(!mEntry, "bad state in dtor");
 }
 
@@ -738,7 +709,6 @@ xptiInterfaceInfo::Release(void)
         mozilla::ReentrantMonitorAutoEnter monitor(XPTInterfaceInfoManager::
                                           GetSingleton()->mWorkingSet.
                                           mTableReentrantMonitor);
-        LOG_INFO_MONITOR_ENTRY;
 
         // If InterfaceInfo added and *released* a reference before we 
         // acquired the monitor then 'this' might already be dead. In that

@@ -20,6 +20,14 @@
 namespace js {
 namespace jit {
 
+// Does this architecture support SIMD conversions between Uint32x4 and Float32x4?
+static MOZ_CONSTEXPR_VAR bool SupportsUint32x4FloatConversions = false;
+
+// Does this architecture support comparisons of unsigned integer vectors?
+static MOZ_CONSTEXPR_VAR bool SupportsUint8x16Compares = false;
+static MOZ_CONSTEXPR_VAR bool SupportsUint16x8Compares = false;
+static MOZ_CONSTEXPR_VAR bool SupportsUint32x4Compares = false;
+
 #if defined(JS_CODEGEN_X86)
 // In bytes: slots needed for potential memory->memory move spills.
 //   +8 for cycles
@@ -50,6 +58,8 @@ static const uint32_t ShadowStackSpace = 32;
 #else
 static const uint32_t ShadowStackSpace = 0;
 #endif
+
+static const uint32_t JumpImmediateRange = INT32_MAX;
 
 class Registers {
   public:
@@ -193,10 +203,9 @@ class FloatRegisters {
     typedef X86Encoding::XMMRegisterID Encoding;
 
     enum ContentType {
-        Single,
-        Double,
-        Int32x4,
-        Float32x4,
+        Single,     // 32-bit float.
+        Double,     // 64-bit double.
+        Simd128,    // 128-bit SIMD type (int32x4, bool16x8, etc).
         NumTypes
     };
 
@@ -244,15 +253,15 @@ class FloatRegisters {
     // the bits of the physical register mask.
     static const SetType SpreadSingle = SetType(1) << (uint32_t(Single) * TotalPhys);
     static const SetType SpreadDouble = SetType(1) << (uint32_t(Double) * TotalPhys);
-    static const SetType SpreadInt32x4 = SetType(1) << (uint32_t(Int32x4) * TotalPhys);
-    static const SetType SpreadFloat32x4 = SetType(1) << (uint32_t(Float32x4) * TotalPhys);
+    static const SetType SpreadSimd128 = SetType(1) << (uint32_t(Simd128) * TotalPhys);
     static const SetType SpreadScalar = SpreadSingle | SpreadDouble;
-    static const SetType SpreadVector = SpreadInt32x4 | SpreadFloat32x4;
+    static const SetType SpreadVector = SpreadSimd128;
     static const SetType Spread = SpreadScalar | SpreadVector;
 
     static const SetType AllPhysMask = ((1 << TotalPhys) - 1);
     static const SetType AllMask = AllPhysMask * Spread;
     static const SetType AllDoubleMask = AllPhysMask * SpreadDouble;
+    static const SetType AllSingleMask = AllPhysMask * SpreadSingle;
 
 #if defined(JS_CODEGEN_X86)
     static const SetType NonAllocatableMask =
@@ -358,14 +367,12 @@ struct FloatRegister {
 
     bool isSingle() const { MOZ_ASSERT(!isInvalid()); return type_ == Codes::Single; }
     bool isDouble() const { MOZ_ASSERT(!isInvalid()); return type_ == Codes::Double; }
-    bool isInt32x4() const { MOZ_ASSERT(!isInvalid()); return type_ == Codes::Int32x4; }
-    bool isFloat32x4() const { MOZ_ASSERT(!isInvalid()); return type_ == Codes::Float32x4; }
+    bool isSimd128() const { MOZ_ASSERT(!isInvalid()); return type_ == Codes::Simd128; }
     bool isInvalid() const { return isInvalid_; }
 
     FloatRegister asSingle() const { MOZ_ASSERT(!isInvalid()); return FloatRegister(reg_, Codes::Single); }
     FloatRegister asDouble() const { MOZ_ASSERT(!isInvalid()); return FloatRegister(reg_, Codes::Double); }
-    FloatRegister asInt32x4() const { MOZ_ASSERT(!isInvalid()); return FloatRegister(reg_, Codes::Int32x4); }
-    FloatRegister asFloat32x4() const { MOZ_ASSERT(!isInvalid()); return FloatRegister(reg_, Codes::Float32x4); }
+    FloatRegister asSimd128() const { MOZ_ASSERT(!isInvalid()); return FloatRegister(reg_, Codes::Simd128); }
 
     uint32_t size() const {
         MOZ_ASSERT(!isInvalid());
@@ -373,7 +380,7 @@ struct FloatRegister {
             return sizeof(float);
         if (isDouble())
             return sizeof(double);
-        MOZ_ASSERT(isInt32x4() || isFloat32x4());
+        MOZ_ASSERT(isSimd128());
         return 4 * sizeof(int32_t);
     }
 
@@ -450,10 +457,9 @@ hasMultiAlias()
     return false;
 }
 
-// Support some constant-offset addressing.
-// See the comments above AsmJSMappedSize in AsmJSValidate.h for more info.
-static const size_t AsmJSCheckedImmediateRange = 4096;
-static const size_t AsmJSImmediateRange = UINT32_C(0x80000000);
+// See MIRGenerator::foldableOffsetRange for more info.
+static const size_t WasmCheckedImmediateRange = 4096;
+static const size_t WasmImmediateRange = UINT32_C(0x80000000);
 
 } // namespace jit
 } // namespace js

@@ -128,7 +128,7 @@ function test_mitm() {
                          Ci.nsICertOverrideService.ERROR_UNTRUSTED,
                          SEC_ERROR_UNKNOWN_ISSUER);
   add_clear_override("unknownissuer.test-mode.pinning.example.com");
-};
+}
 
 function test_disabled() {
   // Disable pinning.
@@ -214,11 +214,11 @@ function check_pinning_telemetry() {
                          .snapshot();
   // Because all of our test domains are pinned to user-specified trust
   // anchors, effectively only strict mode and enforce test-mode get evaluated
-  equal(prod_histogram.counts[0], 16,
+  equal(prod_histogram.counts[0], 4,
         "Actual and expected prod (non-Mozilla) failure count should match");
   equal(prod_histogram.counts[1], 4,
         "Actual and expected prod (non-Mozilla) success count should match");
-  equal(test_histogram.counts[0], 5,
+  equal(test_histogram.counts[0], 2,
         "Actual and expected test (non-Mozilla) failure count should match");
   equal(test_histogram.counts[1], 0,
         "Actual and expected test (non-Mozilla) success count should match");
@@ -246,10 +246,10 @@ function check_pinning_telemetry() {
 }
 
 function run_test() {
-  add_tls_server_setup("BadCertServer");
+  add_tls_server_setup("BadCertServer", "bad_certs");
 
   // Add a user-specified trust anchor.
-  addCertFromFile(certdb, "tlsserver/other-test-ca.der", "CTu,u,u");
+  addCertFromFile(certdb, "bad_certs/other-test-ca.pem", "CTu,u,u");
 
   test_strict();
   test_mitm();

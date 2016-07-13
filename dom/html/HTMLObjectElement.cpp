@@ -5,17 +5,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/EventStates.h"
+#include "mozilla/dom/HTMLFormSubmission.h"
 #include "mozilla/dom/HTMLObjectElement.h"
 #include "mozilla/dom/HTMLObjectElementBinding.h"
 #include "mozilla/dom/ElementInlines.h"
-#include "nsAutoPtr.h"
 #include "nsAttrValueInlines.h"
 #include "nsGkAtoms.h"
 #include "nsError.h"
 #include "nsIDocument.h"
 #include "nsIPluginDocument.h"
 #include "nsIDOMDocument.h"
-#include "nsFormSubmission.h"
 #include "nsIObjectFrame.h"
 #include "nsNPAPIPluginInstance.h"
 #include "nsIWidget.h"
@@ -122,7 +121,7 @@ static nsIWidget* GetWidget(Element* aElement)
 
 Element* HTMLObjectElement::sLastFocused = nullptr; // Weak
 
-class PluginFocusSetter : public nsRunnable
+class PluginFocusSetter : public Runnable
 {
 public:
   PluginFocusSetter(nsIWidget* aWidget, Element* aElement)
@@ -212,18 +211,20 @@ void
 HTMLObjectElement::HandleFocusBlurPlugin(Element* aElement,
                                          WidgetEvent* aEvent)
 {
-  if (!aEvent->mFlags.mIsTrusted) {
+  if (!aEvent->IsTrusted()) {
     return;
   }
-  switch (aEvent->message) {
-    case NS_FOCUS_CONTENT: {
+  switch (aEvent->mMessage) {
+    case eFocus: {
       OnFocusBlurPlugin(aElement, true);
       break;
     }
-    case NS_BLUR_CONTENT: {
+    case eBlur: {
       OnFocusBlurPlugin(aElement, false);
       break;
     }
+    default:
+      break;
   }
 }
 
@@ -240,18 +241,6 @@ NS_IMETHODIMP
 HTMLObjectElement::GetForm(nsIDOMHTMLFormElement **aForm)
 {
   return nsGenericHTMLFormElement::GetForm(aForm);
-}
-
-void
-HTMLObjectElement::GetItemValueText(DOMString& aValue)
-{
-  GetData(aValue);
-}
-
-void
-HTMLObjectElement::SetItemValueText(const nsAString& aValue)
-{
-  SetData(aValue);
 }
 
 nsresult
@@ -278,7 +267,7 @@ HTMLObjectElement::BindToTree(nsIDocument *aDocument,
   // If we already have all the children, start the load.
   if (mIsDoneAddingChildren && !pluginDoc) {
     void (HTMLObjectElement::*start)() = &HTMLObjectElement::StartObjectLoad;
-    nsContentUtils::AddScriptRunner(NS_NewRunnableMethod(this, start));
+    nsContentUtils::AddScriptRunner(NewRunnableMethod(this, start));
   }
 
   return NS_OK;
@@ -290,7 +279,7 @@ HTMLObjectElement::UnbindFromTree(bool aDeep,
 {
 #ifdef XP_MACOSX
   // When a page is reloaded (when an nsIDocument's content is removed), the
-  // focused element isn't necessarily sent an NS_BLUR_CONTENT event. See
+  // focused element isn't necessarily sent an eBlur event. See
   // nsFocusManager::ContentRemoved(). This means that a widget may think it
   // still contains a focused plugin when it doesn't -- which in turn can
   // disable text input in the browser window. See bug 1137229.
@@ -418,7 +407,7 @@ HTMLObjectElement::Reset()
 }
 
 NS_IMETHODIMP
-HTMLObjectElement::SubmitNamesValues(nsFormSubmission *aFormSubmission)
+HTMLObjectElement::SubmitNamesValues(HTMLFormSubmission *aFormSubmission)
 {
   nsAutoString name;
   if (!GetAttr(kNameSpaceID_None, nsGkAtoms::name, name)) {
@@ -436,7 +425,7 @@ HTMLObjectElement::SubmitNamesValues(nsFormSubmission *aFormSubmission)
     return NS_OK;
   }
 
-  nsRefPtr<nsNPAPIPluginInstance> pi;
+  RefPtr<nsNPAPIPluginInstance> pi;
   objFrame->GetPluginInstance(getter_AddRefs(pi));
   if (!pi)
     return NS_OK;
@@ -451,7 +440,7 @@ HTMLObjectElement::SubmitNamesValues(nsFormSubmission *aFormSubmission)
 NS_IMPL_STRING_ATTR(HTMLObjectElement, Align, align)
 NS_IMPL_STRING_ATTR(HTMLObjectElement, Archive, archive)
 NS_IMPL_STRING_ATTR(HTMLObjectElement, Border, border)
-NS_IMPL_URI_ATTR_WITH_BASE(HTMLObjectElement, Code, code, codebase)
+NS_IMPL_STRING_ATTR(HTMLObjectElement, Code, code)
 NS_IMPL_URI_ATTR(HTMLObjectElement, CodeBase, codebase)
 NS_IMPL_STRING_ATTR(HTMLObjectElement, CodeType, codetype)
 NS_IMPL_URI_ATTR_WITH_BASE(HTMLObjectElement, Data, data, codebase)
@@ -481,7 +470,7 @@ HTMLObjectElement::GetContentDocument(nsIDOMDocument **aContentDocument)
   return NS_OK;
 }
 
-nsIDOMWindow*
+nsPIDOMWindowOuter*
 HTMLObjectElement::GetContentWindow()
 {
   nsIDocument* doc = GetContentDocument();

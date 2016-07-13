@@ -40,7 +40,7 @@ this.SessionHistory = Object.freeze({
 /**
  * The internal API for the SessionHistory module.
  */
-let SessionHistoryInternal = {
+var SessionHistoryInternal = {
   /**
    * Returns whether the given docShell's session history is empty.
    *
@@ -64,16 +64,17 @@ let SessionHistoryInternal = {
    *        The docShell that owns the session history.
    */
   collect: function (docShell) {
-    let data = {entries: []};
-    let isPinned = docShell.isAppTab;
+    let loadContext = docShell.QueryInterface(Ci.nsILoadContext);
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
     let history = webNavigation.sessionHistory.QueryInterface(Ci.nsISHistoryInternal);
+
+    let data = {entries: [], userContextId: loadContext.originAttributes.userContextId };
 
     if (history && history.count > 0) {
       // Loop over the transaction linked list directly so we can get the
       // persist property for each transaction.
       for (let txn = history.rootTransaction; txn; txn = txn.next) {
-        let entry = this.serializeEntry(txn.sHEntry, isPinned);
+        let entry = this.serializeEntry(txn.sHEntry);
         entry.persist = txn.persist;
         data.entries.push(entry);
       }
@@ -107,11 +108,9 @@ let SessionHistoryInternal = {
    *
    * @param shEntry
    *        nsISHEntry instance
-   * @param isPinned
-   *        The tab is pinned and should be treated differently for privacy.
    * @return object
    */
-  serializeEntry: function (shEntry, isPinned) {
+  serializeEntry: function (shEntry) {
     let entry = { url: shEntry.URI.spec };
 
     // Save some bytes and don't include the title property
@@ -122,6 +121,8 @@ let SessionHistoryInternal = {
     if (shEntry.isSubFrame) {
       entry.subframe = true;
     }
+
+    entry.charset = shEntry.URI.originCharset;
 
     let cacheKey = shEntry.cacheKey;
     if (cacheKey && cacheKey instanceof Ci.nsISupportsPRUint32 &&
@@ -140,6 +141,14 @@ let SessionHistoryInternal = {
       entry.referrerPolicy = shEntry.referrerPolicy;
     }
 
+    if (shEntry.originalURI) {
+      entry.originalURI = shEntry.originalURI.spec;
+    }
+
+    if (shEntry.loadReplace) {
+      entry.loadReplace = shEntry.loadReplace;
+    }
+
     if (shEntry.srcdocData)
       entry.srcdocData = shEntry.srcdocData;
 
@@ -152,10 +161,14 @@ let SessionHistoryInternal = {
     if (shEntry.contentType)
       entry.contentType = shEntry.contentType;
 
-    let x = {}, y = {};
-    shEntry.getScrollPosition(x, y);
-    if (x.value != 0 || y.value != 0)
-      entry.scroll = x.value + "," + y.value;
+    if (shEntry.scrollRestorationIsManual) {
+      entry.scrollRestorationIsManual = true;
+    } else {
+      let x = {}, y = {};
+      shEntry.getScrollPosition(x, y);
+      if (x.value != 0 || y.value != 0)
+        entry.scroll = x.value + "," + y.value;
+    }
 
     // Collect owner data for the current history entry.
     try {
@@ -193,7 +206,7 @@ let SessionHistoryInternal = {
             break;
           }
 
-          children.push(this.serializeEntry(child, isPinned));
+          children.push(this.serializeEntry(child));
         }
       }
 
@@ -249,7 +262,6 @@ let SessionHistoryInternal = {
   restore: function (docShell, tabData) {
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
     let history = webNavigation.sessionHistory;
-
     if (history.count > 0) {
       history.PurgeHistory(history.count);
     }
@@ -289,7 +301,7 @@ let SessionHistoryInternal = {
     var shEntry = Cc["@mozilla.org/browser/session-history-entry;1"].
                   createInstance(Ci.nsISHEntry);
 
-    shEntry.setURI(Utils.makeURI(entry.url));
+    shEntry.setURI(Utils.makeURI(entry.url, entry.charset));
     shEntry.setTitle(entry.title || entry.url);
     if (entry.subframe)
       shEntry.setIsSubFrame(entry.subframe || false);
@@ -299,6 +311,12 @@ let SessionHistoryInternal = {
     if (entry.referrer) {
       shEntry.referrerURI = Utils.makeURI(entry.referrer);
       shEntry.referrerPolicy = entry.referrerPolicy;
+    }
+    if (entry.originalURI) {
+      shEntry.originalURI = Utils.makeURI(entry.originalURI);
+    }
+    if (entry.loadReplace) {
+      shEntry.loadReplace = entry.loadReplace;
     }
     if (entry.isSrcdocEntry)
       shEntry.srcdocData = entry.srcdocData;
@@ -336,7 +354,9 @@ let SessionHistoryInternal = {
                                        entry.structuredCloneVersion);
     }
 
-    if (entry.scroll) {
+    if (entry.scrollRestorationIsManual) {
+      shEntry.scrollRestorationIsManual = true;
+    } else if (entry.scroll) {
       var scrollPos = (entry.scroll || "0,0").split(",");
       scrollPos = [parseInt(scrollPos[0]) || 0, parseInt(scrollPos[1]) || 0];
       shEntry.setScrollPosition(scrollPos[0], scrollPos[1]);

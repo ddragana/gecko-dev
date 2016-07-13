@@ -57,12 +57,12 @@ public:
   CComPtr(const CComPtr& aOther) : mPtr(nullptr) { Set(aOther.Get()); }
   CComPtr() : mPtr(nullptr) { }
   CComPtr(T* const & aPtr) : mPtr(nullptr) { Set(aPtr); }
-  CComPtr(const nullptr_t& aNullPtr) : mPtr(aNullPtr) { }
+  CComPtr(const std::nullptr_t& aNullPtr) : mPtr(aNullPtr) { }
   T** operator&() { return &mPtr; }
   T* operator->(){ return mPtr; }
   operator T*() { return mPtr; }
   T* operator=(T* const & aPtr) { return Set(aPtr); }
-  T* operator=(const nullptr_t& aPtr) { return mPtr = aPtr; }
+  T* operator=(const std::nullptr_t& aPtr) { return mPtr = aPtr; }
 
   T* Get() const { return mPtr; }
 
@@ -258,6 +258,10 @@ enum CodecType {
 // Returns the name of the DLL that is needed to decode H.264 or AAC on
 // the given windows version we're running on.
 const char* WMFDecoderDllNameFor(CodecType aCodec);
+
+// Returns the maximum number of threads we want WMF to use for decoding
+// given the number of logical processors available.
+int32_t GetNumThreads(int32_t aCoreCount);
 
 } // namespace wmf
 

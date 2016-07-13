@@ -22,6 +22,8 @@ namespace mozilla {
 class EventChainPreVisitor;
 namespace dom {
 
+class ImageLoadTask;
+
 class ResponsiveImageSelector;
 class HTMLImageElement final : public nsGenericHTMLElement,
                                public nsImageLoadingContent,
@@ -111,7 +113,7 @@ public:
   }
   void SetWidth(uint32_t aWidth, ErrorResult& aError)
   {
-    SetUnsignedIntAttr(nsGkAtoms::width, aWidth, aError);
+    SetUnsignedIntAttr(nsGkAtoms::width, aWidth, 0, aError);
   }
   uint32_t Height()
   {
@@ -119,7 +121,7 @@ public:
   }
   void SetHeight(uint32_t aHeight, ErrorResult& aError)
   {
-    SetUnsignedIntAttr(nsGkAtoms::height, aHeight, aError);
+    SetUnsignedIntAttr(nsGkAtoms::height, aHeight, 0, aError);
   }
   uint32_t NaturalWidth();
   uint32_t NaturalHeight();
@@ -130,7 +132,7 @@ public:
   }
   void SetHspace(uint32_t aHspace, ErrorResult& aError)
   {
-    SetUnsignedIntAttr(nsGkAtoms::hspace, aHspace, aError);
+    SetUnsignedIntAttr(nsGkAtoms::hspace, aHspace, 0, aError);
   }
   uint32_t Vspace()
   {
@@ -138,7 +140,7 @@ public:
   }
   void SetVspace(uint32_t aVspace, ErrorResult& aError)
   {
-    SetUnsignedIntAttr(nsGkAtoms::vspace, aVspace, aError);
+    SetUnsignedIntAttr(nsGkAtoms::vspace, aVspace, 0, aError);
   }
 
   // The XPCOM versions of the following getters work for Web IDL bindings as well
@@ -189,19 +191,19 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::border, aBorder, aError);
   }
-  void SetReferrer(const nsAString& aReferrer, ErrorResult& aError)
+  void SetReferrerPolicy(const nsAString& aReferrer, ErrorResult& aError)
   {
-    SetHTMLAttr(nsGkAtoms::referrer, aReferrer, aError);
+    SetHTMLAttr(nsGkAtoms::referrerpolicy, aReferrer, aError);
   }
-  void GetReferrer(nsAString& aReferrer)
+  void GetReferrerPolicy(nsAString& aReferrer)
   {
-    GetHTMLAttr(nsGkAtoms::referrer, aReferrer);
+    GetEnumAttr(nsGkAtoms::referrerpolicy, EmptyCString().get(), aReferrer);
   }
 
   net::ReferrerPolicy
   GetImageReferrerPolicy() override
   {
-    return GetReferrerPolicy();
+    return GetReferrerPolicyAsEnum();
   }
 
   int32_t X();
@@ -265,6 +267,12 @@ public:
                                 const nsAString& aMediaAttr,
                                 nsAString& aResult);
 
+  /**
+   * If this image's src pointers to an SVG document, flush the SVG document's
+   * use counters to telemetry.  Only used for testing purposes.
+   */
+  void FlushUseCounters();
+
 protected:
   virtual ~HTMLImageElement();
 
@@ -274,7 +282,7 @@ protected:
   // algorithm (InResponsiveMode()) -- synchronous actions when just
   // using img.src will bypass this, and update source and kick off
   // image load synchronously.
-  void QueueImageLoadTask();
+  void QueueImageLoadTask(bool aAlwaysLoad);
 
   // True if we have a srcset attribute or a <picture> parent, regardless of if
   // any valid responsive sources were parsed from either.
@@ -286,7 +294,7 @@ protected:
 
   // Resolve and load the current mResponsiveSelector (responsive mode) or src
   // attr image.
-  nsresult LoadSelectedImage(bool aForce, bool aNotify);
+  nsresult LoadSelectedImage(bool aForce, bool aNotify, bool aAlwaysLoad);
 
   // True if this string represents a type we would support on <source type>
   static bool SupportedPictureSourceType(const nsAString& aType);
@@ -315,7 +323,9 @@ protected:
   // the existing mResponsiveSelector, meaning you need to update its
   // parameters as appropriate before calling (or null it out to force
   // recreation)
-  void UpdateResponsiveSource();
+  //
+  // Returns true if the source has changed, and false otherwise.
+  bool UpdateResponsiveSource();
 
   // Given a <source> node that is a previous sibling *or* ourselves, try to
   // create a ResponsiveSelector.
@@ -328,13 +338,11 @@ protected:
                                    const nsAString *aSizes = nullptr);
 
   CSSIntPoint GetXY();
-  virtual void GetItemValueText(DOMString& text) override;
-  virtual void SetItemValueText(const nsAString& text) override;
   virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
   void UpdateFormOwner();
 
   virtual nsresult BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                                 const nsAttrValueOrString* aValue,
+                                 nsAttrValueOrString* aValue,
                                  bool aNotify) override;
 
   virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
@@ -345,7 +353,7 @@ protected:
   HTMLFormElement* mForm;
 
   // Created when we're tracking responsive image state
-  nsRefPtr<ResponsiveImageSelector> mResponsiveSelector;
+  RefPtr<ResponsiveImageSelector> mResponsiveSelector;
 
 private:
   bool SourceElementMatches(nsIContent* aSourceNode);
@@ -353,7 +361,8 @@ private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                     nsRuleData* aData);
 
-  nsCOMPtr<nsIRunnable> mPendingImageLoadTask;
+  bool mInDocResponsiveContent;
+  RefPtr<ImageLoadTask> mPendingImageLoadTask;
 };
 
 } // namespace dom

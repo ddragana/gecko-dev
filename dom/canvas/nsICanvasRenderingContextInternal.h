@@ -12,19 +12,20 @@
 #include "nsIDocShell.h"
 #include "nsRefreshDriver.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
-#include "GraphicsFilter.h"
+#include "mozilla/dom/OffscreenCanvas.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/UniquePtr.h"
 
 #define NS_ICANVASRENDERINGCONTEXTINTERNAL_IID \
-{ 0x3cc9e801, 0x1806, 0x4ff6, \
-  { 0x86, 0x14, 0xf9, 0xd0, 0xf4, 0xfb, 0x3b, 0x08 } }
+{ 0xb84f2fed, 0x9d4b, 0x430b, \
+  { 0xbd, 0xfb, 0x85, 0x57, 0x8a, 0xc2, 0xb4, 0x4b } }
 
-class gfxASurface;
 class nsDisplayListBuilder;
 
 namespace mozilla {
 namespace layers {
 class CanvasLayer;
+class Layer;
 class LayerManager;
 } // namespace layers
 namespace gfx {
@@ -38,6 +39,7 @@ class nsICanvasRenderingContextInternal :
 {
 public:
   typedef mozilla::layers::CanvasLayer CanvasLayer;
+  typedef mozilla::layers::Layer Layer;
   typedef mozilla::layers::LayerManager LayerManager;
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ICANVASRENDERINGCONTEXTINTERNAL_IID)
@@ -80,20 +82,26 @@ public:
     return mCanvasElement;
   }
 
-#ifdef DEBUG
-    // Useful for testing
-    virtual int32_t GetWidth() const = 0;
-    virtual int32_t GetHeight() const = 0;
-#endif
+  void SetOffscreenCanvas(mozilla::dom::OffscreenCanvas* aOffscreenCanvas)
+  {
+    mOffscreenCanvas = aOffscreenCanvas;
+  }
+
+  // Dimensions of the canvas, in pixels.
+  virtual int32_t GetWidth() const = 0;
+  virtual int32_t GetHeight() const = 0;
 
   // Sets the dimensions of the canvas, in pixels.  Called
   // whenever the size of the element changes.
   NS_IMETHOD SetDimensions(int32_t width, int32_t height) = 0;
 
-  NS_IMETHOD InitializeWithSurface(nsIDocShell *docShell, gfxASurface *surface, int32_t width, int32_t height) = 0;
+  // Initializes with an nsIDocShell and DrawTarget. The size is taken from the
+  // DrawTarget.
+  NS_IMETHOD InitializeWithDrawTarget(nsIDocShell *aDocShell,
+                                      mozilla::gfx::DrawTarget* aTarget) = 0;
 
   // Creates an image buffer. Returns null on failure.
-  virtual void GetImageBuffer(uint8_t** imageBuffer, int32_t* format) = 0;
+  virtual mozilla::UniquePtr<uint8_t[]> GetImageBuffer(int32_t* format) = 0;
 
   // Gives you a stream containing the image represented by this context.
   // The format is given in mimeTime, for example "image/png".
@@ -125,9 +133,9 @@ public:
 
   // Return the CanvasLayer for this context, creating
   // one for the given layer manager if not available.
-  virtual already_AddRefed<CanvasLayer> GetCanvasLayer(nsDisplayListBuilder* builder,
-                                                       CanvasLayer *oldLayer,
-                                                       LayerManager *manager) = 0;
+  virtual already_AddRefed<Layer> GetCanvasLayer(nsDisplayListBuilder* builder,
+                                                 Layer *oldLayer,
+                                                 LayerManager *manager) = 0;
 
   // Return true if the canvas should be forced to be "inactive" to ensure
   // it can be drawn to the screen even if it's too large to be blitted by
@@ -136,16 +144,31 @@ public:
 
   virtual void MarkContextClean() = 0;
 
+  // Called when a frame is captured.
+  virtual void MarkContextCleanForFrameCapture() = 0;
+
+  // Whether the context is clean or has been invalidated since the last frame
+  // was captured.
+  virtual bool IsContextCleanForFrameCapture() = 0;
+
   // Redraw the dirty rectangle of this canvas.
   NS_IMETHOD Redraw(const gfxRect &dirty) = 0;
 
-  NS_IMETHOD SetContextOptions(JSContext* cx, JS::Handle<JS::Value> options) { return NS_OK; }
+  NS_IMETHOD SetContextOptions(JSContext* cx, JS::Handle<JS::Value> options,
+                               mozilla::ErrorResult& aRvForDictionaryInit)
+  {
+    return NS_OK;
+  }
 
   // return true and fills in the bounding rect if elementis a child and has a hit region.
   virtual bool GetHitRegionRect(mozilla::dom::Element* element, nsRect& rect) { return false; }
 
   // Given a point, return hit region ID if it exists or an empty string if it doesn't
   virtual nsString GetHitRegion(const mozilla::gfx::Point& point) { return nsString(); }
+
+  virtual void OnVisibilityChange() {}
+
+  virtual void OnMemoryPressure() {}
 
   //
   // shmem support
@@ -158,8 +181,9 @@ public:
   NS_IMETHOD SetIsIPC(bool isIPC) = 0;
 
 protected:
-  nsRefPtr<mozilla::dom::HTMLCanvasElement> mCanvasElement;
-  nsRefPtr<nsRefreshDriver> mRefreshDriver;
+  RefPtr<mozilla::dom::HTMLCanvasElement> mCanvasElement;
+  RefPtr<mozilla::dom::OffscreenCanvas> mOffscreenCanvas;
+  RefPtr<nsRefreshDriver> mRefreshDriver;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsICanvasRenderingContextInternal,

@@ -129,6 +129,14 @@ interface nsIXPConnectWrappedJS : nsIXPConnectJSObjectHolder
 
 };
 
+// Special interface to unmark the internal JSObject.
+// QIing to nsIXPConnectWrappedJSUnmarkGray does *not* addref, it only unmarks,
+// and QIing to nsIXPConnectWrappedJSUnmarkGray is always supposed to fail.
+[builtinclass, uuid(c02a0ce6-275f-4ea1-9c23-08494898b070)]
+interface nsIXPConnectWrappedJSUnmarkGray : nsIXPConnectWrappedJS
+{
+};
+
 /***************************************************************************/
 
 /**
@@ -266,7 +274,7 @@ interface nsIXPCFunctionThisTranslator : nsISupports
     { 0xbd, 0xd6, 0x0, 0x0, 0x64, 0x65, 0x73, 0x74 } }
 %}
 
-[noscript, uuid(db83b3af-ac22-4dd2-99cf-7f79270ed4cd)]
+[noscript, uuid(768507b5-b981-40c7-8276-f6a1da502a24)]
 interface nsIXPConnect : nsISupports
 {
 %{ C++
@@ -409,9 +417,9 @@ interface nsIXPConnect : nsISupports
     getNativeOfWrapper(in JSContextPtr aJSContext,
                        in JSObjectPtr  aJSObj);
 
-    [noscript,notxpcom,nostdcall] JSContextPtr getCurrentJSContext();
     [noscript,notxpcom,nostdcall] JSContextPtr getSafeJSContext();
 
+    // Will return null if there is no JS stack right now.
     readonly attribute nsIStackFrame                CurrentJSStack;
     readonly attribute nsAXPCNativeCallContextPtr   CurrentNativeCallContext;
 
@@ -486,6 +494,8 @@ interface nsIXPConnect : nsISupports
      *           the script. The actual evaluation will happen on a new
      *           temporary context.
      * @param sandbox The sandbox object to evaluate the script in.
+     * @param version The JavaScript version to use for evaluating the script.
+     *                Should be a valid JSVersion from jspubtd.h.
      * @return The result of the evaluation as a jsval. If the caller
      *         intends to use the return value from this call the caller
      *         is responsible for rooting the jsval before making a call
@@ -493,15 +503,8 @@ interface nsIXPConnect : nsISupports
      */
     [noscript] jsval evalInSandboxObject(in AString source, in string filename,
                                          in JSContextPtr cx,
-                                         in JSObjectPtr sandbox);
-
-    /**
-     * Whether or not XPConnect should report all JS exceptions when returning
-     * from JS into C++. False by default, although any value set in the
-     * MOZ_REPORT_ALL_JS_EXCEPTIONS environment variable will override the value
-     * passed here.
-     */
-    void setReportAllJSExceptions(in boolean reportAllJSExceptions);
+                                         in JSObjectPtr sandbox,
+                                         in int32_t version);
 
     /**
      * Trigger a JS garbage collection.

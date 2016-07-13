@@ -10,6 +10,7 @@
 #define nsFontFaceLoader_h_
 
 #include "mozilla/Attributes.h"
+#include "mozilla/TimeStamp.h"
 #include "nsCOMPtr.h"
 #include "nsIStreamLoader.h"
 #include "nsIChannel.h"
@@ -41,21 +42,21 @@ public:
 
   static void LoadTimerCallback(nsITimer* aTimer, void* aClosure);
 
-  static nsresult CheckLoadAllowed(nsIPrincipal* aSourcePrincipal,
-                                   nsIURI* aTargetURI,
-                                   nsISupports* aContext);
   gfxUserFontEntry* GetUserFontEntry() const { return mUserFontEntry; }
 
 protected:
   virtual ~nsFontFaceLoader();
 
+  // helper method for determining the font-display value
+  uint8_t GetFontDisplay();
+
 private:
-  nsRefPtr<gfxUserFontEntry>  mUserFontEntry;
+  RefPtr<gfxUserFontEntry>  mUserFontEntry;
   nsCOMPtr<nsIURI>        mFontURI;
-  nsRefPtr<mozilla::dom::FontFaceSet> mFontFaceSet;
+  RefPtr<mozilla::dom::FontFaceSet> mFontFaceSet;
   nsCOMPtr<nsIChannel>    mChannel;
   nsCOMPtr<nsITimer>      mLoadTimer;
-
+  mozilla::TimeStamp      mStartTime;
   nsIStreamLoader*        mStreamLoader;
 };
 

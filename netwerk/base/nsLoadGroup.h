@@ -14,11 +14,15 @@
 #include "nsWeakPtr.h"
 #include "nsWeakReference.h"
 #include "nsISupportsPriority.h"
-#include "pldhash.h"
+#include "PLDHashTable.h"
 #include "mozilla/TimeStamp.h"
 
-class nsILoadGroupConnectionInfo;
+class nsIRequestContext;
+class nsIRequestContextService;
 class nsITimedChannel;
+
+namespace mozilla {
+namespace net {
 
 class nsLoadGroup : public nsILoadGroup,
                     public nsILoadGroupChild,
@@ -28,7 +32,7 @@ class nsLoadGroup : public nsILoadGroup,
 {
 public:
     NS_DECL_AGGREGATED
-    
+
     ////////////////////////////////////////////////////////////////////////////
     // nsIRequest methods:
     NS_DECL_NSIREQUEST
@@ -52,6 +56,8 @@ public:
     explicit nsLoadGroup(nsISupports* outer);
     virtual ~nsLoadGroup();
 
+    nsresult Init();
+
 protected:
     nsresult MergeLoadFlags(nsIRequest *aRequest, nsLoadFlags& flags);
     nsresult MergeDefaultLoadFlags(nsIRequest *aRequest, nsLoadFlags& flags);
@@ -68,14 +74,15 @@ protected:
 
     nsCOMPtr<nsILoadGroup>          mLoadGroup; // load groups can contain load groups
     nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
-    nsCOMPtr<nsILoadGroupConnectionInfo> mConnectionInfo;
+    nsCOMPtr<nsIRequestContext>  mRequestContext;
+    nsCOMPtr<nsIRequestContextService> mRequestContextService;
 
     nsCOMPtr<nsIRequest>            mDefaultLoadRequest;
     PLDHashTable                    mRequests;
 
     nsWeakPtr                       mObserver;
     nsWeakPtr                       mParentLoadGroup;
-    
+
     nsresult                        mStatus;
     int32_t                         mPriority;
     bool                            mIsCanceling;
@@ -88,6 +95,11 @@ protected:
 
     /* For nsPILoadGroupInternal */
     uint32_t                        mTimedNonCachedRequestsUntilOnEndPageLoad;
+
+    nsCString                       mUserAgentOverrideCache;
 };
+
+} // namespace net
+} // namespace mozilla
 
 #endif // nsLoadGroup_h__

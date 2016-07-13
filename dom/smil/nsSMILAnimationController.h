@@ -74,10 +74,8 @@ public:
 
   void SetResampleNeeded()
   {
-    if (!mRunningSample) {
-      if (!mResampleNeeded) {
-        FlagDocumentNeedsFlush();
-      }
+    if (!mRunningSample && !mResampleNeeded) {
+      FlagDocumentNeedsFlush();
       mResampleNeeded = true;
     }
   }
@@ -104,10 +102,16 @@ public:
   void NotifyRefreshDriverDestroying(nsRefreshDriver* aRefreshDriver);
 
   // Helper to check if we have any animation elements at all
-  bool HasRegisteredAnimations()
-  { return mAnimationElementTable.Count() != 0; }
+  bool HasRegisteredAnimations() const
+  {
+    return mAnimationElementTable.Count() != 0;
+  }
 
   void AddStyleUpdatesTo(mozilla::RestyleTracker& aTracker);
+  bool MightHavePendingStyleUpdates() const
+  {
+    return mMightHavePendingStyleUpdates;
+  }
 
 protected:
   ~nsSMILAnimationController();
@@ -138,8 +142,12 @@ protected:
 
   static void SampleTimedElement(mozilla::dom::SVGAnimationElement* aElement,
                                  TimeContainerHashtable* aActiveContainers);
+
   static void AddAnimationToCompositorTable(
-    mozilla::dom::SVGAnimationElement* aElement, nsSMILCompositorTable* aCompositorTable);
+      mozilla::dom::SVGAnimationElement* aElement,
+      nsSMILCompositorTable* aCompositorTable,
+      bool& aStyleFlushNeeded);
+
   static bool GetTargetIdentifierForAnimation(
       mozilla::dom::SVGAnimationElement* aAnimElem, nsSMILTargetIdentifier& aResult);
 
@@ -185,6 +193,9 @@ protected:
 
   // Are we registered with our document's refresh driver?
   bool                       mRegisteredWithRefreshDriver;
+
+  // Have we updated animated values without adding them to the restyle tracker?
+  bool                       mMightHavePendingStyleUpdates;
 
   // Store raw ptr to mDocument.  It owns the controller, so controller
   // shouldn't outlive it

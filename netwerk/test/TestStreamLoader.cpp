@@ -3,7 +3,7 @@
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
-#include "mozilla/Logging.h"
+#include "NetwerkTestLogging.h"
 #include "mozilla/Attributes.h"
 #include "nsIScriptSecurityManager.h"
 
@@ -74,7 +74,7 @@ int main(int argc, char **argv)
     rv = NS_NewChannel(getter_AddRefs(chan),
                        uri,
                        systemPrincipal,
-                       nsILoadInfo::SEC_NORMAL,
+                       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS,
                        nsIContentPolicy::TYPE_OTHER);
 
     if (NS_FAILED(rv))
@@ -89,7 +89,7 @@ int main(int argc, char **argv)
     if (NS_FAILED(rv))
       return -1;
 
-    rv = chan->AsyncOpen(loader, nullptr);
+    rv = chan->AsyncOpen2(loader);
     if (NS_FAILED(rv))
       return -1;
 

@@ -70,14 +70,14 @@ DOMImplementation::CreateDocumentType(const nsAString& aQualifiedName,
     return nullptr;
   }
 
-  nsCOMPtr<nsIAtom> name = do_GetAtom(aQualifiedName);
+  nsCOMPtr<nsIAtom> name = NS_Atomize(aQualifiedName);
   if (!name) {
     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return nullptr;
   }
 
   // Indicate that there is no internal subset (not just an empty one)
-  nsRefPtr<DocumentType> docType =
+  RefPtr<DocumentType> docType =
     NS_NewDOMDocumentType(mOwner->NodeInfoManager(), name, aPublicId,
                           aSystemId, NullString(), aRv);
   return docType.forget();
@@ -210,39 +210,31 @@ DOMImplementation::CreateHTMLDocument(const nsAString& aTitle,
   NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(document);
 
-  nsCOMPtr<nsIContent> root;
-  rv = doc->CreateElem(NS_LITERAL_STRING("html"), nullptr, kNameSpaceID_XHTML,
-                       getter_AddRefs(root));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<Element> root = doc->CreateElem(NS_LITERAL_STRING("html"), nullptr,
+                                           kNameSpaceID_XHTML);
   rv = doc->AppendChildTo(root, false);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIContent> head;
-  rv = doc->CreateElem(NS_LITERAL_STRING("head"), nullptr, kNameSpaceID_XHTML,
-                       getter_AddRefs(head));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<Element> head = doc->CreateElem(NS_LITERAL_STRING("head"), nullptr,
+                                           kNameSpaceID_XHTML);
   rv = root->AppendChildTo(head, false);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (!DOMStringIsNull(aTitle)) {
-    nsCOMPtr<nsIContent> title;
-    rv = doc->CreateElem(NS_LITERAL_STRING("title"), nullptr,
-                         kNameSpaceID_XHTML, getter_AddRefs(title));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<Element> title = doc->CreateElem(NS_LITERAL_STRING("title"),
+                                              nullptr, kNameSpaceID_XHTML);
     rv = head->AppendChildTo(title, false);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsRefPtr<nsTextNode> titleText = new nsTextNode(doc->NodeInfoManager());
+    RefPtr<nsTextNode> titleText = new nsTextNode(doc->NodeInfoManager());
     rv = titleText->SetText(aTitle, false);
     NS_ENSURE_SUCCESS(rv, rv);
     rv = title->AppendChildTo(titleText, false);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  nsCOMPtr<nsIContent> body;
-  rv = doc->CreateElem(NS_LITERAL_STRING("body"), nullptr, kNameSpaceID_XHTML,
-                       getter_AddRefs(body));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<Element> body = doc->CreateElem(NS_LITERAL_STRING("body"), nullptr,
+                                           kNameSpaceID_XHTML);
   rv = root->AppendChildTo(body, false);
   NS_ENSURE_SUCCESS(rv, rv);
 

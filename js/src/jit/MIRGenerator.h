@@ -37,10 +37,16 @@ class MIRGenerator
   public:
     MIRGenerator(CompileCompartment* compartment, const JitCompileOptions& options,
                  TempAllocator* alloc, MIRGraph* graph,
-                 CompileInfo* info, const OptimizationInfo* optimizationInfo,
-                 Label* outOfBoundsLabel = nullptr,
-                 Label* conversionErrorLabel = nullptr,
-                 bool usesSignalHandlersForAsmJSOOB = false);
+                 const CompileInfo* info, const OptimizationInfo* optimizationInfo);
+
+    void initUsesSignalHandlersForAsmJSOOB(bool init) {
+#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
+        usesSignalHandlersForAsmJSOOB_ = init;
+#endif
+    }
+    void initMinAsmJSHeapLength(uint32_t init) {
+        minAsmJSHeapLength_ = init;
+    }
 
     TempAllocator& alloc() {
         return *alloc_;
@@ -48,13 +54,13 @@ class MIRGenerator
     MIRGraph& graph() {
         return *graph_;
     }
-    bool ensureBallast() {
+    MOZ_MUST_USE bool ensureBallast() {
         return alloc().ensureBallast();
     }
     const JitRuntime* jitRuntime() const {
         return GetJitContext()->runtime->jitRuntime();
     }
-    CompileInfo& info() {
+    const CompileInfo& info() const {
         return *info_;
     }
     const OptimizationInfo& optimizationInfo() const {
@@ -62,22 +68,23 @@ class MIRGenerator
     }
 
     template <typename T>
-    T * allocate(size_t count = 1) {
-        if (count & mozilla::tl::MulOverflowMask<sizeof(T)>::value)
+    T* allocate(size_t count = 1) {
+        size_t bytes;
+        if (MOZ_UNLIKELY(!CalculateAllocSize<T>(count, &bytes)))
             return nullptr;
-        return reinterpret_cast<T*>(alloc().allocate(sizeof(T) * count));
+        return static_cast<T*>(alloc().allocate(bytes));
     }
 
     // Set an error state and prints a message. Returns false so errors can be
     // propagated up.
-    bool abort(const char* message, ...);
-    bool abortFmt(const char* message, va_list ap);
+    bool abort(const char* message, ...);           // always returns false
+    bool abortFmt(const char* message, va_list ap); // always returns false
 
     bool errored() const {
         return error_;
     }
 
-    bool instrumentedProfiling() {
+    MOZ_MUST_USE bool instrumentedProfiling() {
         if (!instrumentedProfilingIsCached_) {
             instrumentedProfiling_ = GetJitContext()->runtime->spsProfiler().enabled();
             instrumentedProfilingIsCached_ = true;
@@ -128,19 +135,17 @@ class MIRGenerator
         return info_->compilingAsmJS();
     }
 
-    uint32_t maxAsmJSStackArgBytes() const {
+    uint32_t wasmMaxStackArgBytes() const {
         MOZ_ASSERT(compilingAsmJS());
-        return maxAsmJSStackArgBytes_;
+        return wasmMaxStackArgBytes_;
     }
-    uint32_t resetAsmJSMaxStackArgBytes() {
+    void initWasmMaxStackArgBytes(uint32_t n) {
         MOZ_ASSERT(compilingAsmJS());
-        uint32_t old = maxAsmJSStackArgBytes_;
-        maxAsmJSStackArgBytes_ = 0;
-        return old;
+        MOZ_ASSERT(wasmMaxStackArgBytes_ == 0);
+        wasmMaxStackArgBytes_ = n;
     }
-    void setAsmJSMaxStackArgBytes(uint32_t n) {
-        MOZ_ASSERT(compilingAsmJS());
-        maxAsmJSStackArgBytes_ = n;
+    uint32_t minAsmJSHeapLength() const {
+        return minAsmJSHeapLength_;
     }
     void setPerformsCall() {
         performsCall_ = true;
@@ -151,13 +156,6 @@ class MIRGenerator
     // Traverses the graph to find if there's any SIMD instruction. Costful but
     // the value is cached, so don't worry about calling it several times.
     bool usesSimd();
-    void initMinAsmJSHeapLength(uint32_t len) {
-        MOZ_ASSERT(minAsmJSHeapLength_ == 0);
-        minAsmJSHeapLength_ = len;
-    }
-    uint32_t minAsmJSHeapLength() const {
-        return minAsmJSHeapLength_;
-    }
 
     bool modifiesFrameArguments() const {
         return modifiesFrameArguments_;
@@ -175,11 +173,9 @@ class MIRGenerator
     CompileCompartment* compartment;
 
   protected:
-    CompileInfo* info_;
+    const CompileInfo* info_;
     const OptimizationInfo* optimizationInfo_;
     TempAllocator* alloc_;
-    JSFunction* fun_;
-    uint32_t nslots_;
     MIRGraph* graph_;
     AbortReason abortReason_;
     bool shouldForceAbort_; // Force AbortReason_Disable
@@ -188,11 +184,10 @@ class MIRGenerator
     mozilla::Atomic<bool, mozilla::Relaxed>* pauseBuild_;
     mozilla::Atomic<bool, mozilla::Relaxed> cancelBuild_;
 
-    uint32_t maxAsmJSStackArgBytes_;
+    uint32_t wasmMaxStackArgBytes_;
     bool performsCall_;
     bool usesSimd_;
-    bool usesSimdCached_;
-    uint32_t minAsmJSHeapLength_;
+    bool cachedUsesSimd_;
 
     // Keep track of whether frame arguments are modified during execution.
     // RegAlloc needs to know this as spilling values back to their register
@@ -205,14 +200,10 @@ class MIRGenerator
 
     void addAbortedPreliminaryGroup(ObjectGroup* group);
 
-    Label* outOfBoundsLabel_;
-    // Label where we should jump in asm.js mode, in the case where we have an
-    // invalid conversion or a loss of precision (when converting from a
-    // floating point SIMD type into an integer SIMD type).
-    Label* conversionErrorLabel_;
 #if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
     bool usesSignalHandlersForAsmJSOOB_;
 #endif
+    uint32_t minAsmJSHeapLength_;
 
     void setForceAbort() {
         shouldForceAbort_ = true;
@@ -231,16 +222,9 @@ class MIRGenerator
   public:
     const JitCompileOptions options;
 
-    Label* conversionErrorLabel() const {
-        MOZ_ASSERT((conversionErrorLabel_ != nullptr) == compilingAsmJS());
-        return conversionErrorLabel_;
-    }
-    Label* outOfBoundsLabel() const {
-        MOZ_ASSERT(compilingAsmJS());
-        return outOfBoundsLabel_;
-    }
-    bool needsAsmJSBoundsCheckBranch(const MAsmJSHeapAccess* access) const;
-    size_t foldableOffsetRange(const MAsmJSHeapAccess* access) const;
+    bool needsBoundsCheckBranch(const MWasmMemoryAccess* access) const;
+    size_t foldableOffsetRange(const MWasmMemoryAccess* access) const;
+    size_t foldableOffsetRange(bool accessNeedsBoundsCheck, bool atomic) const;
 
   private:
     GraphSpewer gs_;

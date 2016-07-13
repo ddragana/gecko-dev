@@ -36,11 +36,11 @@ SubtleCrypto::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 
 #define SUBTLECRYPTO_METHOD_BODY(Operation, aRv, ...)                   \
   MOZ_ASSERT(mParent);                                                  \
-  nsRefPtr<Promise> p = Promise::Create(mParent, aRv);                  \
+  RefPtr<Promise> p = Promise::Create(mParent, aRv);                  \
   if (aRv.Failed()) {                                                   \
     return nullptr;                                                     \
   }                                                                     \
-  nsRefPtr<WebCryptoTask> task = WebCryptoTask::Create ## Operation ## Task(__VA_ARGS__); \
+  RefPtr<WebCryptoTask> task = WebCryptoTask::Create ## Operation ## Task(__VA_ARGS__); \
   task->DispatchWithPromise(p); \
   return p.forget();
 
@@ -104,8 +104,8 @@ SubtleCrypto::ImportKey(JSContext* cx,
                         const Sequence<nsString>& keyUsages,
                         ErrorResult& aRv)
 {
-  SUBTLECRYPTO_METHOD_BODY(ImportKey, aRv, cx, format, keyData, algorithm,
-                           extractable, keyUsages)
+  SUBTLECRYPTO_METHOD_BODY(ImportKey, aRv, mParent, cx, format, keyData,
+                           algorithm, extractable, keyUsages)
 }
 
 already_AddRefed<Promise>
@@ -121,7 +121,8 @@ SubtleCrypto::GenerateKey(JSContext* cx, const ObjectOrString& algorithm,
                           bool extractable, const Sequence<nsString>& keyUsages,
                           ErrorResult& aRv)
 {
-  SUBTLECRYPTO_METHOD_BODY(GenerateKey, aRv, cx, algorithm, extractable, keyUsages)
+  SUBTLECRYPTO_METHOD_BODY(GenerateKey, aRv, mParent, cx, algorithm,
+                           extractable, keyUsages)
 }
 
 already_AddRefed<Promise>
@@ -132,7 +133,7 @@ SubtleCrypto::DeriveKey(JSContext* cx,
                         bool extractable, const Sequence<nsString>& keyUsages,
                         ErrorResult& aRv)
 {
-  SUBTLECRYPTO_METHOD_BODY(DeriveKey, aRv, cx, algorithm, baseKey,
+  SUBTLECRYPTO_METHOD_BODY(DeriveKey, aRv, mParent, cx, algorithm, baseKey,
                            derivedKeyType, extractable, keyUsages)
 }
 
@@ -168,9 +169,9 @@ SubtleCrypto::UnwrapKey(JSContext* cx,
                         const Sequence<nsString>& keyUsages,
                         ErrorResult& aRv)
 {
-  SUBTLECRYPTO_METHOD_BODY(UnwrapKey, aRv, cx, format, wrappedKey, unwrappingKey,
-                           unwrapAlgorithm, unwrappedKeyAlgorithm,
-                           extractable, keyUsages)
+  SUBTLECRYPTO_METHOD_BODY(UnwrapKey, aRv, mParent, cx, format, wrappedKey,
+                           unwrappingKey, unwrapAlgorithm,
+                           unwrappedKeyAlgorithm, extractable, keyUsages)
 }
 
 } // namespace dom

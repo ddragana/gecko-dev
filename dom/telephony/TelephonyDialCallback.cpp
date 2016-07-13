@@ -16,7 +16,7 @@ using namespace mozilla::dom::telephony;
 NS_IMPL_ISUPPORTS_INHERITED(TelephonyDialCallback, TelephonyCallback,
                             nsITelephonyDialCallback)
 
-TelephonyDialCallback::TelephonyDialCallback(nsPIDOMWindow* aWindow,
+TelephonyDialCallback::TelephonyDialCallback(nsPIDOMWindowInner* aWindow,
                                              Telephony* aTelephony,
                                              Promise* aPromise)
   : TelephonyCallback(aPromise), mWindow(aWindow), mTelephony(aTelephony)
@@ -56,10 +56,10 @@ TelephonyDialCallback::NotifyDialCallSuccess(uint32_t aClientId,
                                              uint32_t aCallIndex,
                                              const nsAString& aNumber)
 {
-  nsRefPtr<TelephonyCallId> id = mTelephony->CreateCallId(aNumber);
-  nsRefPtr<TelephonyCall> call =
+  RefPtr<TelephonyCallId> id = mTelephony->CreateCallId(aNumber);
+  RefPtr<TelephonyCall> call =
       mTelephony->CreateCall(id, aClientId, aCallIndex,
-                             nsITelephonyService::CALL_STATE_DIALING);
+                             TelephonyCallState::Dialing);
 
   mPromise->MaybeResolve(call);
   return NS_OK;
@@ -75,7 +75,7 @@ TelephonyDialCallback::NotifyDialMMISuccess(const nsAString& aStatusMessage)
 
   JSContext* cx = jsapi.cx();
 
-  MozMMIResult result;
+  RootedDictionary<MozMMIResult> result(cx);
   result.mSuccess = true;
   result.mServiceCode.Assign(mServiceCode);
   result.mStatusMessage.Assign(aStatusMessage);
@@ -94,7 +94,7 @@ TelephonyDialCallback::NotifyDialMMISuccessWithInteger(const nsAString& aStatusM
 
   JSContext* cx = jsapi.cx();
 
-  MozMMIResult result;
+  RootedDictionary<MozMMIResult> result(cx);
   result.mSuccess = true;
   result.mServiceCode.Assign(mServiceCode);
   result.mStatusMessage.Assign(aStatusMessage);
@@ -121,8 +121,10 @@ TelephonyDialCallback::NotifyDialMMISuccessWithStrings(const nsAString& aStatusM
   result.mStatusMessage.Assign(aStatusMessage);
 
   nsTArray<nsString> additionalInformation;
+  nsString* infos = additionalInformation.AppendElements(aCount);
   for (uint32_t i = 0; i < aCount; i++) {
-    additionalInformation.AppendElement(nsDependentString(aAdditionalInformation[i]));
+    infos[i].Rebind(aAdditionalInformation[i],
+                    nsCharTraits<char16_t>::length(aAdditionalInformation[i]));
   }
 
   JS::Rooted<JS::Value> jsAdditionalInformation(cx);
@@ -215,7 +217,7 @@ TelephonyDialCallback::NotifyDialMMIError(const nsAString& aError)
 
   JSContext* cx = jsapi.cx();
 
-  MozMMIResult result;
+  RootedDictionary<MozMMIResult> result(cx);
   result.mSuccess = false;
   result.mServiceCode.Assign(mServiceCode);
   result.mStatusMessage.Assign(aError);
@@ -234,7 +236,7 @@ TelephonyDialCallback::NotifyDialMMIErrorWithInfo(const nsAString& aError,
 
   JSContext* cx = jsapi.cx();
 
-  MozMMIResult result;
+  RootedDictionary<MozMMIResult> result(cx);
   result.mSuccess = false;
   result.mServiceCode.Assign(mServiceCode);
   result.mStatusMessage.Assign(aError);

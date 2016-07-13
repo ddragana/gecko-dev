@@ -8,7 +8,6 @@
 #define MOZILLA_DOMSVGNUMBER_H__
 
 #include "DOMSVGNumberList.h"
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsTArray.h"
 #include "mozilla/Attributes.h"
@@ -162,7 +161,7 @@ private:
   bool IndexIsValid();
 #endif
 
-  nsRefPtr<DOMSVGNumberList> mList;
+  RefPtr<DOMSVGNumberList> mList;
   nsCOMPtr<nsISupports> mParent;
 
   // Bounds for the following are checked in the ctor, so be sure to update

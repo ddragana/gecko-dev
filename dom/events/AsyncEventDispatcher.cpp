@@ -23,29 +23,31 @@ using namespace dom;
 AsyncEventDispatcher::AsyncEventDispatcher(EventTarget* aTarget,
                                            WidgetEvent& aEvent)
   : mTarget(aTarget)
-  , mOnlyChromeDispatch(false)
 {
   MOZ_ASSERT(mTarget);
-  EventDispatcher::CreateEvent(aTarget, nullptr, &aEvent, EmptyString(),
-                               getter_AddRefs(mEvent));
+  RefPtr<Event> event =
+    EventDispatcher::CreateEvent(aTarget, nullptr, &aEvent, EmptyString());
+  mEvent = event.forget();
   NS_ASSERTION(mEvent, "Should never fail to create an event");
   mEvent->DuplicatePrivateData();
-  mEvent->SetTrusted(aEvent.mFlags.mIsTrusted);
+  mEvent->SetTrusted(aEvent.IsTrusted());
 }
 
 NS_IMETHODIMP
 AsyncEventDispatcher::Run()
 {
-  nsCOMPtr<nsIDOMEvent> event = mEvent;
+  if (mCanceled) {
+    return NS_OK;
+  }
+  RefPtr<Event> event = mEvent ? mEvent->InternalDOMEvent() : nullptr;
   if (!event) {
-    NS_NewDOMEvent(getter_AddRefs(event), mTarget, nullptr, nullptr);
-    nsresult rv = event->InitEvent(mEventType, mBubbles, false);
-    NS_ENSURE_SUCCESS(rv, rv);
+    event = NS_NewDOMEvent(mTarget, nullptr, nullptr);
+    event->InitEvent(mEventType, mBubbles, false);
     event->SetTrusted(true);
   }
   if (mOnlyChromeDispatch) {
-    MOZ_ASSERT(event->InternalDOMEvent()->IsTrusted());
-    event->GetInternalNSEvent()->mFlags.mOnlyChromeDispatch = true;
+    MOZ_ASSERT(event->IsTrusted());
+    event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
   }
   bool dummy;
   mTarget->DispatchEvent(event, &dummy);
@@ -53,16 +55,23 @@ AsyncEventDispatcher::Run()
 }
 
 nsresult
+AsyncEventDispatcher::Cancel()
+{
+  mCanceled = true;
+  return NS_OK;
+}
+
+nsresult
 AsyncEventDispatcher::PostDOMEvent()
 {
-  nsRefPtr<AsyncEventDispatcher> ensureDeletionWhenFailing = this;
+  RefPtr<AsyncEventDispatcher> ensureDeletionWhenFailing = this;
   return NS_DispatchToCurrentThread(this);
 }
 
 void
 AsyncEventDispatcher::RunDOMEventWhenSafe()
 {
-  nsRefPtr<AsyncEventDispatcher> ensureDeletionWhenFailing = this;
+  RefPtr<AsyncEventDispatcher> ensureDeletionWhenFailing = this;
   nsContentUtils::AddScriptRunner(this);
 }
 

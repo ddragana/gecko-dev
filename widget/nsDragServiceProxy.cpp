@@ -13,6 +13,10 @@
 #include "mozilla/unused.h"
 #include "nsContentUtils.h"
 
+using mozilla::ipc::Shmem;
+using mozilla::dom::TabChild;
+using mozilla::dom::OptionalShmem;
+
 NS_IMPL_ISUPPORTS_INHERITED0(nsDragServiceProxy, nsBaseDragService)
 
 nsDragServiceProxy::nsDragServiceProxy()
@@ -23,61 +27,58 @@ nsDragServiceProxy::~nsDragServiceProxy()
 {
 }
 
-NS_IMETHODIMP
-nsDragServiceProxy::InvokeDragSession(nsIDOMNode* aDOMNode,
-                                      nsISupportsArray* aArrayTransferables,
-                                      nsIScriptableRegion* aRegion,
-                                      uint32_t aActionType)
+nsresult
+nsDragServiceProxy::InvokeDragSessionImpl(nsISupportsArray* aArrayTransferables,
+                                          nsIScriptableRegion* aRegion,
+                                          uint32_t aActionType)
 {
-  nsresult rv = nsBaseDragService::InvokeDragSession(aDOMNode,
-                                                     aArrayTransferables,
-                                                     aRegion,
-                                                     aActionType);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIDOMDocument> sourceDocument;
-  aDOMNode->GetOwnerDocument(getter_AddRefs(sourceDocument));
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(sourceDocument);
+  nsCOMPtr<nsIDocument> doc = do_QueryInterface(mSourceDocument);
   NS_ENSURE_STATE(doc->GetDocShell());
-  mozilla::dom::TabChild* child =
-    mozilla::dom::TabChild::GetFrom(doc->GetDocShell());
+  TabChild* child = TabChild::GetFrom(doc->GetDocShell());
   NS_ENSURE_STATE(child);
   nsTArray<mozilla::dom::IPCDataTransfer> dataTransfers;
   nsContentUtils::TransferablesToIPCTransferables(aArrayTransferables,
                                                   dataTransfers,
+                                                  false,
                                                   child->Manager(),
                                                   nullptr);
 
   if (mHasImage || mSelection) {
     nsIntRect dragRect;
     nsPresContext* pc;
-    mozilla::RefPtr<mozilla::gfx::SourceSurface> surface;
+    RefPtr<mozilla::gfx::SourceSurface> surface;
     DrawDrag(mSourceNode, aRegion, mScreenX, mScreenY,
              &dragRect, &surface, &pc);
 
     if (surface) {
-      mozilla::RefPtr<mozilla::gfx::DataSourceSurface> dataSurface =
+      RefPtr<mozilla::gfx::DataSourceSurface> dataSurface =
         surface->GetDataSurface();
-      mozilla::gfx::IntSize size = dataSurface->GetSize();
+      if (dataSurface) {
+        size_t length;
+        int32_t stride;
+        Shmem surfaceData;
+        nsContentUtils::GetSurfaceData(dataSurface, &length, &stride, child,
+                                       &surfaceData);
+        // Save the surface data to shared memory.
+        if (!surfaceData.IsReadable() || !surfaceData.get<char>()) {
+          NS_WARNING("Failed to create shared memory for drag session.");
+          return NS_ERROR_FAILURE;
+        }
 
-      size_t length;
-      int32_t stride;
-      mozilla::UniquePtr<char[]> surfaceData =
-        nsContentUtils::GetSurfaceData(dataSurface, &length, &stride);
-      nsDependentCString dragImage(surfaceData.get(), length);
-
-      mozilla::unused <<
-        child->SendInvokeDragSession(dataTransfers, aActionType, dragImage,
-                                     size.width, size.height, stride,
-                                     static_cast<uint8_t>(dataSurface->GetFormat()),
-                                     dragRect.x, dragRect.y);
-      StartDragSession();
-      return NS_OK;
+        mozilla::gfx::IntSize size = dataSurface->GetSize();
+        mozilla::Unused <<
+          child->SendInvokeDragSession(dataTransfers, aActionType, surfaceData,
+                                       size.width, size.height, stride,
+                                       static_cast<uint8_t>(dataSurface->GetFormat()),
+                                       dragRect.x, dragRect.y);
+        StartDragSession();
+        return NS_OK;
+      }
     }
   }
 
-  mozilla::unused << child->SendInvokeDragSession(dataTransfers, aActionType,
-                                                  nsCString(),
+  mozilla::Unused << child->SendInvokeDragSession(dataTransfers, aActionType,
+                                                  mozilla::void_t(),
                                                   0, 0, 0, 0, 0, 0);
   StartDragSession();
   return NS_OK;

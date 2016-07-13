@@ -90,9 +90,9 @@ JSONParser<CharT>::error(const char* msg)
 
         const size_t MaxWidth = sizeof("4294967295");
         char columnNumber[MaxWidth];
-        JS_snprintf(columnNumber, sizeof columnNumber, "%lu", column);
+        JS_snprintf(columnNumber, sizeof columnNumber, "%" PRIu32, column);
         char lineNumber[MaxWidth];
-        JS_snprintf(lineNumber, sizeof lineNumber, "%lu", line);
+        JS_snprintf(lineNumber, sizeof lineNumber, "%" PRIu32, line);
 
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_JSON_BAD_PARSE,
                              msg, lineNumber, columnNumber);
@@ -590,6 +590,13 @@ JSONParserBase::finishObject(MutableHandleValue vp, PropertyVector& properties)
     if (!freeProperties.append(&properties))
         return false;
     stack.popBack();
+
+    if (!stack.empty() && stack.back().state == FinishArrayElement) {
+        const ElementVector& elements = stack.back().elements();
+        if (!CombinePlainObjectPropertyTypes(cx, obj, elements.begin(), elements.length()))
+            return false;
+    }
+
     return true;
 }
 
@@ -607,6 +614,13 @@ JSONParserBase::finishArray(MutableHandleValue vp, ElementVector& elements)
     if (!freeElements.append(&elements))
         return false;
     stack.popBack();
+
+    if (!stack.empty() && stack.back().state == FinishArrayElement) {
+        const ElementVector& elements = stack.back().elements();
+        if (!CombineArrayElementTypes(cx, obj, elements.begin(), elements.length()))
+            return false;
+    }
+
     return true;
 }
 

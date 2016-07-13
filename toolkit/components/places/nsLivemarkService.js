@@ -453,7 +453,9 @@ function Livemark(aLivemarkInfo)
 }
 
 Livemark.prototype = {
-  get status() this._status,
+  get status() {
+    return this._status;
+  },
   set status(val) {
     if (this._status != val) {
       this._status = val;
@@ -480,7 +482,7 @@ Livemark.prototype = {
 
     // Security check the site URI against the feed URI principal.
     let secMan = Services.scriptSecurityManager;
-    let feedPrincipal = secMan.getSimpleCodebasePrincipal(this.feedURI);
+    let feedPrincipal = secMan.createCodebasePrincipal(this.feedURI, {});
     try {
       secMan.checkLoadURIWithPrincipal(feedPrincipal, aSiteURI,
                                        Ci.nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL);
@@ -526,10 +528,15 @@ Livemark.prototype = {
       // cancel the channel.
       let loadgroup = Cc["@mozilla.org/network/load-group;1"].
                       createInstance(Ci.nsILoadGroup);
+      // Creating a CodeBasePrincipal and using it as the loadingPrincipal
+      // is *not* desired and is only tolerated within this file.
+      // TODO: Find the right OriginAttributes and pass something other
+      // than {} to .createCodeBasePrincipal().
       let channel = NetUtil.newChannel({
-        uri: this.feedURI.spec,
-        loadingPrincipal: Services.scriptSecurityManager.getNoAppCodebasePrincipal(this.feedURI),
-        contentPolicyType: Ci.nsIContentPolicy.TYPE_DATAREQUEST
+        uri: this.feedURI,
+        loadingPrincipal: Services.scriptSecurityManager.createCodebasePrincipal(this.feedURI, {}),
+        securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+        contentPolicyType: Ci.nsIContentPolicy.TYPE_INTERNAL_XMLHTTPREQUEST
       }).QueryInterface(Ci.nsIHttpChannel);
       channel.loadGroup = loadgroup;
       channel.loadFlags |= Ci.nsIRequest.LOAD_BACKGROUND |
@@ -540,7 +547,7 @@ Livemark.prototype = {
       // Stream the result to the feed parser with this listener
       let listener = new LivemarkLoadListener(this);
       channel.notificationCallbacks = listener;
-      channel.asyncOpen(listener, null);
+      channel.asyncOpen2(listener);
 
       this.loadGroup = loadgroup;
     }
@@ -553,7 +560,9 @@ Livemark.prototype = {
     this.updateChildren(aForceUpdate);
   },
 
-  get children() this._children,
+  get children() {
+    return this._children;
+  },
   set children(val) {
     this._children = val;
 
@@ -591,23 +600,48 @@ Livemark.prototype = {
         // The QueryInterface is needed cause aContainerNode is a jsval.
         // This is required to avoid issues with scriptable wrappers that would
         // not allow the view to correctly set expandos.
-        get parent()
-          aContainerNode.QueryInterface(Ci.nsINavHistoryContainerResultNode),
-        get parentResult() this.parent.parentResult,
-        get uri() localChild.uri.spec,
-        get type() Ci.nsINavHistoryResultNode.RESULT_TYPE_URI,
-        get title() localChild.title,
-        get accessCount()
-          Number(livemark._isURIVisited(NetUtil.newURI(this.uri))),
-        get time() 0,
-        get icon() "",
-        get indentLevel() this.parent.indentLevel + 1,
-        get bookmarkIndex() -1,
-        get itemId() -1,
-        get dateAdded() now,
-        get lastModified() now,
-        get tags()
-          PlacesUtils.tagging.getTagsForURI(NetUtil.newURI(this.uri)).join(", "),
+        get parent() {
+          return aContainerNode.QueryInterface(Ci.nsINavHistoryContainerResultNode);
+        },
+        get parentResult() {
+          return this.parent.parentResult;
+        },
+        get uri() {
+          return localChild.uri.spec;
+        },
+        get type() {
+          return Ci.nsINavHistoryResultNode.RESULT_TYPE_URI;
+        },
+        get title() {
+          return localChild.title;
+        },
+        get accessCount() {
+          return Number(livemark._isURIVisited(NetUtil.newURI(this.uri)));
+        },
+        get time() {
+          return 0;
+        },
+        get icon() {
+          return "";
+        },
+        get indentLevel() {
+          return this.parent.indentLevel + 1;
+        },
+        get bookmarkIndex() {
+            return -1;
+        },
+        get itemId() {
+            return -1;
+        },
+        get dateAdded() {
+          return now;
+        },
+        get lastModified() {
+          return now;
+        },
+        get tags() {
+          return PlacesUtils.tagging.getTagsForURI(NetUtil.newURI(this.uri)).join(", ");
+        },
         QueryInterface: XPCOMUtils.generateQI([Ci.nsINavHistoryResultNode])
       };
       nodes.push(node);
@@ -652,8 +686,8 @@ Livemark.prototype = {
         let nodes = this._nodes.get(container);
         for (let node of nodes) {
           // Workaround for bug 449811.
-          localObserver = observer;
-          localNode = node;
+          let localObserver = observer;
+          let localNode = node;
           if (!aURI || node.uri == aURI.spec) {
             Services.tm.mainThread.dispatch(() => {
               localObserver.nodeHistoryDetailsChanged(localNode, 0, aVisitedStatus);
@@ -725,7 +759,7 @@ LivemarkLoadListener.prototype = {
       // We need this to make sure the item links are safe
       let feedPrincipal =
         Services.scriptSecurityManager
-                .getSimpleCodebasePrincipal(this._livemark.feedURI);
+                .createCodebasePrincipal(this._livemark.feedURI, {});
 
       // Enforce well-formedness because the existing code does
       if (!aResult || !aResult.doc || aResult.bozo) {

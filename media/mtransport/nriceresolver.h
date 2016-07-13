@@ -71,6 +71,10 @@ class NrIceResolver
   void DestroyResolver();
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(NrIceResolver)
 
+  int resolve(nr_resolver_resource *resource,
+              int (*cb)(void *cb_arg, nr_transport_addr *addr),
+              void *cb_arg, void **handle);
+
  private:
   // Implementations of vtbl functions
   static int destroy(void **objp);
@@ -79,10 +83,6 @@ class NrIceResolver
                      void *cb_arg, void **handle);
   static void resolve_cb(NR_SOCKET s, int how, void *cb_arg);
   static int cancel(void *obj, void *handle);
-
-  int resolve(nr_resolver_resource *resource,
-              int (*cb)(void *cb_arg, nr_transport_addr *addr),
-              void *cb_arg, void **handle);
 
   class PendingResolution : public nsIDNSListener
   {
@@ -95,8 +95,7 @@ class NrIceResolver
         thread_(thread),
         port_(port),
         transport_(transport),
-        cb_(cb), cb_arg_(cb_arg),
-        canceled_ (false) {}
+        cb_(cb), cb_arg_(cb_arg) {}
     NS_IMETHOD OnLookupComplete(nsICancelable *request, nsIDNSRecord *record,
                                 nsresult status) override;
     int cancel();
@@ -110,7 +109,6 @@ class NrIceResolver
     int transport_;
     int (*cb_)(void *cb_arg, nr_transport_addr *addr);
     void *cb_arg_;
-    bool canceled_;
   };
 
   nr_resolver_vtbl* vtbl_;

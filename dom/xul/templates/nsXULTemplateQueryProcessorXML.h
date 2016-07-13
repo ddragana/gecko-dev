@@ -9,6 +9,7 @@
 #include "nsIXULTemplateBuilder.h"
 #include "nsIXULTemplateQueryProcessor.h"
 
+#include "nsAutoPtr.h"
 #include "nsISimpleEnumerator.h"
 #include "nsString.h"
 #include "nsCOMArray.h"
@@ -77,7 +78,7 @@ class nsXMLQuery final : public nsISupports
 
     nsAutoPtr<mozilla::dom::XPathExpression> mResultsExpr;
 
-    nsRefPtr<nsXMLBindingSet> mRequiredBindings;
+    RefPtr<nsXMLBindingSet> mRequiredBindings;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsXMLQuery, NS_IXMLQUERY_IID)
@@ -90,10 +91,10 @@ private:
     nsCOMPtr<nsXMLQuery> mQuery;
 
     // the binding set created from <assign> nodes
-    nsRefPtr<nsXMLBindingSet> mBindingSet;
+    RefPtr<nsXMLBindingSet> mBindingSet;
 
     // set of results contained in this enumerator
-    nsRefPtr<mozilla::dom::XPathResult> mResults;
+    RefPtr<mozilla::dom::XPathResult> mResults;
 
     // current position within the list of results
     uint32_t mPosition;
@@ -158,7 +159,7 @@ private:
 
     nsCOMPtr<mozilla::dom::Element> mRoot;
 
-    nsRefPtr<mozilla::dom::XPathEvaluator> mEvaluator;
+    RefPtr<mozilla::dom::XPathEvaluator> mEvaluator;
 
     nsCOMPtr<nsIXULTemplateBuilder> mTemplateBuilder;
 

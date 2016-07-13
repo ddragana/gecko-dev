@@ -8,6 +8,7 @@
 #define EMEDecoderModule_h_
 
 #include "PlatformDecoderModule.h"
+#include "PDMFactory.h"
 #include "gmp-decryption.h"
 
 namespace mozilla {
@@ -18,39 +19,32 @@ class EMEDecoderModule : public PlatformDecoderModule {
 private:
 
 public:
-  EMEDecoderModule(CDMProxy* aProxy,
-                   PlatformDecoderModule* aPDM,
-                   bool aCDMDecodesAudio,
-                   bool aCDMDecodesVideo);
+  EMEDecoderModule(CDMProxy* aProxy, PDMFactory* aPDM);
 
   virtual ~EMEDecoderModule();
 
+protected:
   // Decode thread.
-  virtual already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const VideoInfo& aConfig,
-                    layers::LayersBackend aLayersBackend,
-                    layers::ImageContainer* aImageContainer,
-                    FlushableTaskQueue* aVideoTaskQueue,
-                    MediaDataDecoderCallback* aCallback) override;
+  already_AddRefed<MediaDataDecoder>
+  CreateVideoDecoder(const CreateDecoderParams& aParams) override;
 
   // Decode thread.
-  virtual already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override;
+  already_AddRefed<MediaDataDecoder>
+  CreateAudioDecoder(const CreateDecoderParams& aParams) override;
 
-  virtual ConversionRequired
+  ConversionRequired
   DecoderNeedsConversion(const TrackInfo& aConfig) const override;
 
-private:
-  nsRefPtr<CDMProxy> mProxy;
-  // Will be null if CDM has decoding capability.
-  nsRefPtr<PlatformDecoderModule> mPDM;
-  // We run the PDM on its own task queue.
-  nsRefPtr<TaskQueue> mTaskQueue;
-  bool mCDMDecodesAudio;
-  bool mCDMDecodesVideo;
+  bool
+  SupportsMimeType(const nsACString& aMimeType,
+                   DecoderDoctorDiagnostics* aDiagnostics) const override;
 
+private:
+  RefPtr<CDMProxy> mProxy;
+  // Will be null if CDM has decoding capability.
+  RefPtr<PDMFactory> mPDM;
+  // We run the PDM on its own task queue.
+  RefPtr<TaskQueue> mTaskQueue;
 };
 
 } // namespace mozilla

@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_HTMLContentElement_h__
 #define mozilla_dom_HTMLContentElement_h__
 
+#include "nsAutoPtr.h"
 #include "nsINodeList.h"
 #include "nsGenericHTMLElement.h"
 
@@ -114,7 +115,7 @@ public:
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 protected:
   virtual ~DistributedContentList();
-  nsRefPtr<HTMLContentElement> mParent;
+  RefPtr<HTMLContentElement> mParent;
   nsCOMArray<nsIContent> mDistributedNodes;
 };
 

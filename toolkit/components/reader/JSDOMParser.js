@@ -1,3 +1,4 @@
+/*eslint-env es6:false*/
 /*
  * DO NOT MODIFY THIS FILE DIRECTLY!
  *
@@ -32,10 +33,6 @@
  *      document, you must take care to manually update them yourself.
  */
 (function (global) {
-
-  function error(m) {
-    dump("JSDOMParser error: " + m + "\n");
-  }
 
   // XML only defines these and the numeric ones:
 
@@ -676,9 +673,9 @@
               arr.push(" " + attr.name + '=' + quote + val + quote);
             }
 
-            if (child.localName in voidElems) {
+            if (child.localName in voidElems && !child.childNodes.length) {
               // if this is a self-closing element, end it here
-              arr.push(">");
+              arr.push("/>");
             } else {
               // otherwise, add its children
               arr.push(">");
@@ -702,12 +699,13 @@
     set innerHTML(html) {
       var parser = new JSDOMParser();
       var node = parser.parse(html);
-      for (var i = this.childNodes.length; --i >= 0;) {
+      var i;
+      for (i = this.childNodes.length; --i >= 0;) {
         this.childNodes[i].parentNode = null;
       }
       this.childNodes = node.childNodes;
       this.children = node.children;
-      for (var i = this.childNodes.length; --i >= 0;) {
+      for (i = this.childNodes.length; --i >= 0;) {
         this.childNodes[i].parentNode = this;
       }
     },
@@ -849,9 +847,16 @@
     // makeElementNode(), which saves us from having to allocate a new array
     // every time.
     this.retPair = [];
+
+    this.errorState = "";
   };
 
   JSDOMParser.prototype = {
+    error: function(m) {
+      dump("JSDOMParser error: " + m + "\n");
+      this.errorState += m + "\n";
+    },
+
     /**
      * Look at the next character without advancing the index.
      */
@@ -906,7 +911,7 @@
       // After a '=', we should see a '"' for the attribute value
       var c = this.nextChar();
       if (c !== '"' && c !== "'") {
-        error("Error reading attribute " + name + ", expecting '\"'");
+        this.error("Error reading attribute " + name + ", expecting '\"'");
         return;
       }
 
@@ -959,12 +964,12 @@
       }
 
       // If this is a self-closing tag, read '/>'
-      var closed = tag in voidElems;
+      var closed = false;
       if (c === "/") {
         closed = true;
         c = this.nextChar();
         if (c !== ">") {
-          error("expected '>' to close " + tag);
+          this.error("expected '>' to close " + tag);
           return false;
         }
       }
@@ -1085,16 +1090,16 @@
       // Read any text as Text node
       if (c !== "<") {
         --this.currentChar;
-        var node = new Text();
+        var textNode = new Text();
         var n = this.html.indexOf("<", this.currentChar);
         if (n === -1) {
-          node.innerHTML = this.html.substring(this.currentChar, this.html.length);
+          textNode.innerHTML = this.html.substring(this.currentChar, this.html.length);
           this.currentChar = this.html.length;
         } else {
-          node.innerHTML = this.html.substring(this.currentChar, n);
+          textNode.innerHTML = this.html.substring(this.currentChar, n);
           this.currentChar = n;
         }
-        return node;
+        return textNode;
       }
 
       c = this.peekNext();
@@ -1134,7 +1139,7 @@
         }
         var closingTag = "</" + localName + ">";
         if (!this.match(closingTag)) {
-          error("expected '" + closingTag + "'");
+          this.error("expected '" + closingTag + "' and got " + this.html.substr(this.currentChar, closingTag.length));
           return null;
         }
       }

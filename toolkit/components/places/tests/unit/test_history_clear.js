@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let mDBConn = DBConn();
+var mDBConn = DBConn();
 
 function promiseOnClearHistoryObserved() {
   let deferred = Promise.defer();
@@ -35,7 +35,7 @@ function promiseOnClearHistoryObserved() {
 // upon in the first asynchronous test.  It is resolved when the
 // "places-init-complete" notification is received. We cannot initialize it in
 // the asynchronous test, because then it's too late to register the observer.
-let promiseInit;
+var promiseInit;
 
 function run_test() {
   // places-init-complete is notified after run_test, and it will
@@ -79,7 +79,7 @@ add_task(function* test_history_clear()
                                             PlacesUtils.annotations.EXPIRE_NEVER);
 
   // Add a bookmark
-  // Bookmarked page should have history cleared and frecency = -old_visit_count
+  // Bookmarked page should have history cleared and frecency = -1
   PlacesUtils.bookmarks.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
                                        uri("http://typed.mozilla.org/"),
                                        PlacesUtils.bookmarks.DEFAULT_INDEX,
@@ -105,8 +105,7 @@ add_task(function* test_history_clear()
   yield PlacesTestUtils.promiseAsyncUpdates();
 
   // Check that frecency for not cleared items (bookmarks) has been converted
-  // to -MAX(visit_count, 1), so we will be able to recalculate frecency
-  // starting from most frecent bookmarks.
+  // to -1.
   stmt = mDBConn.createStatement(
     "SELECT h.id FROM moz_places h WHERE h.frecency > 0 ");
   do_check_false(stmt.executeStep());
@@ -132,7 +131,8 @@ add_task(function* test_history_clear()
 
   // Check that all moz_places entries except bookmarks and place: have been removed
   stmt = mDBConn.createStatement(
-    `SELECT h.id FROM moz_places h WHERE SUBSTR(h.url, 1, 6) <> 'place:'
+    `SELECT h.id FROM moz_places h WHERE
+       url_hash NOT BETWEEN hash('place', 'prefix_lo') AND hash('place', 'prefix_hi')
        AND NOT EXISTS (SELECT id FROM moz_bookmarks WHERE fk = h.id) LIMIT 1`);
   do_check_false(stmt.executeStep());
   stmt.finalize();
@@ -161,7 +161,9 @@ add_task(function* test_history_clear()
   // Check that place:uris have frecency 0
   stmt = mDBConn.createStatement(
     `SELECT h.id FROM moz_places h
-     WHERE SUBSTR(h.url, 1, 6) = 'place:' AND h.frecency <> 0 LIMIT 1`);
+     WHERE url_hash BETWEEN hash('place', 'prefix_lo')
+                        AND hash('place', 'prefix_hi')
+       AND h.frecency <> 0 LIMIT 1`);
   do_check_false(stmt.executeStep());
   stmt.finalize();
 });

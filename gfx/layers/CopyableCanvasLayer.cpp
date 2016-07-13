@@ -18,6 +18,7 @@
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
 #include "mozilla/gfx/Tools.h"
 #include "mozilla/gfx/Point.h"          // for IntSize
+#include "mozilla/layers/AsyncCanvasRenderer.h"
 #include "mozilla/layers/PersistentBufferProvider.h"
 #include "nsDebug.h"                    // for NS_ASSERTION, NS_WARNING, etc
 #include "nsISupportsImpl.h"            // for gfxContext::AddRef, etc
@@ -61,11 +62,15 @@ CopyableCanvasLayer::Initialize(const Data& aData)
       gfx::IntSize size(aData.mSize.width, aData.mSize.height);
       mGLFrontbuffer = SharedSurface_Basic::Wrap(aData.mGLContext, size, aData.mHasAlpha,
                                                  aData.mFrontbufferGLTex);
+      mBufferProvider = aData.mBufferProvider;
     }
   } else if (aData.mBufferProvider) {
     mBufferProvider = aData.mBufferProvider;
+  } else if (aData.mRenderer) {
+    mAsyncRenderer = aData.mRenderer;
+    mOriginPos = gl::OriginPos::BottomLeft;
   } else {
-    MOZ_CRASH("CanvasLayer created without mSurface, mDrawTarget or mGLContext?");
+    MOZ_CRASH("GFX: CanvasLayer created without mSurface, mDrawTarget or mGLContext?");
   }
 
   mBounds.SetRect(0, 0, aData.mSize.width, aData.mSize.height);
@@ -80,8 +85,21 @@ CopyableCanvasLayer::IsDataValid(const Data& aData)
 void
 CopyableCanvasLayer::UpdateTarget(DrawTarget* aDestTarget)
 {
-  if (mBufferProvider) {
-    mSurface = mBufferProvider->GetSnapshot();
+  AutoReturnSnapshot autoReturn;
+
+  if (mAsyncRenderer) {
+    mSurface = mAsyncRenderer->GetSurface();
+  } else if (!mGLFrontbuffer && mBufferProvider) {
+    mSurface = mBufferProvider->BorrowSnapshot();
+    if (aDestTarget) {
+      // If !aDestTarget we'll end up painting using mSurface later,
+      // so we can't return it to the provider (note that this will trigger a
+      // copy of the snapshot behind the scenes when the provider is unlocked).
+      autoReturn.mSnapshot = &mSurface;
+    }
+    // Either way we need to call ReturnSnapshot because ther may be an
+    // underlying TextureClient that has to be unlocked.
+    autoReturn.mBufferProvider = mBufferProvider;
   }
 
   if (!mGLContext && aDestTarget) {
@@ -92,10 +110,11 @@ CopyableCanvasLayer::UpdateTarget(DrawTarget* aDestTarget)
                                IntPoint(0, 0));
       mSurface = nullptr;
     }
+
     return;
   }
 
-  if (mBufferProvider) {
+  if ((!mGLFrontbuffer && mBufferProvider) || mAsyncRenderer) {
     return;
   }
 

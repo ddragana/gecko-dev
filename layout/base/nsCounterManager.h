@@ -11,7 +11,6 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenConList.h"
-#include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
 #include "mozilla/Likely.h"
 #include "CounterStyleManager.h"
@@ -80,10 +79,10 @@ struct nsCounterUseNode : public nsCounterNode {
     // The same structure passed through the style system:  an array
     // containing the values in the counter() or counters() in the order
     // given in the CSS spec.
-    nsRefPtr<nsCSSValue::Array> mCounterFunction;
+    RefPtr<nsCSSValue::Array> mCounterFunction;
 
     nsPresContext* mPresContext;
-    nsRefPtr<mozilla::CounterStyle> mCounterStyle;
+    RefPtr<mozilla::CounterStyle> mCounterStyle;
 
     // false for counter(), true for counters()
     bool mAllCounters;

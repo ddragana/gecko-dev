@@ -17,6 +17,7 @@ interface Response {
   readonly attribute ResponseType type;
 
   readonly attribute USVString url;
+  readonly attribute boolean redirected;
   readonly attribute unsigned short status;
   readonly attribute boolean ok;
   readonly attribute ByteString statusText;
@@ -24,6 +25,8 @@ interface Response {
 
   [Throws,
    NewObject] Response clone();
+
+  [ChromeOnly, NewObject, Throws] Response cloneUnfiltered();
 };
 Response implements Body;
 
@@ -34,4 +37,4 @@ dictionary ResponseInit {
   HeadersInit headers;
 };
 
-enum ResponseType { "basic", "cors", "default", "error", "opaque" };
+enum ResponseType { "basic", "cors", "default", "error", "opaque", "opaqueredirect" };

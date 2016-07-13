@@ -1,7 +1,7 @@
-# -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 var FullScreen = {
   _MESSAGES: [
@@ -23,6 +23,8 @@ var FullScreen = {
     for (let type of this._MESSAGES) {
       window.messageManager.addMessageListener(type, this);
     }
+
+    this._WarningBox.init();
 
     if (window.fullScreen)
       this.toggle();
@@ -47,11 +49,11 @@ var FullScreen = {
       fullscreenCommand.removeAttribute("checked");
     }
 
-#ifdef XP_MACOSX
-    // Make sure the menu items are adjusted.
-    document.getElementById("enterFullScreenItem").hidden = enterFS;
-    document.getElementById("exitFullScreenItem").hidden = !enterFS;
-#endif
+    if (AppConstants.platform == "macosx") {
+      // Make sure the menu items are adjusted.
+      document.getElementById("enterFullScreenItem").hidden = enterFS;
+      document.getElementById("exitFullScreenItem").hidden = !enterFS;
+    }
 
     if (!this._fullScrToggler) {
       this._fullScrToggler = document.getElementById("fullscr-toggler");
@@ -62,7 +64,7 @@ var FullScreen = {
     if (enterFS) {
       gNavToolbox.setAttribute("inFullscreen", true);
       document.documentElement.setAttribute("inFullscreen", true);
-      if (!document.mozFullScreen && this.useLionFullScreen)
+      if (!document.fullscreenElement && this.useLionFullScreen)
         document.documentElement.setAttribute("OSXLionFullscreen", true);
     } else {
       gNavToolbox.removeAttribute("inFullscreen");
@@ -70,7 +72,7 @@ var FullScreen = {
       document.documentElement.removeAttribute("OSXLionFullscreen");
     }
 
-    if (!document.mozFullScreen)
+    if (!document.fullscreenElement)
       this._updateToolbars(enterFS);
 
     if (enterFS) {
@@ -78,7 +80,7 @@ var FullScreen = {
       document.addEventListener("popupshown", this._setPopupOpen, false);
       document.addEventListener("popuphidden", this._setPopupOpen, false);
       // In DOM fullscreen mode, we hide toolbars with CSS
-      if (!document.mozFullScreen)
+      if (!document.fullscreenElement)
         this.hideNavToolbox(true);
     }
     else {
@@ -93,25 +95,26 @@ var FullScreen = {
       // TabsInTitlebar._update() and bug 1173768.
       TabsInTitlebar.updateAppearance(true);
     }
+
+    if (enterFS && !document.fullscreenElement) {
+      Services.telemetry.getHistogramById("FX_BROWSER_FULLSCREEN_USED")
+                        .add(1);
+    }
   },
 
   exitDomFullScreen : function() {
-    document.mozCancelFullScreen();
+    document.exitFullscreen();
   },
 
   handleEvent: function (event) {
     switch (event.type) {
       case "activate":
-        if (document.mozFullScreen) {
-          this.showWarning(this.fullscreenOrigin);
+        if (document.fullscreenElement) {
+          this._WarningBox.show();
         }
         break;
       case "fullscreen":
         this.toggle();
-        break;
-      case "transitionend":
-        if (event.propertyName == "opacity")
-          this.cancelWarning();
         break;
       case "MozDOMFullscreen:Entered": {
         // The event target is the element which requested the DOM
@@ -128,25 +131,12 @@ var FullScreen = {
           let topWin = event.target.ownerDocument.defaultView.top;
           browser = gBrowser.getBrowserForContentWindow(topWin);
         }
-        if (!browser || !this.enterDomFullscreen(browser)) {
-          if (document.mozFullScreen) {
-            // MozDOMFullscreen:Entered is dispatched synchronously in
-            // fullscreen change, hence we have to avoid calling this
-            // method synchronously here.
-            setTimeout(() => document.mozCancelFullScreen(), 0);
-          }
-          break;
-        }
-        // If it is a remote browser, send a message to ask the content
-        // to enter fullscreen state. We don't need to do so if it is an
-        // in-process browser, since all related document should have
-        // entered fullscreen state at this point.
-        if (this._isRemoteBrowser(browser)) {
-          browser.messageManager.sendAsyncMessage("DOMFullscreen:Entered");
-        }
+        TelemetryStopwatch.start("FULLSCREEN_CHANGE_MS");
+        this.enterDomFullscreen(browser);
         break;
       }
       case "MozDOMFullscreen:Exited":
+        TelemetryStopwatch.start("FULLSCREEN_CHANGE_MS");
         this.cleanupDomFullscreen();
         break;
     }
@@ -160,7 +150,7 @@ var FullScreen = {
         break;
       }
       case "DOMFullscreen:NewOrigin": {
-        this.showWarning(aMessage.data.originNoSuffix);
+        this._WarningBox.show(aMessage.data.originNoSuffix);
         break;
       }
       case "DOMFullscreen:Exit": {
@@ -169,34 +159,44 @@ var FullScreen = {
       }
       case "DOMFullscreen:Painted": {
         Services.obs.notifyObservers(window, "fullscreen-painted", "");
+        TelemetryStopwatch.finish("FULLSCREEN_CHANGE_MS");
         break;
       }
     }
   },
 
   enterDomFullscreen : function(aBrowser) {
-    if (!document.mozFullScreen)
-      return false;
+    if (!document.fullscreenElement) {
+      return;
+    }
 
     // If we've received a fullscreen notification, we have to ensure that the
     // element that's requesting fullscreen belongs to the browser that's currently
     // active. If not, we exit fullscreen since the "full-screen document" isn't
     // actually visible now.
-    if (gBrowser.selectedBrowser != aBrowser) {
-      return false;
+    if (!aBrowser || gBrowser.selectedBrowser != aBrowser ||
+        // The top-level window has lost focus since the request to enter
+        // full-screen was made. Cancel full-screen.
+        Services.focus.activeWindow != window) {
+      // This function is called synchronously in fullscreen change, so
+      // we have to avoid calling exitFullscreen synchronously here.
+      setTimeout(() => document.exitFullscreen(), 0);
+      return;
     }
 
-    let focusManager = Services.focus;
-    if (focusManager.activeWindow != window) {
-      // The top-level window has lost focus since the request to enter
-      // full-screen was made. Cancel full-screen.
-      return false;
+    // If it is a remote browser, send a message to ask the content
+    // to enter fullscreen state. We don't need to do so if it is an
+    // in-process browser, since all related document should have
+    // entered fullscreen state at this point.
+    if (this._isRemoteBrowser(aBrowser)) {
+      aBrowser.messageManager.sendAsyncMessage("DOMFullscreen:Entered");
     }
 
     document.documentElement.setAttribute("inDOMFullscreen", true);
 
-    if (gFindBarInitialized)
-      gFindBar.close();
+    if (gFindBarInitialized) {
+      gFindBar.close(true);
+    }
 
     // Exit DOM full-screen mode upon open, close, or change tab.
     gBrowser.tabContainer.addEventListener("TabOpen", this.exitDomFullScreen);
@@ -207,8 +207,6 @@ var FullScreen = {
     // If a fullscreen window loses focus, we show a warning when the
     // fullscreen window is refocused.
     window.addEventListener("activate", this);
-
-    return true;
   },
 
   cleanup: function () {
@@ -221,16 +219,16 @@ var FullScreen = {
   },
 
   cleanupDomFullscreen: function () {
-    this.cancelWarning();
+    window.messageManager
+          .broadcastAsyncMessage("DOMFullscreen:CleanUp");
+
+    this._WarningBox.close();
     gBrowser.tabContainer.removeEventListener("TabOpen", this.exitDomFullScreen);
     gBrowser.tabContainer.removeEventListener("TabClose", this.exitDomFullScreen);
     gBrowser.tabContainer.removeEventListener("TabSelect", this.exitDomFullScreen);
     window.removeEventListener("activate", this);
 
     document.documentElement.removeAttribute("inDOMFullscreen");
-
-    window.messageManager
-          .broadcastAsyncMessage("DOMFullscreen:CleanUp");
   },
 
   _isRemoteBrowser: function (aBrowser) {
@@ -303,8 +301,11 @@ var FullScreen = {
         aEvent.target.localName != "tooltip" && aEvent.target.localName != "window")
       FullScreen._isPopupOpen = true;
     else if (aEvent.type == "popuphidden" && aEvent.target.localName != "tooltip" &&
-             aEvent.target.localName != "window")
+             aEvent.target.localName != "window") {
       FullScreen._isPopupOpen = false;
+      // Try again to hide toolbar when we close the popup.
+      FullScreen.hideNavToolbox(true);
+    }
   },
 
   // Autohide helpers for the context menu item
@@ -315,79 +316,215 @@ var FullScreen = {
   setAutohide: function()
   {
     gPrefService.setBoolPref("browser.fullscreen.autohide", !gPrefService.getBoolPref("browser.fullscreen.autohide"));
+    // Try again to hide toolbar when we change the pref.
+    FullScreen.hideNavToolbox(true);
   },
 
-  cancelWarning: function(event) {
-    if (!this.warningBox)
-      return;
-    this.warningBox.removeEventListener("transitionend", this);
-    if (this.warningFadeOutTimeout) {
-      clearTimeout(this.warningFadeOutTimeout);
-      this.warningFadeOutTimeout = null;
-    }
+  _WarningBox: {
+    _element: null,
+    _origin: null,
 
-    // Ensure focus switches away from the (now hidden) warning box. If the user
-    // clicked buttons in the fullscreen key authorization UI, it would have been
-    // focused, and any key events would be directed at the (now hidden) chrome
-    // document instead of the target document.
-    gBrowser.selectedBrowser.focus();
+    /**
+     * Timeout object for managing timeout request. If it is started when
+     * the previous call hasn't finished, it would automatically cancelled
+     * the previous one.
+     */
+    Timeout: function(func, delay) {
+      this._id = 0;
+      this._func = func;
+      this._delay = delay;
+    },
 
-    this.warningBox.setAttribute("hidden", true);
-    this.warningBox.removeAttribute("fade-warning-out");
-    this.warningBox = null;
-  },
+    init: function() {
+      this.Timeout.prototype = {
+        start: function() {
+          this.cancel();
+          this._id = setTimeout(() => this._handle(), this._delay);
+        },
+        cancel: function() {
+          if (this._id) {
+            clearTimeout(this._id);
+            this._id = 0;
+          }
+        },
+        _handle: function() {
+          this._id = 0;
+          this._func();
+        },
+        get delay() {
+          return this._delay;
+        }
+      };
+    },
 
-  warningBox: null,
-  warningFadeOutTimeout: null,
-
-  // Shows a warning that the site has entered fullscreen for a short duration.
-  showWarning: function(aOrigin) {
-    if (!document.mozFullScreen)
-      return;
-
-    // Set the strings on the fullscreen warning UI.
-    this.fullscreenOrigin = aOrigin;
-    let uri = BrowserUtils.makeURI(aOrigin);
-    let host = null;
-    try {
-      host = uri.host;
-    } catch (e) { }
-    let hostLabel = document.getElementById("full-screen-domain-text");
-    if (host) {
-      // Document's principal's URI has a host. Display a warning including the hostname and
-      // show UI to enable the user to permanently grant this host permission to enter fullscreen.
-      let utils = {};
-      Cu.import("resource://gre/modules/DownloadUtils.jsm", utils);
-      let displayHost = utils.DownloadUtils.getURIHost(uri.spec)[0];
-      let bundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
-
-      hostLabel.textContent = bundle.formatStringFromName("fullscreen.entered", [displayHost], 1);
-      hostLabel.removeAttribute("hidden");
-    } else {
-      hostLabel.setAttribute("hidden", "true");
-    }
-
-    // Note: the warning box can be non-null if the warning box from the previous request
-    // wasn't hidden before another request was made.
-    if (!this.warningBox) {
-      this.warningBox = document.getElementById("full-screen-warning-container");
-      // Add a listener to clean up state after the warning is hidden.
-      this.warningBox.addEventListener("transitionend", this);
-      this.warningBox.removeAttribute("hidden");
-    } else {
-      if (this.warningFadeOutTimeout) {
-        clearTimeout(this.warningFadeOutTimeout);
-        this.warningFadeOutTimeout = null;
+    // Shows a warning that the site has entered fullscreen for a short duration.
+    show: function(aOrigin) {
+      if (!document.fullscreenElement) {
+        return;
       }
-      this.warningBox.removeAttribute("fade-warning-out");
-    }
 
-    // Set a timeout to fade the warning out after a few moments.
-    this.warningFadeOutTimeout = setTimeout(() => {
-      if (this.warningBox) {
-        this.warningBox.setAttribute("fade-warning-out", "true");
+      if (!this._element) {
+        this._element = document.getElementById("fullscreen-warning");
+        // Setup event listeners
+        this._element.addEventListener("transitionend", this);
+        window.addEventListener("mousemove", this, true);
+        // The timeout to hide the warning box after a while.
+        this._timeoutHide = new this.Timeout(() => {
+          this._state = "hidden";
+        }, gPrefService.getIntPref("full-screen-api.warning.timeout"));
+        // The timeout to show the warning box when the pointer is at the top
+        this._timeoutShow = new this.Timeout(() => {
+          this._state = "ontop";
+          this._timeoutHide.start();
+        }, gPrefService.getIntPref("full-screen-api.warning.delay"));
       }
-    }, 3000);
+
+      // Set the strings on the fullscreen warning UI.
+      if (aOrigin) {
+        this._origin = aOrigin;
+      }
+      let uri = BrowserUtils.makeURI(this._origin);
+      let host = null;
+      try {
+        host = uri.host;
+      } catch (e) { }
+      let textElem = document.getElementById("fullscreen-domain-text");
+      if (!host) {
+        textElem.setAttribute("hidden", true);
+      } else {
+        textElem.removeAttribute("hidden");
+        let hostElem = document.getElementById("fullscreen-domain");
+        // Document's principal's URI has a host. Display a warning including it.
+        let utils = {};
+        Cu.import("resource://gre/modules/DownloadUtils.jsm", utils);
+        hostElem.textContent = utils.DownloadUtils.getURIHost(uri.spec)[0];
+      }
+      this._element.className = gIdentityHandler.fullscreenWarningClassName;
+
+      // User should be allowed to explicitly disable
+      // the prompt if they really want.
+      if (this._timeoutHide.delay <= 0) {
+        return;
+      }
+
+      // Explicitly set the last state to hidden to avoid the warning
+      // box being hidden immediately because of mousemove.
+      this._state = "onscreen";
+      this._lastState = "hidden";
+      this._timeoutHide.start();
+    },
+
+    close: function() {
+      if (!this._element) {
+        return;
+      }
+      // Cancel any pending timeout
+      this._timeoutHide.cancel();
+      this._timeoutShow.cancel();
+      // Reset state of the warning box
+      this._state = "hidden";
+      this._element.setAttribute("hidden", true);
+      // Remove all event listeners
+      this._element.removeEventListener("transitionend", this);
+      window.removeEventListener("mousemove", this, true);
+      // Clear fields
+      this._element = null;
+      this._timeoutHide = null;
+      this._timeoutShow = null;
+
+      // Ensure focus switches away from the (now hidden) warning box.
+      // If the user clicked buttons in the warning box, it would have
+      // been focused, and any key events would be directed at the (now
+      // hidden) chrome document instead of the target document.
+      gBrowser.selectedBrowser.focus();
+    },
+
+    // State could be one of "onscreen", "ontop", "hiding", and
+    // "hidden". Setting the state to "onscreen" and "ontop" takes
+    // effect immediately, while setting it to "hidden" actually
+    // turns the state to "hiding" before the transition finishes.
+    _lastState: null,
+    _STATES: ["hidden", "ontop", "onscreen"],
+    get _state() {
+      for (let state of this._STATES) {
+        if (this._element.hasAttribute(state)) {
+          return state;
+        }
+      }
+      return "hiding";
+    },
+    set _state(newState) {
+      let currentState = this._state;
+      if (currentState == newState) {
+        return;
+      }
+      if (currentState != "hiding") {
+        this._lastState = currentState;
+        this._element.removeAttribute(currentState);
+      }
+      if (newState != "hidden") {
+        if (currentState != "hidden") {
+          this._element.setAttribute(newState, true);
+        } else {
+          // When the previous state is hidden, the display was none,
+          // thus no box was constructed. We need to wait for the new
+          // display value taking effect first, otherwise, there won't
+          // be any transition. Since requestAnimationFrame callback is
+          // generally triggered before any style flush and layout, we
+          // should wait for the second animation frame.
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (this._element) {
+                this._element.setAttribute(newState, true);
+              }
+            });
+          });
+        }
+      }
+    },
+
+    handleEvent: function(event) {
+      switch (event.type) {
+        case "mousemove": {
+          let state = this._state;
+          if (state == "hidden") {
+            // If the warning box is currently hidden, show it after
+            // a short delay if the pointer is at the top.
+            if (event.clientY != 0) {
+              this._timeoutShow.cancel();
+            } else if (this._timeoutShow.delay >= 0) {
+              this._timeoutShow.start();
+            }
+          } else {
+            let elemRect = this._element.getBoundingClientRect();
+            if (state == "hiding" && this._lastState != "hidden") {
+              // If we are on the hiding transition, and the pointer
+              // moved near the box, restore to the previous state.
+              if (event.clientY <= elemRect.bottom + 50) {
+                this._state = this._lastState;
+                this._timeoutHide.start();
+              }
+            } else if (state == "ontop" || this._lastState != "hidden") {
+              // State being "ontop" or the previous state not being
+              // "hidden" indicates this current warning box is shown
+              // in response to user's action. Hide it immediately when
+              // the pointer leaves that area.
+              if (event.clientY > elemRect.bottom + 50) {
+                this._state = "hidden";
+                this._timeoutHide.cancel();
+              }
+            }
+          }
+          break;
+        }
+        case "transitionend": {
+          if (this._state == "hiding") {
+            this._element.setAttribute("hidden", true);
+          }
+          break;
+        }
+      }
+    }
   },
 
   showNavToolbox: function(trackMouse = true) {
@@ -490,10 +627,6 @@ XPCOMUtils.defineLazyGetter(FullScreen, "useLionFullScreen", function() {
   // * on OS X
   // * on Lion or higher (Darwin 11+)
   // * have fullscreenbutton="true"
-#ifdef XP_MACOSX
-  return parseFloat(Services.sysinfo.getProperty("version")) >= 11 &&
+  return AppConstants.isPlatformAndVersionAtLeast("macosx", 11) &&
          document.documentElement.getAttribute("fullscreenbutton") == "true";
-#else
-  return false;
-#endif
 });

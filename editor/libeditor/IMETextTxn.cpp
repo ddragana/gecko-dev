@@ -79,7 +79,7 @@ IMETextTxn::UndoTransaction()
 {
   // Get the selection first so we'll fail before making any changes if we
   // can't get it
-  nsRefPtr<Selection> selection = mEditor.GetSelection();
+  RefPtr<Selection> selection = mEditor.GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NOT_INITIALIZED);
 
   nsresult res = mTextNode->DeleteData(mOffset, mStringToInsert.Length());
@@ -106,7 +106,7 @@ IMETextTxn::Merge(nsITransaction* aTransaction, bool* aDidMerge)
   }
 
   // If aTransaction is another IMETextTxn then absorb it
-  nsRefPtr<IMETextTxn> otherTxn = do_QueryObject(aTransaction);
+  RefPtr<IMETextTxn> otherTxn = do_QueryObject(aTransaction);
   if (otherTxn) {
     // We absorb the next IME transaction by adopting its insert string
     mStringToInsert = otherTxn->mStringToInsert;
@@ -134,23 +134,6 @@ IMETextTxn::GetTxnDescription(nsAString& aString)
 }
 
 /* ============ private methods ================== */
-static SelectionType
-ToSelectionType(uint32_t aTextRangeType)
-{
-  switch(aTextRangeType) {
-    case NS_TEXTRANGE_RAWINPUT:
-      return nsISelectionController::SELECTION_IME_RAWINPUT;
-    case NS_TEXTRANGE_SELECTEDRAWTEXT:
-      return nsISelectionController::SELECTION_IME_SELECTEDRAWTEXT;
-    case NS_TEXTRANGE_CONVERTEDTEXT:
-      return nsISelectionController::SELECTION_IME_CONVERTEDTEXT;
-    case NS_TEXTRANGE_SELECTEDCONVERTEDTEXT:
-      return nsISelectionController::SELECTION_IME_SELECTEDCONVERTEDTEXT;
-    default:
-      MOZ_CRASH("Selection type is invalid");
-      return nsISelectionController::SELECTION_NORMAL;
-  }
-}
 
 nsresult
 IMETextTxn::SetSelectionForRanges()
@@ -167,14 +150,14 @@ IMETextTxn::SetIMESelection(nsEditor& aEditor,
                             uint32_t aLengthOfCompositionString,
                             const TextRangeArray* aRanges)
 {
-  nsRefPtr<Selection> selection = aEditor.GetSelection();
+  RefPtr<Selection> selection = aEditor.GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NOT_INITIALIZED);
 
   nsresult rv = selection->StartBatchChanges();
   NS_ENSURE_SUCCESS(rv, rv);
 
   // First, remove all selections of IME composition.
-  static const SelectionType kIMESelections[] = {
+  static const RawSelectionType kIMESelections[] = {
     nsISelectionController::SELECTION_IME_RAWINPUT,
     nsISelectionController::SELECTION_IME_SELECTEDRAWTEXT,
     nsISelectionController::SELECTION_IME_CONVERTEDTEXT,
@@ -213,7 +196,7 @@ IMETextTxn::SetIMESelection(nsEditor& aEditor,
 
     // Caret needs special handling since its length may be 0 and if it's not
     // specified explicitly, we need to handle it ourselves later.
-    if (textRange.mRangeType == NS_TEXTRANGE_CARETPOSITION) {
+    if (textRange.mRangeType == TextRangeType::eCaret) {
       NS_ASSERTION(!setCaret, "The ranges already has caret position");
       NS_ASSERTION(!textRange.Length(), "nsEditor doesn't support wide caret");
       int32_t caretOffset = static_cast<int32_t>(
@@ -223,7 +206,12 @@ IMETextTxn::SetIMESelection(nsEditor& aEditor,
                  static_cast<uint32_t>(caretOffset) <= maxOffset);
       rv = selection->Collapse(aTextNode, caretOffset);
       setCaret = setCaret || NS_SUCCEEDED(rv);
-      NS_ASSERTION(setCaret, "Failed to collapse normal selection");
+      if (NS_WARN_IF(!setCaret)) {
+        continue;
+      }
+      // If caret range is specified explicitly, we should show the caret if
+      // it should be so.
+      aEditor.HideCaret(false);
       continue;
     }
 
@@ -233,7 +221,7 @@ IMETextTxn::SetIMESelection(nsEditor& aEditor,
       continue;
     }
 
-    nsRefPtr<nsRange> clauseRange;
+    RefPtr<nsRange> clauseRange;
     int32_t startOffset = static_cast<int32_t>(
       aOffsetInNode +
         std::min(textRange.mStartOffset, aLengthOfCompositionString));
@@ -254,7 +242,7 @@ IMETextTxn::SetIMESelection(nsEditor& aEditor,
 
     // Set the range of the clause to selection.
     nsCOMPtr<nsISelection> selectionOfIME;
-    rv = selCon->GetSelection(ToSelectionType(textRange.mRangeType),
+    rv = selCon->GetSelection(ToRawSelectionType(textRange.mRangeType),
                               getter_AddRefs(selectionOfIME));
     if (NS_FAILED(rv)) {
       NS_WARNING("Failed to get IME selection");
@@ -292,9 +280,13 @@ IMETextTxn::SetIMESelection(nsEditor& aEditor,
     rv = selection->Collapse(aTextNode, caretOffset);
     NS_ASSERTION(NS_SUCCEEDED(rv),
                  "Failed to set caret at the end of composition string");
+
+    // If caret range isn't specified explicitly, we should hide the caret.
+    // Hiding the caret benefits a Windows build (see bug 555642 comment #6).
+    aEditor.HideCaret(true);
   }
 
-  rv = selection->EndBatchChanges();
+  rv = selection->EndBatchChangesInternal();
   NS_ASSERTION(NS_SUCCEEDED(rv), "Failed to end batch changes");
 
   return rv;

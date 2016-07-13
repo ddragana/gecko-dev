@@ -51,10 +51,10 @@ ArenaStrdup(const nsAFlatCString& aString, PLArenaPool* aArena)
 }
 
 static const struct PLDHashTableOps property_HashTableOps = {
-  PL_DHashStringKey,
-  PL_DHashMatchStringKey,
-  PL_DHashMoveEntryStub,
-  PL_DHashClearEntryStub,
+  PLDHashTable::HashStringKey,
+  PLDHashTable::MatchStringKey,
+  PLDHashTable::MoveEntryStub,
+  PLDHashTable::ClearEntryStub,
   nullptr,
 };
 
@@ -227,7 +227,7 @@ nsPropertiesParser::ParseValueCharacter(char16_t aChar, const char16_t* aCur,
             aTokenStart = aCur + 1;
             break;
           }
-        // no break
+          MOZ_FALLTHROUGH;
 
         case '\r':
           // we're done! We have a key and value
@@ -477,7 +477,7 @@ nsPersistentProperties::Create(nsISupports* aOuter, REFNSIID aIID,
   if (aOuter) {
     return NS_ERROR_NO_AGGREGATION;
   }
-  nsRefPtr<nsPersistentProperties> props = new nsPersistentProperties();
+  RefPtr<nsPersistentProperties> props = new nsPersistentProperties();
   return props->QueryInterface(aIID, aResult);
 }
 
@@ -486,8 +486,7 @@ NS_IMPL_ISUPPORTS(nsPersistentProperties, nsIPersistentProperties, nsIProperties
 NS_IMETHODIMP
 nsPersistentProperties::Load(nsIInputStream* aIn)
 {
-  nsresult rv = nsSimpleUnicharStreamFactory::GetInstance()->
-    CreateInstanceFromUTF8Stream(aIn, getter_AddRefs(mIn));
+  nsresult rv = NS_NewUnicharInputStream(aIn, getter_AddRefs(mIn));
 
   if (rv != NS_OK) {
     NS_WARNING("Error creating UnicharInputStream");
@@ -523,12 +522,12 @@ nsPersistentProperties::SetStringProperty(const nsACString& aKey,
                                           nsAString& aOldValue)
 {
   const nsAFlatCString&  flatKey = PromiseFlatCString(aKey);
-  PropertyTableEntry* entry = static_cast<PropertyTableEntry*>(
-    PL_DHashTableAdd(&mTable, flatKey.get(), mozilla::fallible));
+  auto entry = static_cast<PropertyTableEntry*>
+                          (mTable.Add(flatKey.get()));
 
   if (entry->mKey) {
     aOldValue = entry->mValue;
-    NS_WARNING(nsPrintfCString("the property %s already exists\n",
+    NS_WARNING(nsPrintfCString("the property %s already exists",
                                flatKey.get()).get());
   } else {
     aOldValue.Truncate();
@@ -552,9 +551,7 @@ nsPersistentProperties::GetStringProperty(const nsACString& aKey,
 {
   const nsAFlatCString&  flatKey = PromiseFlatCString(aKey);
 
-  PropertyTableEntry* entry = static_cast<PropertyTableEntry*>(
-    PL_DHashTableSearch(&mTable, flatKey.get()));
-
+  auto entry = static_cast<PropertyTableEntry*>(mTable.Search(flatKey.get()));
   if (!entry) {
     return NS_ERROR_FAILURE;
   }
@@ -575,7 +572,7 @@ nsPersistentProperties::Enumerate(nsISimpleEnumerator** aResult)
   for (auto iter = mTable.Iter(); !iter.Done(); iter.Next()) {
     auto entry = static_cast<PropertyTableEntry*>(iter.Get());
 
-    nsRefPtr<nsPropertyElement> element =
+    RefPtr<nsPropertyElement> element =
       new nsPropertyElement(nsDependentCString(entry->mKey),
                             nsDependentString(entry->mValue));
 
@@ -612,7 +609,7 @@ nsPersistentProperties::Undefine(const char* aProp)
 NS_IMETHODIMP
 nsPersistentProperties::Has(const char* aProp, bool* aResult)
 {
-  *aResult = !!PL_DHashTableSearch(&mTable, aProp);
+  *aResult = !!mTable.Search(aProp);
   return NS_OK;
 }
 
@@ -632,7 +629,7 @@ nsPropertyElement::Create(nsISupports* aOuter, REFNSIID aIID, void** aResult)
   if (aOuter) {
     return NS_ERROR_NO_AGGREGATION;
   }
-  nsRefPtr<nsPropertyElement> propElem = new nsPropertyElement();
+  RefPtr<nsPropertyElement> propElem = new nsPropertyElement();
   return propElem->QueryInterface(aIID, aResult);
 }
 

@@ -10,13 +10,13 @@
 
 importScripts("resource://gre/modules/osfile.jsm");
 
-let PromiseWorker = require("resource://gre/modules/workers/PromiseWorker.js");
+var PromiseWorker = require("resource://gre/modules/workers/PromiseWorker.js");
 
-let File = OS.File;
-let Encoder = new TextEncoder();
-let Decoder = new TextDecoder();
+var File = OS.File;
+var Encoder = new TextEncoder();
+var Decoder = new TextDecoder();
 
-let worker = new PromiseWorker.AbstractWorker();
+var worker = new PromiseWorker.AbstractWorker();
 worker.dispatch = function(method, args = []) {
   return Agent[method](...args);
 };
@@ -62,7 +62,7 @@ const STATE_UPGRADE_BACKUP = "upgradeBackup";
  */
 const STATE_EMPTY = "empty";
 
-let Agent = {
+var Agent = {
   // Path to the files used by the SessionWorker
   Paths: null,
 
@@ -344,25 +344,29 @@ let Agent = {
     let exn = null;
 
     let iterator = new File.DirectoryIterator(path);
-    if (!iterator.exists()) {
-      return;
-    }
-    for (let entry in iterator) {
-      if (entry.isDir) {
-        continue;
+    try {
+      if (!iterator.exists()) {
+        return;
       }
-      if (!prefix || entry.name.startsWith(prefix)) {
-        try {
-          File.remove(entry.path);
-        } catch (ex) {
-          // Don't stop immediately
-          exn = exn || ex;
+      for (let entry in iterator) {
+        if (entry.isDir) {
+          continue;
+        }
+        if (!prefix || entry.name.startsWith(prefix)) {
+          try {
+            File.remove(entry.path);
+          } catch (ex) {
+            // Don't stop immediately
+            exn = exn || ex;
+          }
         }
       }
-    }
 
-    if (exn) {
-      throw exn;
+      if (exn) {
+        throw exn;
+      }
+    } finally {
+      iterator.close();
     }
   },
 };

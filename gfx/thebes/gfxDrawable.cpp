@@ -7,7 +7,6 @@
 #include "gfxASurface.h"
 #include "gfxContext.h"
 #include "gfxPlatform.h"
-#include "gfxColor.h"
 #include "gfx2DGlue.h"
 #ifdef MOZ_X11
 #include "cairo.h"
@@ -31,11 +30,13 @@ gfxSurfaceDrawable::gfxSurfaceDrawable(SourceSurface* aSurface,
 }
 
 bool
-gfxSurfaceDrawable::DrawWithSamplingRect(gfxContext* aContext,
+gfxSurfaceDrawable::DrawWithSamplingRect(DrawTarget* aDrawTarget,
+                                         CompositionOp aOp,
+                                         AntialiasMode aAntialiasMode,
                                          const gfxRect& aFillRect,
                                          const gfxRect& aSamplingRect,
-                                         bool aRepeat,
-                                         const GraphicsFilter& aFilter,
+                                         ExtendMode aExtendMode,
+                                         const SamplingFilter aSamplingFilter,
                                          gfxFloat aOpacity)
 {
   if (!mSourceSurface) {
@@ -53,60 +54,56 @@ gfxSurfaceDrawable::DrawWithSamplingRect(gfxContext* aContext,
     return false;
   }
 
-  DrawInternal(aContext, aFillRect, intRect, false, aFilter, aOpacity, gfxMatrix());
+  DrawInternal(aDrawTarget, aOp, aAntialiasMode, aFillRect, intRect,
+               ExtendMode::CLAMP, aSamplingFilter, aOpacity, gfxMatrix());
   return true;
 }
 
 bool
 gfxSurfaceDrawable::Draw(gfxContext* aContext,
                          const gfxRect& aFillRect,
-                         bool aRepeat,
-                         const GraphicsFilter& aFilter,
+                         ExtendMode aExtendMode,
+                         const SamplingFilter aSamplingFilter,
                          gfxFloat aOpacity,
                          const gfxMatrix& aTransform)
+
 {
   if (!mSourceSurface) {
     return true;
   }
 
-  DrawInternal(aContext, aFillRect, IntRect(), aRepeat, aFilter, aOpacity, aTransform);
+  DrawInternal(aContext->GetDrawTarget(), aContext->CurrentOp(),
+               aContext->CurrentAntialiasMode(), aFillRect, IntRect(),
+               aExtendMode, aSamplingFilter, aOpacity, aTransform);
   return true;
 }
 
 void
-gfxSurfaceDrawable::DrawInternal(gfxContext* aContext,
+gfxSurfaceDrawable::DrawInternal(DrawTarget* aDrawTarget,
+                                 CompositionOp aOp,
+                                 AntialiasMode aAntialiasMode,
                                  const gfxRect& aFillRect,
                                  const IntRect& aSamplingRect,
-                                 bool aRepeat,
-                                 const GraphicsFilter& aFilter,
+                                 ExtendMode aExtendMode,
+                                 const SamplingFilter aSamplingFilter,
                                  gfxFloat aOpacity,
                                  const gfxMatrix& aTransform)
 {
-    ExtendMode extend = ExtendMode::CLAMP;
-
-    if (aRepeat) {
-        extend = ExtendMode::REPEAT;
-    }
-
     Matrix patternTransform = ToMatrix(aTransform * mTransform);
     patternTransform.Invert();
 
-    SurfacePattern pattern(mSourceSurface, extend,
-                           patternTransform, ToFilter(aFilter), aSamplingRect);
+    SurfacePattern pattern(mSourceSurface, aExtendMode,
+                           patternTransform, aSamplingFilter, aSamplingRect);
 
     Rect fillRect = ToRect(aFillRect);
-    DrawTarget* dt = aContext->GetDrawTarget();
 
-    if (aContext->CurrentOperator() == gfxContext::OPERATOR_SOURCE &&
-        aOpacity == 1.0) {
+    if (aOp == CompositionOp::OP_SOURCE && aOpacity == 1.0) {
         // Emulate cairo operator source which is bound by mask!
-        dt->ClearRect(fillRect);
-        dt->FillRect(fillRect, pattern);
+        aDrawTarget->ClearRect(fillRect);
+        aDrawTarget->FillRect(fillRect, pattern);
     } else {
-        dt->FillRect(fillRect, pattern,
-                     DrawOptions(aOpacity,
-                                 CompositionOpForOp(aContext->CurrentOperator()),
-                                 aContext->CurrentAntialiasMode()));
+        aDrawTarget->FillRect(fillRect, pattern,
+                              DrawOptions(aOpacity, aOp, aAntialiasMode));
     }
 }
 
@@ -118,45 +115,61 @@ gfxCallbackDrawable::gfxCallbackDrawable(gfxDrawingCallback* aCallback,
 }
 
 already_AddRefed<gfxSurfaceDrawable>
-gfxCallbackDrawable::MakeSurfaceDrawable(const GraphicsFilter aFilter)
+gfxCallbackDrawable::MakeSurfaceDrawable(const SamplingFilter aSamplingFilter)
 {
     SurfaceFormat format =
         gfxPlatform::GetPlatform()->Optimal2DFormatForContent(gfxContentType::COLOR_ALPHA);
     RefPtr<DrawTarget> dt =
         gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(mSize,
                                                                      format);
-    if (!dt)
+    if (!dt || !dt->IsValid())
         return nullptr;
 
-    nsRefPtr<gfxContext> ctx = new gfxContext(dt);
-    Draw(ctx, gfxRect(0, 0, mSize.width, mSize.height), false, aFilter);
+    RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(dt);
+    MOZ_ASSERT(ctx); // already checked for target above
+    Draw(ctx, gfxRect(0, 0, mSize.width, mSize.height), ExtendMode::CLAMP,
+         aSamplingFilter);
 
     RefPtr<SourceSurface> surface = dt->Snapshot();
     if (surface) {
-        nsRefPtr<gfxSurfaceDrawable> drawable = new gfxSurfaceDrawable(surface, mSize);
+        RefPtr<gfxSurfaceDrawable> drawable = new gfxSurfaceDrawable(surface, mSize);
         return drawable.forget();
     }
     return nullptr;
 }
 
+static bool
+IsRepeatingExtendMode(ExtendMode aExtendMode)
+{
+  switch (aExtendMode) {
+  case ExtendMode::REPEAT:
+  case ExtendMode::REPEAT_X:
+  case ExtendMode::REPEAT_Y:
+    return true;
+  default:
+    return false;
+  }
+}
+
 bool
 gfxCallbackDrawable::Draw(gfxContext* aContext,
                           const gfxRect& aFillRect,
-                          bool aRepeat,
-                          const GraphicsFilter& aFilter,
+                          ExtendMode aExtendMode,
+                          const SamplingFilter aSamplingFilter,
                           gfxFloat aOpacity,
                           const gfxMatrix& aTransform)
 {
-    if ((aRepeat || aOpacity != 1.0) && !mSurfaceDrawable) {
-        mSurfaceDrawable = MakeSurfaceDrawable(aFilter);
+    if ((IsRepeatingExtendMode(aExtendMode) || aOpacity != 1.0) && !mSurfaceDrawable) {
+        mSurfaceDrawable = MakeSurfaceDrawable(aSamplingFilter);
     }
 
     if (mSurfaceDrawable)
-        return mSurfaceDrawable->Draw(aContext, aFillRect, aRepeat, aFilter,
+        return mSurfaceDrawable->Draw(aContext, aFillRect, aExtendMode,
+                                      aSamplingFilter,
                                       aOpacity, aTransform);
 
     if (mCallback)
-        return (*mCallback)(aContext, aFillRect, aFilter, aTransform);
+        return (*mCallback)(aContext, aFillRect, aSamplingFilter, aTransform);
 
     return false;
 }
@@ -183,22 +196,23 @@ public:
 
     virtual bool operator()(gfxContext* aContext,
                               const gfxRect& aFillRect,
-                              const GraphicsFilter& aFilter,
+                              const SamplingFilter aSamplingFilter,
                               const gfxMatrix& aTransform = gfxMatrix())
     {
-        return mDrawable->Draw(aContext, aFillRect, false, aFilter, 1.0,
+        return mDrawable->Draw(aContext, aFillRect, ExtendMode::CLAMP,
+                               aSamplingFilter, 1.0,
                                aTransform);
     }
 private:
-    nsRefPtr<gfxDrawable> mDrawable;
+    RefPtr<gfxDrawable> mDrawable;
 };
 
 already_AddRefed<gfxCallbackDrawable>
 gfxPatternDrawable::MakeCallbackDrawable()
 {
-    nsRefPtr<gfxDrawingCallback> callback =
+    RefPtr<gfxDrawingCallback> callback =
         new DrawingCallbackFromDrawable(this);
-    nsRefPtr<gfxCallbackDrawable> callbackDrawable =
+    RefPtr<gfxCallbackDrawable> callbackDrawable =
         new gfxCallbackDrawable(callback, mSize);
     return callbackDrawable.forget();
 }
@@ -206,8 +220,8 @@ gfxPatternDrawable::MakeCallbackDrawable()
 bool
 gfxPatternDrawable::Draw(gfxContext* aContext,
                          const gfxRect& aFillRect,
-                         bool aRepeat,
-                         const GraphicsFilter& aFilter,
+                         ExtendMode aExtendMode,
+                         const SamplingFilter aSamplingFilter,
                          gfxFloat aOpacity,
                          const gfxMatrix& aTransform)
 {
@@ -216,7 +230,7 @@ gfxPatternDrawable::Draw(gfxContext* aContext,
     if (!mPattern)
         return false;
 
-    if (aRepeat) {
+    if (IsRepeatingExtendMode(aExtendMode)) {
         // We can't use mPattern directly: We want our repeated tiles to have
         // the size mSize, which might not be the case in mPattern.
         // So we need to draw mPattern into a surface of size mSize, create
@@ -224,8 +238,9 @@ gfxPatternDrawable::Draw(gfxContext* aContext,
         // gfxCallbackDrawable and gfxSurfaceDrawable already know how to do
         // those things, so we use them here. Drawing mPattern into the surface
         // will happen through this Draw() method with aRepeat = false.
-        nsRefPtr<gfxCallbackDrawable> callbackDrawable = MakeCallbackDrawable();
-        return callbackDrawable->Draw(aContext, aFillRect, true, aFilter,
+        RefPtr<gfxCallbackDrawable> callbackDrawable = MakeCallbackDrawable();
+        return callbackDrawable->Draw(aContext, aFillRect, aExtendMode,
+                                      aSamplingFilter,
                                       aOpacity, aTransform);
     }
 

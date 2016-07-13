@@ -5,15 +5,13 @@
 
 const {PushDB, PushService, PushServiceWebSocket} = serviceExports;
 
+const userAgentID = '1ca1cf66-eeb4-4df7-87c1-d5c92906ab90';
+
 function run_test() {
   do_get_profile();
-  setPrefs();
-  disableServiceWorkerEvents(
-    'https://example.com/page/1',
-    'https://example.com/page/2',
-    'https://example.com/page/3',
-    'https://example.com/page/4'
-  );
+  setPrefs({
+    userAgentID: userAgentID,
+  });
   run_next_test();
 }
 
@@ -53,12 +51,15 @@ add_task(function* test_notification_incomplete() {
     yield db.put(record);
   }
 
-  Services.obs.addObserver(function observe(subject, topic, data) {
+  function observeMessage(subject, topic, data) {
     ok(false, 'Should not deliver malformed updates');
-  }, 'push-notification', false);
+  }
+  do_register_cleanup(() =>
+    Services.obs.removeObserver(observeMessage, PushServiceComponent.pushTopic));
+  Services.obs.addObserver(observeMessage, PushServiceComponent.pushTopic, false);
 
-  let notificationDefer = Promise.defer();
-  let notificationDone = after(2, notificationDefer.resolve);
+  let notificationDone;
+  let notificationPromise = new Promise(resolve => notificationDone = after(2, resolve));
   let prevHandler = PushServiceWebSocket._handleNotificationReply;
   PushServiceWebSocket._handleNotificationReply = function _handleNotificationReply() {
     notificationDone();
@@ -66,7 +67,6 @@ add_task(function* test_notification_incomplete() {
   };
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -74,7 +74,7 @@ add_task(function* test_notification_incomplete() {
           this.serverSendMsg(JSON.stringify({
             messageType: 'hello',
             status: 200,
-            uaid: '1ca1cf66-eeb4-4df7-87c1-d5c92906ab90'
+            uaid: userAgentID,
           }));
           this.serverSendMsg(JSON.stringify({
             // Missing "updates" field; should ignore message.
@@ -107,8 +107,7 @@ add_task(function* test_notification_incomplete() {
     }
   });
 
-  yield waitForPromise(notificationDefer.promise, DEFAULT_TIMEOUT,
-    'Timed out waiting for incomplete notifications');
+  yield notificationPromise;
 
   let storeRecords = yield db.getAllKeyIDs();
   storeRecords.sort(({pushEndpoint: a}, {pushEndpoint: b}) =>

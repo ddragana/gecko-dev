@@ -12,6 +12,9 @@
 #include "nsTObserverArray.h"
 
 namespace mozilla {
+namespace ipc {
+class AutoIPCStream;
+} // namespace ipc
 namespace dom {
 namespace cache {
 
@@ -35,12 +38,8 @@ public:
   SerializeControl(CacheReadStream* aReadStreamOut) override;
 
   virtual void
-  SerializeFds(CacheReadStream* aReadStreamOut,
-               const nsTArray<mozilla::ipc::FileDescriptor>& aFds) override;
-
-  virtual void
-  DeserializeFds(const CacheReadStream& aReadStream,
-                 nsTArray<mozilla::ipc::FileDescriptor>& aFdsOut) override;
+  SerializeStream(CacheReadStream* aReadStreamOut, nsIInputStream* aStream,
+                  nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList) override;
 
 private:
   virtual void
@@ -61,7 +60,7 @@ private:
   // Cycle with StreamList via a weak-ref to us.  Cleanup occurs when the actor
   // is deleted by the PBackground manager.  ActorDestroy() then calls
   // StreamList::RemoveStreamControl() to clear the weak ref.
-  nsRefPtr<StreamList> mStreamList;
+  RefPtr<StreamList> mStreamList;
 
   NS_DECL_OWNINGTHREAD
 };

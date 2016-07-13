@@ -10,7 +10,7 @@
 #define mozilla_ipc_SocketBase_h
 
 #include "base/message_loop.h"
-#include "nsAutoPtr.h"
+#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 namespace ipc {
@@ -72,6 +72,26 @@ public:
     return Read(&aValue, sizeof(aValue));
   }
 
+  nsresult Read(int64_t& aValue)
+  {
+    return Read(&aValue, sizeof(aValue));
+  }
+
+  nsresult Read(uint64_t& aValue)
+  {
+    return Read(&aValue, sizeof(aValue));
+  }
+
+  nsresult Read(float& aValue)
+  {
+    return Read(&aValue, sizeof(aValue));
+  }
+
+  nsresult Read(double& aValue)
+  {
+    return Read(&aValue, sizeof(aValue));
+  }
+
   uint8_t* Append(size_t aLen);
 
   nsresult Write(const void* aValue, size_t aLen);
@@ -102,6 +122,26 @@ public:
   }
 
   nsresult Write(uint32_t aValue)
+  {
+    return Write(&aValue, sizeof(aValue));
+  }
+
+  nsresult Write(int64_t aValue)
+  {
+    return Write(&aValue, sizeof(aValue));
+  }
+
+  nsresult Write(uint64_t aValue)
+  {
+    return Write(&aValue, sizeof(aValue));
+  }
+
+  nsresult Write(float aValue)
+  {
+    return Write(&aValue, sizeof(aValue));
+  }
+
+  nsresult Write(double aValue)
   {
     return Write(&aValue, sizeof(aValue));
   }
@@ -229,6 +269,15 @@ public:
    * @param aSize The number of bytes in |aData|.
    */
   UnixSocketRawData(const void* aData, size_t aSize);
+
+  /**
+   * This constructor takes ownership of the data in aData.  The
+   * data is assumed to be aSize bytes in length.
+   *
+   * @param aData The buffer to take ownership of.
+   * @param aSize The number of bytes in |aData|.
+   */
+  UnixSocketRawData(UniquePtr<uint8_t[]> aData, size_t aSize);
 
   /**
    * This constructor reserves aSize bytes of space. Currently
@@ -404,7 +453,7 @@ private:
  * the I/O thread to the consumer thread.
  */
 template <typename T>
-class SocketTask : public Task
+class SocketTask : public CancelableRunnable
 {
 public:
   virtual ~SocketTask()
@@ -442,7 +491,7 @@ public:
   SocketEventTask(SocketIOBase* aIO, SocketEvent aEvent);
   ~SocketEventTask();
 
-  void Run() override;
+  NS_IMETHOD Run() override;
 
 private:
   SocketEvent mEvent;
@@ -458,22 +507,22 @@ public:
   SocketRequestClosingTask(SocketIOBase* aIO);
   ~SocketRequestClosingTask();
 
-  void Run() override;
+  NS_IMETHOD Run() override;
 };
 
 /**
  * |SocketDeleteInstanceTask| deletes an object on the consumer thread.
  */
-class SocketDeleteInstanceTask final : public Task
+class SocketDeleteInstanceTask final : public Runnable
 {
 public:
   SocketDeleteInstanceTask(SocketIOBase* aIO);
   ~SocketDeleteInstanceTask();
 
-  void Run() override;
+  NS_IMETHOD Run() override;
 
 private:
-  nsAutoPtr<SocketIOBase> mIO;
+  UniquePtr<SocketIOBase> mIO;
 };
 
 //
@@ -484,7 +533,7 @@ private:
  * supposed to run on the I/O thread.
  */
 template<typename Tio>
-class SocketIOTask : public CancelableTask
+class SocketIOTask : public CancelableRunnable
 {
 public:
   virtual ~SocketIOTask()
@@ -495,9 +544,10 @@ public:
     return mIO;
   }
 
-  void Cancel() override
+  nsresult Cancel() override
   {
     mIO = nullptr;
+    return NS_OK;
   }
 
   bool IsCanceled() const
@@ -526,7 +576,7 @@ public:
   SocketIOShutdownTask(SocketIOBase* aIO);
   ~SocketIOShutdownTask();
 
-  void Run() override;
+  NS_IMETHOD Run() override;
 };
 
 }

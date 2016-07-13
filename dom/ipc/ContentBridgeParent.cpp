@@ -9,6 +9,7 @@
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "nsXULAppAPI.h"
 #include "nsIObserverService.h"
+#include "base/task.h"
 
 using namespace mozilla::ipc;
 using namespace mozilla::jsipc;
@@ -26,7 +27,6 @@ ContentBridgeParent::ContentBridgeParent(Transport* aTransport)
 
 ContentBridgeParent::~ContentBridgeParent()
 {
-  XRE_GetIOMessageLoop()->PostTask(FROM_HERE, new DeleteTask<Transport>(mTransport));
 }
 
 void
@@ -36,15 +36,13 @@ ContentBridgeParent::ActorDestroy(ActorDestroyReason aWhy)
   if (os) {
     os->RemoveObserver(this, "content-child-shutdown");
   }
-  MessageLoop::current()->PostTask(
-    FROM_HERE,
-    NewRunnableMethod(this, &ContentBridgeParent::DeferredDestroy));
+  MessageLoop::current()->PostTask(NewRunnableMethod(this, &ContentBridgeParent::DeferredDestroy));
 }
 
 /*static*/ ContentBridgeParent*
 ContentBridgeParent::Create(Transport* aTransport, ProcessId aOtherPid)
 {
-  nsRefPtr<ContentBridgeParent> bridge =
+  RefPtr<ContentBridgeParent> bridge =
     new ContentBridgeParent(aTransport);
   bridge->mSelfRef = bridge;
 
@@ -76,7 +74,7 @@ ContentBridgeParent::RecvSyncMessage(const nsString& aMsg,
                                      const ClonedMessageData& aData,
                                      InfallibleTArray<jsipc::CpowEntry>&& aCpows,
                                      const IPC::Principal& aPrincipal,
-                                     nsTArray<OwningSerializedStructuredCloneBuffer>* aRetvals)
+                                     nsTArray<StructuredCloneData>* aRetvals)
 {
   return nsIContentParent::RecvSyncMessage(aMsg, aData, Move(aCpows),
                                            aPrincipal, aRetvals);
@@ -84,12 +82,12 @@ ContentBridgeParent::RecvSyncMessage(const nsString& aMsg,
 
 bool
 ContentBridgeParent::RecvAsyncMessage(const nsString& aMsg,
-                                      const ClonedMessageData& aData,
                                       InfallibleTArray<jsipc::CpowEntry>&& aCpows,
-                                      const IPC::Principal& aPrincipal)
+                                      const IPC::Principal& aPrincipal,
+                                      const ClonedMessageData& aData)
 {
-  return nsIContentParent::RecvAsyncMessage(aMsg, aData, Move(aCpows),
-                                            aPrincipal);
+  return nsIContentParent::RecvAsyncMessage(aMsg, Move(aCpows),
+                                            aPrincipal, aData);
 }
 
 PBlobParent*
@@ -163,16 +161,25 @@ ContentBridgeParent::DeallocPBrowserParent(PBrowserParent* aParent)
   return nsIContentParent::DeallocPBrowserParent(aParent);
 }
 
+void
+ContentBridgeParent::NotifyTabDestroyed()
+{
+  int32_t numLiveTabs = ManagedPBrowserParent().Count();
+  if (numLiveTabs == 1) {
+    MessageLoop::current()->PostTask(NewRunnableMethod(this, &ContentBridgeParent::Close));
+  }
+}
+
 // This implementation is identical to ContentParent::GetCPOWManager but we can't
 // move it to nsIContentParent because it calls ManagedPJavaScriptParent() which
 // only exists in PContentParent and PContentBridgeParent.
 jsipc::CPOWManager*
 ContentBridgeParent::GetCPOWManager()
 {
-  if (ManagedPJavaScriptParent().Length()) {
-    return CPOWManagerFor(ManagedPJavaScriptParent()[0]);
+  if (PJavaScriptParent* p = LoneManagedOrNullAsserts(ManagedPJavaScriptParent())) {
+    return CPOWManagerFor(p);
   }
-  return CPOWManagerFor(SendPJavaScriptConstructor());
+  return nullptr;
 }
 
 NS_IMETHODIMP

@@ -10,7 +10,6 @@
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
-#include "nsAutoPtr.h"
 #include "ThreeDPoint.h"
 #include "AudioContext.h"
 #include "PannerNode.h"
@@ -37,7 +36,7 @@ public:
     return mContext;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   double DopplerFactor() const
   {
@@ -117,7 +116,7 @@ private:
 
 private:
   friend class PannerNode;
-  nsRefPtr<AudioContext> mContext;
+  RefPtr<AudioContext> mContext;
   ThreeDPoint mPosition;
   ThreeDPoint mFrontVector;
   ThreeDPoint mRightVector;

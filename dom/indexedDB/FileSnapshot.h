@@ -9,8 +9,6 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/File.h"
-#include "nsAutoPtr.h"
-#include "nsCOMPtr.h"
 #include "nsISupports.h"
 #include "nsWeakPtr.h"
 
@@ -21,6 +19,9 @@ class PIBlobImplSnapshot : public nsISupports
 {
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(FILEIMPLSNAPSHOT_IID)
+
+  virtual mozilla::dom::BlobImpl*
+  GetBlobImpl() const = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(PIBlobImplSnapshot, FILEIMPLSNAPSHOT_IID)
@@ -28,60 +29,88 @@ NS_DEFINE_STATIC_IID_ACCESSOR(PIBlobImplSnapshot, FILEIMPLSNAPSHOT_IID)
 namespace mozilla {
 namespace dom {
 
-class MetadataParameters;
+class IDBFileHandle;
 
 namespace indexedDB {
 
-class IDBFileHandle;
-
 class BlobImplSnapshot final
-  : public BlobImplBase
+  : public BlobImpl
   , public PIBlobImplSnapshot
 {
-  typedef mozilla::dom::MetadataParameters MetadataParameters;
-
-  nsCOMPtr<nsIFile> mFile;
+  RefPtr<BlobImpl> mBlobImpl;
   nsWeakPtr mFileHandle;
 
-  bool mWholeFile;
-
 public:
-  // Create as a stored file
-  BlobImplSnapshot(const nsAString& aName,
-                   const nsAString& aContentType,
-                   MetadataParameters* aMetadataParams,
-                   nsIFile* aFile,
-                   IDBFileHandle* aFileHandle,
-                   FileInfo* aFileInfo);
+  BlobImplSnapshot(BlobImpl* aImpl,
+                   IDBFileHandle* aFileHandle);
 
   NS_DECL_ISUPPORTS_INHERITED
 
 private:
-  // Create slice
-  BlobImplSnapshot(const BlobImplSnapshot* aOther,
-                   uint64_t aStart,
-                   uint64_t aLength,
-                   const nsAString& aContentType);
+  BlobImplSnapshot(BlobImpl* aImpl,
+                   nsIWeakReference* aFileHandle);
 
   ~BlobImplSnapshot();
 
-  static void
-  AssertSanity()
-#ifdef DEBUG
-  ;
-#else
-  { }
-#endif
-
+  // BlobImpl
   virtual void
-  GetMozFullPathInternal(nsAString& aFullPath, ErrorResult& aRv) const override;
-
-  virtual void
-  GetInternalStream(nsIInputStream** aStream, ErrorResult& aRv) override;
-
-  virtual bool MayBeClonedToOtherThreads() const override
+  GetName(nsAString& aName) const override
   {
-    return false;
+    mBlobImpl->GetName(aName);
+  }
+
+  virtual void
+  GetPath(nsAString& aPath) const override
+  {
+    mBlobImpl->GetPath(aPath);
+  }
+
+  virtual void
+  SetPath(const nsAString& aPath) override
+  {
+    mBlobImpl->SetPath(aPath);
+  }
+
+  virtual int64_t
+  GetLastModified(ErrorResult& aRv) override
+  {
+    return mBlobImpl->GetLastModified(aRv);
+  }
+
+  virtual void
+  SetLastModified(int64_t aLastModified) override
+  {
+    mBlobImpl->SetLastModified(aLastModified);
+  }
+
+  virtual void
+  GetMozFullPath(nsAString& aName, ErrorResult& aRv) const override
+  {
+    mBlobImpl->GetMozFullPath(aName, aRv);
+  }
+
+  virtual void
+  GetMozFullPathInternal(nsAString& aFileName, ErrorResult& aRv) const override
+  {
+    mBlobImpl->GetMozFullPathInternal(aFileName, aRv);
+  }
+
+  virtual uint64_t
+  GetSize(ErrorResult& aRv) override
+  {
+    return mBlobImpl->GetSize(aRv);
+  }
+
+  virtual void
+  GetType(nsAString& aType) override
+  {
+    mBlobImpl->GetType(aType);
+  }
+
+  virtual uint64_t
+  GetSerialNumber() const override
+  {
+    return mBlobImpl->GetSerialNumber();
   }
 
   virtual already_AddRefed<BlobImpl>
@@ -90,14 +119,88 @@ private:
               const nsAString& aContentType,
               ErrorResult& aRv) override;
 
-  virtual bool
-  IsStoredFile() const override;
+  virtual const nsTArray<RefPtr<BlobImpl>>*
+  GetSubBlobImpls() const override
+  {
+    return mBlobImpl->GetSubBlobImpls();
+  }
+
+  virtual void
+  GetInternalStream(nsIInputStream** aStream,
+                    ErrorResult& aRv) override;
+
+  virtual int64_t
+  GetFileId() override
+  {
+    return mBlobImpl->GetFileId();
+  }
+
+  virtual nsresult
+  GetSendInfo(nsIInputStream** aBody,
+              uint64_t* aContentLength,
+              nsACString& aContentType,
+              nsACString& aCharset) override
+  {
+    return mBlobImpl->GetSendInfo(aBody,
+                                  aContentLength,
+                                  aContentType,
+                                  aCharset);
+  }
+
+  virtual nsresult
+  GetMutable(bool* aMutable) const override
+  {
+    return mBlobImpl->GetMutable(aMutable);
+  }
+
+  virtual nsresult
+  SetMutable(bool aMutable) override
+  {
+    return mBlobImpl->SetMutable(aMutable);
+  }
+
+  virtual void
+  SetLazyData(const nsAString& aName,
+              const nsAString& aContentType,
+              uint64_t aLength,
+              int64_t aLastModifiedDate) override
+  {
+    MOZ_CRASH("This should never be called!");
+  }
 
   virtual bool
-  IsWholeFile() const override;
+  IsMemoryFile() const override
+  {
+    return mBlobImpl->IsMemoryFile();
+  }
 
   virtual bool
-  IsSnapshot() const override;
+  IsSizeUnknown() const override
+  {
+    return mBlobImpl->IsSizeUnknown();
+  }
+
+  virtual bool
+  IsDateUnknown() const override
+  {
+    return mBlobImpl->IsDateUnknown();
+  }
+
+  virtual bool
+  IsFile() const override
+  {
+    return mBlobImpl->IsFile();
+  }
+
+  virtual bool
+  MayBeClonedToOtherThreads() const override
+  {
+    return false;
+  }
+
+  // PIBlobImplSnapshot
+  virtual BlobImpl*
+  GetBlobImpl() const override;
 };
 
 } // namespace indexedDB

@@ -5,14 +5,16 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 CppUnitTests([
+    'TestIsCertBuiltInRoot',
     'TestSTSParser',
 ])
 
-LOCAL_INCLUDES += [
-    '/security/manager/ssl/',
-]
-
 GeckoCppUnitTests([
     'TestCertDB',
-    'TestMD4',
 ])
+
+USE_LIBS += [
+    'nss',
+]
+
+DEFINES['CERT_AddTempCertToPerm'] = '__CERT_AddTempCertToPerm'

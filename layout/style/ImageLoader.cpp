@@ -7,6 +7,7 @@
  */
 
 #include "mozilla/css/ImageLoader.h"
+#include "nsAutoPtr.h"
 #include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsError.h"
@@ -14,36 +15,10 @@
 #include "FrameLayerBuilder.h"
 #include "nsSVGEffects.h"
 #include "imgIContainer.h"
+#include "Image.h"
 
 namespace mozilla {
 namespace css {
-
-/* static */ PLDHashOperator
-ImageLoader::SetAnimationModeEnumerator(nsISupports* aKey, FrameSet* aValue,
-                                        void* aClosure)
-{
-  imgIRequest* request = static_cast<imgIRequest*>(aKey);
-
-  uint16_t* mode = static_cast<uint16_t*>(aClosure);
-
-#ifdef DEBUG
-  {
-    nsCOMPtr<imgIRequest> debugRequest = do_QueryInterface(aKey);
-    NS_ASSERTION(debugRequest == request, "This is bad");
-  }
-#endif
-
-  nsCOMPtr<imgIContainer> container;
-  request->GetImage(getter_AddRefs(container));
-  if (!container) {
-    return PL_DHASH_NEXT;
-  }
-
-  // This can fail if the image is in error, and we don't care.
-  container->SetAnimationMode(*mode);
-
-  return PL_DHASH_NEXT;
-}
 
 void
 ImageLoader::DropDocumentReference()
@@ -140,7 +115,7 @@ ImageLoader::MaybeRegisterCSSImage(ImageLoader::Image* aImage)
     return;
   }
 
-  nsRefPtr<imgRequestProxy> request;
+  RefPtr<imgRequestProxy> request;
 
   // Ignore errors here.  If cloning fails for some reason we'll put a null
   // entry in the hash and we won't keep trying to clone.
@@ -226,36 +201,47 @@ ImageLoader::SetAnimationMode(uint16_t aMode)
                aMode == imgIContainer::kLoopOnceAnimMode,
                "Wrong Animation Mode is being set!");
 
-  mRequestToFrameMap.EnumerateRead(SetAnimationModeEnumerator, &aMode);
-}
-
-/* static */ PLDHashOperator
-ImageLoader::DeregisterRequestEnumerator(nsISupports* aKey, FrameSet* aValue,
-                                         void* aClosure)
-{
-  imgIRequest* request = static_cast<imgIRequest*>(aKey);
+  for (auto iter = mRequestToFrameMap.ConstIter(); !iter.Done(); iter.Next()) {
+    auto request = static_cast<imgIRequest*>(iter.Key());
 
 #ifdef DEBUG
-  {
-    nsCOMPtr<imgIRequest> debugRequest = do_QueryInterface(aKey);
-    NS_ASSERTION(debugRequest == request, "This is bad");
-  }
+    {
+      nsCOMPtr<imgIRequest> debugRequest = do_QueryInterface(request);
+      NS_ASSERTION(debugRequest == request, "This is bad");
+    }
 #endif
 
-  nsPresContext* presContext = static_cast<nsPresContext*>(aClosure);
-  if (presContext) {
-    nsLayoutUtils::DeregisterImageRequest(presContext,
-                                          request,
-                                          nullptr);
-  }
+    nsCOMPtr<imgIContainer> container;
+    request->GetImage(getter_AddRefs(container));
+    if (!container) {
+      continue;
+    }
 
-  return PL_DHASH_NEXT;
+    // This can fail if the image is in error, and we don't care.
+    container->SetAnimationMode(aMode);
+  }
 }
 
 void
 ImageLoader::ClearFrames(nsPresContext* aPresContext)
 {
-  mRequestToFrameMap.EnumerateRead(DeregisterRequestEnumerator, aPresContext);
+  for (auto iter = mRequestToFrameMap.ConstIter(); !iter.Done(); iter.Next()) {
+    auto request = static_cast<imgIRequest*>(iter.Key());
+
+#ifdef DEBUG
+    {
+      nsCOMPtr<imgIRequest> debugRequest = do_QueryInterface(request);
+      NS_ASSERTION(debugRequest == request, "This is bad");
+    }
+#endif
+
+    if (aPresContext) {
+      nsLayoutUtils::DeregisterImageRequest(aPresContext,
+					    request,
+					    nullptr);
+    }
+  }
+
   mRequestToFrameMap.Clear();
   mFrameToRequestMap.Clear();
 }
@@ -272,25 +258,21 @@ ImageLoader::LoadImage(nsIURI* aURI, nsIPrincipal* aOriginPrincipal,
     return;
   }
 
-  if (!nsContentUtils::CanLoadImage(aURI, mDocument, mDocument,
-                                    aOriginPrincipal)) {
+  RefPtr<imgRequestProxy> request;
+  nsresult rv = nsContentUtils::LoadImage(aURI, mDocument, mDocument,
+                                          aOriginPrincipal, aReferrer,
+                                          mDocument->GetReferrerPolicy(),
+                                          nullptr, nsIRequest::LOAD_NORMAL,
+                                          NS_LITERAL_STRING("css"),
+                                          getter_AddRefs(request));
+
+  if (NS_FAILED(rv) || !request) {
     return;
   }
 
-  nsRefPtr<imgRequestProxy> request;
-  nsContentUtils::LoadImage(aURI, mDocument, aOriginPrincipal, aReferrer,
-                            mDocument->GetReferrerPolicy(),
-                            nullptr, nsIRequest::LOAD_NORMAL,
-                            NS_LITERAL_STRING("css"),
-                            getter_AddRefs(request));
-
-  if (!request) {
-    return;
-  }
-
-  nsRefPtr<imgRequestProxy> clonedRequest;
+  RefPtr<imgRequestProxy> clonedRequest;
   mInClone = true;
-  nsresult rv = request->Clone(this, getter_AddRefs(clonedRequest));
+  rv = request->Clone(this, getter_AddRefs(clonedRequest));
   mInClone = false;
 
   if (NS_FAILED(rv)) {
@@ -413,6 +395,14 @@ ImageLoader::Notify(imgIRequest* aRequest, int32_t aType, const nsIntRect* aData
     return OnFrameUpdate(aRequest);
   }
 
+  if (aType == imgINotificationObserver::DECODE_COMPLETE) {
+    nsCOMPtr<imgIContainer> image;
+    aRequest->GetImage(getter_AddRefs(image));
+    if (image && mDocument) {
+      image->PropagateUseCounters(mDocument);
+    }
+  }
+
   return NS_OK;
 }
 
@@ -516,6 +506,23 @@ ImageLoader::UnblockOnload(imgIRequest* aRequest)
   mDocument->UnblockOnload(false);
 
   return NS_OK;
+}
+
+void
+ImageLoader::FlushUseCounters()
+{
+  for (auto iter = mImages.Iter(); !iter.Done(); iter.Next()) {
+    nsPtrHashKey<Image>* key = iter.Get();
+    ImageLoader::Image* image = key->GetKey();
+
+    imgIRequest* request = image->mRequests.GetWeak(mDocument);
+
+    nsCOMPtr<imgIContainer> container;
+    request->GetImage(getter_AddRefs(container));
+    if (container) {
+      static_cast<image::Image*>(container.get())->ReportUseCounters();
+    }
+  }
 }
 
 } // namespace css

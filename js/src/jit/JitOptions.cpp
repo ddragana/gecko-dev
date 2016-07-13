@@ -17,7 +17,7 @@ using mozilla::Maybe;
 namespace js {
 namespace jit {
 
-JitOptions js_JitOptions;
+DefaultJitOptions JitOptions;
 
 static void Warn(const char* env, const char* value)
 {
@@ -56,8 +56,9 @@ T overrideDefault(const char* param, T dflt) {
     }
     return dflt;
 }
+
 #define SET_DEFAULT(var, dflt) var = overrideDefault("JIT_OPTION_" #var, dflt)
-JitOptions::JitOptions()
+DefaultJitOptions::DefaultJitOptions()
 {
     // Whether to perform expensive graph-consistency DEBUG-only assertions.
     // It can be useful to disable this to reduce DEBUG-compile time of large
@@ -74,41 +75,61 @@ JitOptions::JitOptions()
     // RangeAnalysis results.
     SET_DEFAULT(checkRangeAnalysis, false);
 
-    // Whether to enable extra code to perform dynamic validations.
-    SET_DEFAULT(runExtraChecks, false);
-
-    // Toggle whether eager scalar replacement is globally disabled.
-    SET_DEFAULT(disableScalarReplacement, false);
-
-    // Toggle whether eager simd unboxing is globally disabled.
-    SET_DEFAULT(disableEagerSimdUnbox, false);
-
-    // Toggle whether global value numbering is globally disabled.
-    SET_DEFAULT(disableGvn, false);
-
-    // Toggles whether loop invariant code motion is globally disabled.
-    SET_DEFAULT(disableLicm, false);
-
-    // Toggles whether inlining is globally disabled.
-    SET_DEFAULT(disableInlining, false);
-
-    // Toggles whether Edge Case Analysis is gobally disabled.
-    SET_DEFAULT(disableEdgeCaseAnalysis, false);
-
-    // Toggles whether Range Analysis is globally disabled.
-    SET_DEFAULT(disableRangeAnalysis, false);
-
-    // Toggles whether sink code motion is globally disabled.
-    SET_DEFAULT(disableSink, true);
-
-    // Toggles whether Loop Unrolling is globally disabled.
-    SET_DEFAULT(disableLoopUnrolling, true);
+    // Toggles whether Alignment Mask Analysis is globally disabled.
+    SET_DEFAULT(disableAma, false);
 
     // Toggles whether Effective Address Analysis is globally disabled.
     SET_DEFAULT(disableEaa, false);
 
-    // Toggles whether Alignment Mask Analysis is globally disabled.
-    SET_DEFAULT(disableAma, false);
+    // Toggle whether eager simd unboxing is globally disabled.
+    SET_DEFAULT(disableEagerSimdUnbox, false);
+
+    // Toggles whether Edge Case Analysis is gobally disabled.
+    SET_DEFAULT(disableEdgeCaseAnalysis, false);
+
+    // Toggles whether to use flow sensitive Alias Analysis.
+    SET_DEFAULT(disableFlowAA, true);
+
+    // Toggle whether global value numbering is globally disabled.
+    SET_DEFAULT(disableGvn, false);
+
+    // Toggles whether inlining is globally disabled.
+    SET_DEFAULT(disableInlining, false);
+
+    // Toggles whether loop invariant code motion is globally disabled.
+    SET_DEFAULT(disableLicm, false);
+
+    // Toggles whether Loop Unrolling is globally disabled.
+    SET_DEFAULT(disableLoopUnrolling, true);
+
+    // Toggle whether Profile Guided Optimization is globally disabled.
+    SET_DEFAULT(disablePgo, false);
+
+    // Toggles whether instruction reordering is globally disabled.
+    SET_DEFAULT(disableInstructionReordering, false);
+
+    // Toggles whether Range Analysis is globally disabled.
+    SET_DEFAULT(disableRangeAnalysis, false);
+
+    // Toggles wheter Recover instructions is globally disabled.
+    SET_DEFAULT(disableRecoverIns, false);
+
+    // Toggle whether eager scalar replacement is globally disabled.
+    SET_DEFAULT(disableScalarReplacement, false);
+
+    // Toggles whether shared stubs are used in Ionmonkey.
+    SET_DEFAULT(disableSharedStubs, false);
+
+    // Toggles whether sincos optimization is globally disabled.
+    // See bug984018: The MacOS is the only one that has the sincos fast.
+    #if defined(XP_MACOSX)
+        SET_DEFAULT(disableSincos, false);
+    #else
+        SET_DEFAULT(disableSincos, true);
+    #endif
+
+    // Toggles whether sink code motion is globally disabled.
+    SET_DEFAULT(disableSink, true);
 
     // Whether functions are compiled immediately.
     SET_DEFAULT(eagerCompilation, false);
@@ -116,32 +137,14 @@ JitOptions::JitOptions()
     // Whether IonBuilder should prefer IC generation above specialized MIR.
     SET_DEFAULT(forceInlineCaches, false);
 
-    // Force how many invocation or loop iterations are needed before compiling
-    // a function with the highest ionmonkey optimization level.
-    // (i.e. OptimizationLevel_Normal)
-    const char* forcedDefaultIonWarmUpThresholdEnv = "JIT_OPTION_forcedDefaultIonWarmUpThreshold";
-    if (const char* env = getenv(forcedDefaultIonWarmUpThresholdEnv)) {
-        Maybe<int> value = ParseInt(env);
-        if (value.isSome())
-            forcedDefaultIonWarmUpThreshold.emplace(value.ref());
-        else
-            Warn(forcedDefaultIonWarmUpThresholdEnv, env);
-    }
-
-    // Force the used register allocator instead of letting the optimization
-    // pass decide.
-    const char* forcedRegisterAllocatorEnv = "JIT_OPTION_forcedRegisterAllocator";
-    if (const char* env = getenv(forcedRegisterAllocatorEnv)) {
-        forcedRegisterAllocator = LookupRegisterAllocator(env);
-        if (!forcedRegisterAllocator.isSome())
-            Warn(forcedRegisterAllocatorEnv, env);
-    }
-
     // Toggles whether large scripts are rejected.
     SET_DEFAULT(limitScriptSize, true);
 
     // Toggles whether functions may be entered at loop headers.
     SET_DEFAULT(osr, true);
+
+    // Whether to enable extra code to perform dynamic validations.
+    SET_DEFAULT(runExtraChecks, false);
 
     // How many invocations or loop iterations are needed before functions
     // are compiled with the baseline compiler.
@@ -163,55 +166,109 @@ JitOptions::JitOptions()
     SET_DEFAULT(osrPcMismatchesBeforeRecompile, 6000);
 
     // The bytecode length limit for small function.
-    SET_DEFAULT(smallFunctionMaxBytecodeLength_, 100);
+    SET_DEFAULT(smallFunctionMaxBytecodeLength_, 130);
+
+    // An artificial testing limit for the maximum supported offset of
+    // pc-relative jump and call instructions.
+    SET_DEFAULT(jumpThreshold, UINT32_MAX);
+
+    // Branch pruning heuristic is based on a scoring system, which is look at
+    // different metrics and provide a score. The score is computed as a
+    // projection where each factor defines the weight of each metric. Then this
+    // score is compared against a threshold to prevent a branch from being
+    // removed.
+    SET_DEFAULT(branchPruningHitCountFactor, 1);
+    SET_DEFAULT(branchPruningInstFactor, 10);
+    SET_DEFAULT(branchPruningBlockSpanFactor, 100);
+    SET_DEFAULT(branchPruningEffectfulInstFactor, 3500);
+    SET_DEFAULT(branchPruningThreshold, 4000);
+
+    // Force how many invocation or loop iterations are needed before compiling
+    // a function with the highest ionmonkey optimization level.
+    // (i.e. OptimizationLevel_Normal)
+    const char* forcedDefaultIonWarmUpThresholdEnv = "JIT_OPTION_forcedDefaultIonWarmUpThreshold";
+    if (const char* env = getenv(forcedDefaultIonWarmUpThresholdEnv)) {
+        Maybe<int> value = ParseInt(env);
+        if (value.isSome())
+            forcedDefaultIonWarmUpThreshold.emplace(value.ref());
+        else
+            Warn(forcedDefaultIonWarmUpThresholdEnv, env);
+    }
+
+    // Same but for compiling small functions.
+    const char* forcedDefaultIonSmallFunctionWarmUpThresholdEnv =
+        "JIT_OPTION_forcedDefaultIonSmallFunctionWarmUpThreshold";
+    if (const char* env = getenv(forcedDefaultIonSmallFunctionWarmUpThresholdEnv)) {
+        Maybe<int> value = ParseInt(env);
+        if (value.isSome())
+            forcedDefaultIonSmallFunctionWarmUpThreshold.emplace(value.ref());
+        else
+            Warn(forcedDefaultIonSmallFunctionWarmUpThresholdEnv, env);
+    }
+
+    // Force the used register allocator instead of letting the optimization
+    // pass decide.
+    const char* forcedRegisterAllocatorEnv = "JIT_OPTION_forcedRegisterAllocator";
+    if (const char* env = getenv(forcedRegisterAllocatorEnv)) {
+        forcedRegisterAllocator = LookupRegisterAllocator(env);
+        if (!forcedRegisterAllocator.isSome())
+            Warn(forcedRegisterAllocatorEnv, env);
+    }
 
     // Toggles whether unboxed plain objects can be created by the VM.
     SET_DEFAULT(disableUnboxedObjects, false);
+
+    // Test whether wasm int64 / double NaN bits testing is enabled.
+    SET_DEFAULT(wasmTestMode, false);
 }
 
 bool
-JitOptions::isSmallFunction(JSScript* script) const
+DefaultJitOptions::isSmallFunction(JSScript* script) const
 {
     return script->length() <= smallFunctionMaxBytecodeLength_;
 }
 
 void
-JitOptions::enableGvn(bool enable)
+DefaultJitOptions::enableGvn(bool enable)
 {
     disableGvn = !enable;
 }
 
 void
-JitOptions::setEagerCompilation()
+DefaultJitOptions::setEagerCompilation()
 {
     eagerCompilation = true;
     baselineWarmUpThreshold = 0;
     forcedDefaultIonWarmUpThreshold.reset();
     forcedDefaultIonWarmUpThreshold.emplace(0);
+    forcedDefaultIonSmallFunctionWarmUpThreshold.reset();
+    forcedDefaultIonSmallFunctionWarmUpThreshold.emplace(0);
 }
 
 void
-JitOptions::setCompilerWarmUpThreshold(uint32_t warmUpThreshold)
+DefaultJitOptions::setCompilerWarmUpThreshold(uint32_t warmUpThreshold)
 {
     forcedDefaultIonWarmUpThreshold.reset();
     forcedDefaultIonWarmUpThreshold.emplace(warmUpThreshold);
+    forcedDefaultIonSmallFunctionWarmUpThreshold.reset();
+    forcedDefaultIonSmallFunctionWarmUpThreshold.emplace(warmUpThreshold);
 
     // Undo eager compilation
     if (eagerCompilation && warmUpThreshold != 0) {
-        jit::JitOptions defaultValues;
+        jit::DefaultJitOptions defaultValues;
         eagerCompilation = false;
         baselineWarmUpThreshold = defaultValues.baselineWarmUpThreshold;
     }
 }
 
 void
-JitOptions::resetCompilerWarmUpThreshold()
+DefaultJitOptions::resetCompilerWarmUpThreshold()
 {
     forcedDefaultIonWarmUpThreshold.reset();
 
     // Undo eager compilation
     if (eagerCompilation) {
-        jit::JitOptions defaultValues;
+        jit::DefaultJitOptions defaultValues;
         eagerCompilation = false;
         baselineWarmUpThreshold = defaultValues.baselineWarmUpThreshold;
     }

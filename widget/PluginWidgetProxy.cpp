@@ -35,7 +35,8 @@ NS_IMPL_ISUPPORTS_INHERITED(PluginWidgetProxy, PuppetWidget, nsIWidget)
 PluginWidgetProxy::PluginWidgetProxy(dom::TabChild* aTabChild,
                                      mozilla::plugins::PluginWidgetChild* aActor) :
   PuppetWidget(aTabChild),
-  mActor(aActor)
+  mActor(aActor),
+  mCachedPluginPort(0)
 {
   // See ChannelDestroyed() in the header
   mActor->SetWidget(this);
@@ -47,9 +48,9 @@ PluginWidgetProxy::~PluginWidgetProxy()
 }
 
 NS_IMETHODIMP
-PluginWidgetProxy::Create(nsIWidget*        aParent,
-                          nsNativeWidget    aNativeParent,
-                          const nsIntRect&  aRect,
+PluginWidgetProxy::Create(nsIWidget* aParent,
+                          nsNativeWidget aNativeParent,
+                          const LayoutDeviceIntRect& aRect,
                           nsWidgetInitData* aInitData)
 {
   ENSURE_CHANNEL;
@@ -62,7 +63,8 @@ PluginWidgetProxy::Create(nsIWidget*        aParent,
     return rv;
   }
 
-  BaseCreate(aParent, aRect, aInitData);
+  BaseCreate(aParent, aInitData);
+  mParent = aParent;
 
   mBounds = aRect;
   mEnabled = true;
@@ -74,8 +76,6 @@ PluginWidgetProxy::Create(nsIWidget*        aParent,
 NS_IMETHODIMP
 PluginWidgetProxy::SetParent(nsIWidget* aNewParent)
 {
-  mParent = aNewParent;
-
   nsCOMPtr<nsIWidget> kungFuDeathGrip(this);
   nsIWidget* parent = GetParent();
   if (parent) {
@@ -84,6 +84,7 @@ PluginWidgetProxy::SetParent(nsIWidget* aNewParent)
   if (aNewParent) {
     aNewParent->AddChild(this);
   }
+  mParent = aNewParent;
   return NS_OK;
 }
 
@@ -109,7 +110,7 @@ PluginWidgetProxy::Destroy()
 }
 
 void
-PluginWidgetProxy::GetWindowClipRegion(nsTArray<nsIntRect>* aRects)
+PluginWidgetProxy::GetWindowClipRegion(nsTArray<LayoutDeviceIntRect>* aRects)
 {
   if (mClipRects && mClipRectCount) {
     aRects->AppendElements(mClipRects.get(), mClipRectCount);
@@ -135,10 +136,14 @@ PluginWidgetProxy::GetNativeData(uint32_t aDataType)
       NS_WARNING("PluginWidgetProxy::GetNativeData received request for unsupported data type.");
       return nullptr;
   }
-  uintptr_t value = 0;
-  mActor->SendGetNativePluginPort(&value);
-  PWLOG("PluginWidgetProxy::GetNativeData %p\n", (void*)value);
-  return (void*)value;
+  // The parent side window handle or xid never changes so we can
+  // cache this for our lifetime.
+  if (mCachedPluginPort) {
+    return (void*)mCachedPluginPort;
+  }
+  mActor->SendGetNativePluginPort(&mCachedPluginPort);
+  PWLOG("PluginWidgetProxy::GetNativeData %p\n", (void*)mCachedPluginPort);
+  return (void*)mCachedPluginPort;
 }
 
 #if defined(XP_WIN)

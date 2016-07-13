@@ -5,16 +5,14 @@
 #include "OGLShaderProgram.h"
 #include <stdint.h>                     // for uint32_t
 #include <sstream>                      // for ostringstream
+#include "gfxEnv.h"
 #include "gfxRect.h"                    // for gfxRect
 #include "mozilla/DebugOnly.h"          // for DebugOnly
+#include "mozilla/layers/Compositor.h"  // for BlendOpIsMixBlendMode
 #include "nsAString.h"
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsString.h"                   // for nsAutoCString
-#include "prenv.h"                      // for PR_GetEnv
 #include "Layers.h"
 #include "GLContext.h"
-
-struct gfxRGBA;
 
 namespace mozilla {
 namespace layers {
@@ -32,6 +30,7 @@ AddUniforms(ProgramProfileOGL& aProfile)
         "uLayerTransform",
         "uLayerTransformInverse",
         "uMaskTransform",
+        "uBackdropTransform",
         "uLayerRects",
         "uMatrixProj",
         "uTextureTransform",
@@ -45,8 +44,10 @@ AddUniforms(ProgramProfileOGL& aProfile)
         "uBlackTexture",
         "uWhiteTexture",
         "uMaskTexture",
+        "uBackdropTexture",
         "uRenderColor",
         "uTexCoordMultiplier",
+        "uCbCrTexCoordMultiplier",
         "uTexturePass2",
         "uColorMatrix",
         "uColorMatrixVector",
@@ -108,6 +109,14 @@ void
 ShaderConfigOGL::SetYCbCr(bool aEnabled)
 {
   SetFeature(ENABLE_TEXTURE_YCBCR, aEnabled);
+  MOZ_ASSERT(!(mFeatures & ENABLE_TEXTURE_NV12));
+}
+
+void
+ShaderConfigOGL::SetNV12(bool aEnabled)
+{
+  SetFeature(ENABLE_TEXTURE_NV12, aEnabled);
+  MOZ_ASSERT(!(mFeatures & ENABLE_TEXTURE_YCBCR));
 }
 
 void
@@ -129,27 +138,27 @@ ShaderConfigOGL::SetBlur(bool aEnabled)
 }
 
 void
-ShaderConfigOGL::SetMask2D(bool aEnabled)
+ShaderConfigOGL::SetMask(bool aEnabled)
 {
-  SetFeature(ENABLE_MASK_2D, aEnabled);
+  SetFeature(ENABLE_MASK, aEnabled);
 }
 
 void
-ShaderConfigOGL::SetMask3D(bool aEnabled)
+ShaderConfigOGL::SetNoPremultipliedAlpha()
 {
-  SetFeature(ENABLE_MASK_3D, aEnabled);
-}
-
-void
-ShaderConfigOGL::SetPremultiply(bool aEnabled)
-{
-  SetFeature(ENABLE_PREMULTIPLY, aEnabled);
+  SetFeature(ENABLE_NO_PREMUL_ALPHA, true);
 }
 
 void
 ShaderConfigOGL::SetDEAA(bool aEnabled)
 {
   SetFeature(ENABLE_DEAA, aEnabled);
+}
+
+void
+ShaderConfigOGL::SetCompositionOp(gfx::CompositionOp aOp)
+{
+  mCompositionOp = aOp;
 }
 
 /* static */ ProgramProfileOGL
@@ -160,12 +169,19 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
 
   AddUniforms(result);
 
+  gfx::CompositionOp blendOp = aConfig.mCompositionOp;
+
+  vs << "#ifdef GL_ES" << endl;
+  vs << "#define EDGE_PRECISION mediump" << endl;
+  vs << "#else" << endl;
+  vs << "#define EDGE_PRECISION" << endl;
+  vs << "#endif" << endl;
   vs << "uniform mat4 uMatrixProj;" << endl;
   vs << "uniform vec4 uLayerRects[4];" << endl;
   vs << "uniform mat4 uLayerTransform;" << endl;
   if (aConfig.mFeatures & ENABLE_DEAA) {
     vs << "uniform mat4 uLayerTransformInverse;" << endl;
-    vs << "uniform vec3 uSSEdges[4];" << endl;
+    vs << "uniform EDGE_PRECISION vec3 uSSEdges[4];" << endl;
     vs << "uniform vec2 uVisibleCenter;" << endl;
     vs << "uniform vec2 uViewportSize;" << endl;
   }
@@ -178,8 +194,12 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
     vs << "varying vec2 vTexCoord;" << endl;
   }
 
-  if (aConfig.mFeatures & ENABLE_MASK_2D ||
-      aConfig.mFeatures & ENABLE_MASK_3D) {
+  if (BlendOpIsMixBlendMode(blendOp)) {
+    vs << "uniform mat4 uBackdropTransform;" << endl;
+    vs << "varying vec2 vBackdropCoord;" << endl;
+  }
+
+  if (aConfig.mFeatures & ENABLE_MASK) {
     vs << "uniform mat4 uMaskTransform;" << endl;
     vs << "varying vec3 vMaskCoord;" << endl;
   }
@@ -204,8 +224,7 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
     vs << "  ssPos = uMatrixProj * ssPos;" << endl;
     vs << "  ssPos.xy = ((ssPos.xy/ssPos.w)*0.5+0.5)*uViewportSize;" << endl;
 
-    if (aConfig.mFeatures & ENABLE_MASK_2D ||
-        aConfig.mFeatures & ENABLE_MASK_3D ||
+    if (aConfig.mFeatures & ENABLE_MASK ||
         !(aConfig.mFeatures & ENABLE_RENDER_COLOR)) {
       vs << "  vec4 coordAdjusted;" << endl;
       vs << "  coordAdjusted.xy = aCoord.xy;" << endl;
@@ -250,17 +269,22 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
     vs << "  vec2 texCoord = aCoord.xy * textureRect.zw + textureRect.xy;" << endl;
     vs << "  vTexCoord = (uTextureTransform * vec4(texCoord, 0.0, 1.0)).xy;" << endl;
   }
-  if (aConfig.mFeatures & ENABLE_MASK_2D ||
-      aConfig.mFeatures & ENABLE_MASK_3D) {
+  if (aConfig.mFeatures & ENABLE_MASK) {
     vs << "  vMaskCoord.xy = (uMaskTransform * (finalPosition / finalPosition.w)).xy;" << endl;
-    if (aConfig.mFeatures & ENABLE_MASK_3D) {
-      // correct for perspective correct interpolation, see comment in D3D10 shader
-      vs << "  vMaskCoord.z = 1.0;" << endl;
-      vs << "  vMaskCoord *= finalPosition.w;" << endl;
-    }
+    // correct for perspective correct interpolation, see comment in D3D11 shader
+    vs << "  vMaskCoord.z = 1.0;" << endl;
+    vs << "  vMaskCoord *= finalPosition.w;" << endl;
   }
   vs << "  finalPosition.xy -= uRenderTargetOffset * finalPosition.w;" << endl;
   vs << "  finalPosition = uMatrixProj * finalPosition;" << endl;
+  if (BlendOpIsMixBlendMode(blendOp)) {
+    // Translate from clip space (-1, 1) to (0..1), apply the backdrop
+    // transform, then invert the y-axis.
+    vs << "  vBackdropCoord.x = (finalPosition.x + 1.0) / 2.0;" << endl;
+    vs << "  vBackdropCoord.y = 1.0 - (finalPosition.y + 1.0) / 2.0;" << endl;
+    vs << "  vBackdropCoord = (uBackdropTransform * vec4(vBackdropCoord.xy, 0.0, 1.0)).xy;" << endl;
+    vs << "  vBackdropCoord.y = 1.0 - vBackdropCoord.y;" << endl;
+  }
   vs << "  gl_Position = finalPosition;" << endl;
   vs << "}" << endl;
 
@@ -273,8 +297,10 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
   fs << "#ifdef GL_ES" << endl;
   fs << "precision mediump float;" << endl;
   fs << "#define COLOR_PRECISION lowp" << endl;
+  fs << "#define EDGE_PRECISION mediump" << endl;
   fs << "#else" << endl;
   fs << "#define COLOR_PRECISION" << endl;
+  fs << "#define EDGE_PRECISION" << endl;
   fs << "#endif" << endl;
   if (aConfig.mFeatures & ENABLE_RENDER_COLOR) {
     fs << "uniform COLOR_PRECISION vec4 uRenderColor;" << endl;
@@ -295,12 +321,19 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
       fs << "uniform COLOR_PRECISION float uLayerOpacity;" << endl;
     }
   }
+  if (BlendOpIsMixBlendMode(blendOp)) {
+    fs << "varying vec2 vBackdropCoord;" << endl;
+  }
 
   const char *sampler2D = "sampler2D";
   const char *texture2D = "texture2D";
 
   if (aConfig.mFeatures & ENABLE_TEXTURE_RECT) {
     fs << "uniform vec2 uTexCoordMultiplier;" << endl;
+    if (aConfig.mFeatures & ENABLE_TEXTURE_YCBCR ||
+        aConfig.mFeatures & ENABLE_TEXTURE_NV12) {
+      fs << "uniform vec2 uCbCrTexCoordMultiplier;" << endl;
+    }
     sampler2D = "sampler2DRect";
     texture2D = "texture2DRect";
   }
@@ -313,31 +346,63 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
     fs << "uniform sampler2D uYTexture;" << endl;
     fs << "uniform sampler2D uCbTexture;" << endl;
     fs << "uniform sampler2D uCrTexture;" << endl;
+  } else if (aConfig.mFeatures & ENABLE_TEXTURE_NV12) {
+    fs << "uniform " << sampler2D << " uYTexture;" << endl;
+    fs << "uniform " << sampler2D << " uCbTexture;" << endl;
   } else if (aConfig.mFeatures & ENABLE_TEXTURE_COMPONENT_ALPHA) {
-    fs << "uniform sampler2D uBlackTexture;" << endl;
-    fs << "uniform sampler2D uWhiteTexture;" << endl;
+    fs << "uniform " << sampler2D << " uBlackTexture;" << endl;
+    fs << "uniform " << sampler2D << " uWhiteTexture;" << endl;
     fs << "uniform bool uTexturePass2;" << endl;
   } else {
     fs << "uniform " << sampler2D << " uTexture;" << endl;
   }
 
-  if (aConfig.mFeatures & ENABLE_MASK_2D ||
-      aConfig.mFeatures & ENABLE_MASK_3D) {
+  if (BlendOpIsMixBlendMode(blendOp)) {
+    // Component alpha should be flattened away inside blend containers.
+    MOZ_ASSERT(!(aConfig.mFeatures & ENABLE_TEXTURE_COMPONENT_ALPHA));
+
+    fs << "uniform sampler2D uBackdropTexture;" << endl;
+  }
+
+  if (aConfig.mFeatures & ENABLE_MASK) {
     fs << "varying vec3 vMaskCoord;" << endl;
     fs << "uniform sampler2D uMaskTexture;" << endl;
   }
 
   if (aConfig.mFeatures & ENABLE_DEAA) {
-    fs << "uniform vec3 uSSEdges[4];" << endl;
+    fs << "uniform EDGE_PRECISION vec3 uSSEdges[4];" << endl;
+  }
+
+  if (BlendOpIsMixBlendMode(blendOp)) {
+    BuildMixBlender(aConfig, fs);
   }
 
   if (!(aConfig.mFeatures & ENABLE_RENDER_COLOR)) {
     fs << "vec4 sample(vec2 coord) {" << endl;
     fs << "  vec4 color;" << endl;
-    if (aConfig.mFeatures & ENABLE_TEXTURE_YCBCR) {
-      fs << "  COLOR_PRECISION float y = texture2D(uYTexture, coord).r;" << endl;
-      fs << "  COLOR_PRECISION float cb = texture2D(uCbTexture, coord).r;" << endl;
-      fs << "  COLOR_PRECISION float cr = texture2D(uCrTexture, coord).r;" << endl;
+    if (aConfig.mFeatures & ENABLE_TEXTURE_YCBCR ||
+        aConfig.mFeatures & ENABLE_TEXTURE_NV12) {
+      if (aConfig.mFeatures & ENABLE_TEXTURE_YCBCR) {
+        if (aConfig.mFeatures & ENABLE_TEXTURE_RECT) {
+          fs << "  COLOR_PRECISION float y = texture2D(uYTexture, coord * uTexCoordMultiplier).r;" << endl;
+          fs << "  COLOR_PRECISION float cb = texture2D(uCbTexture, coord * uCbCrTexCoordMultiplier).r;" << endl;
+          fs << "  COLOR_PRECISION float cr = texture2D(uCrTexture, coord * uCbCrTexCoordMultiplier).r;" << endl;
+        } else {
+          fs << "  COLOR_PRECISION float y = texture2D(uYTexture, coord).r;" << endl;
+          fs << "  COLOR_PRECISION float cb = texture2D(uCbTexture, coord).r;" << endl;
+          fs << "  COLOR_PRECISION float cr = texture2D(uCrTexture, coord).r;" << endl;
+        }
+      } else {
+        if (aConfig.mFeatures & ENABLE_TEXTURE_RECT) {
+          fs << "  COLOR_PRECISION float y = " << texture2D << "(uYTexture, coord * uTexCoordMultiplier).r;" << endl;
+          fs << "  COLOR_PRECISION float cb = " << texture2D << "(uCbTexture, coord * uCbCrTexCoordMultiplier).r;" << endl;
+          fs << "  COLOR_PRECISION float cr = " << texture2D << "(uCbTexture, coord * uCbCrTexCoordMultiplier).a;" << endl;
+        } else {
+          fs << "  COLOR_PRECISION float y = " << texture2D << "(uYTexture, coord).r;" << endl;
+          fs << "  COLOR_PRECISION float cb = " << texture2D << "(uCbTexture, coord).r;" << endl;
+          fs << "  COLOR_PRECISION float cr = " << texture2D << "(uCbTexture, coord).a;" << endl;
+        }
+      }
 
       /* From Rec601:
 [R]   [1.1643835616438356,  0.0,                 1.5960267857142858]      [ Y -  16]
@@ -357,15 +422,24 @@ For [0,1] instead of [0,255], and to 5 places:
       fs << "  color.b = y + 2.01723*cb;" << endl;
       fs << "  color.a = 1.0;" << endl;
     } else if (aConfig.mFeatures & ENABLE_TEXTURE_COMPONENT_ALPHA) {
-      fs << "  COLOR_PRECISION vec3 onBlack = texture2D(uBlackTexture, coord).rgb;" << endl;
-      fs << "  COLOR_PRECISION vec3 onWhite = texture2D(uWhiteTexture, coord).rgb;" << endl;
+      if (aConfig.mFeatures & ENABLE_TEXTURE_RECT) {
+        fs << "  COLOR_PRECISION vec3 onBlack = " << texture2D << "(uBlackTexture, coord * uTexCoordMultiplier).rgb;" << endl;
+        fs << "  COLOR_PRECISION vec3 onWhite = " << texture2D << "(uWhiteTexture, coord * uTexCoordMultiplier).rgb;" << endl;
+      } else {
+        fs << "  COLOR_PRECISION vec3 onBlack = " << texture2D << "(uBlackTexture, coord).rgb;" << endl;
+        fs << "  COLOR_PRECISION vec3 onWhite = " << texture2D << "(uWhiteTexture, coord).rgb;" << endl;
+      }
       fs << "  COLOR_PRECISION vec4 alphas = (1.0 - onWhite + onBlack).rgbg;" << endl;
       fs << "  if (uTexturePass2)" << endl;
       fs << "    color = vec4(onBlack, alphas.a);" << endl;
       fs << "  else" << endl;
       fs << "    color = alphas;" << endl;
     } else {
-      fs << "  color = " << texture2D << "(uTexture, coord);" << endl;
+      if (aConfig.mFeatures & ENABLE_TEXTURE_RECT) {
+        fs << "  color = " << texture2D << "(uTexture, coord * uTexCoordMultiplier);" << endl;
+      } else {
+        fs << "  color = " << texture2D << "(uTexture, coord);" << endl;
+      }
     }
     if (aConfig.mFeatures & ENABLE_TEXTURE_RB_SWAP) {
       fs << "  color = color.bgra;" << endl;
@@ -404,11 +478,7 @@ For [0,1] instead of [0,255], and to 5 places:
   if (aConfig.mFeatures & ENABLE_RENDER_COLOR) {
     fs << "  vec4 color = uRenderColor;" << endl;
   } else {
-    if (aConfig.mFeatures & ENABLE_TEXTURE_RECT) {
-      fs << "  vec4 color = sample(vTexCoord * uTexCoordMultiplier);" << endl;
-    } else {
-      fs << "  vec4 color = sample(vTexCoord);" << endl;
-    }
+    fs << "  vec4 color = sample(vTexCoord);" << endl;
     if (aConfig.mFeatures & ENABLE_BLUR) {
       fs << "  color = blur(color, vTexCoord);" << endl;
     }
@@ -418,9 +488,6 @@ For [0,1] instead of [0,255], and to 5 places:
     }
     if (aConfig.mFeatures & ENABLE_OPACITY) {
       fs << "  color *= uLayerOpacity;" << endl;
-    }
-    if (aConfig.mFeatures & ENABLE_PREMULTIPLY) {
-      fs << " color.rgb *= color.a;" << endl;
     }
   }
   if (aConfig.mFeatures & ENABLE_DEAA) {
@@ -433,12 +500,13 @@ For [0,1] instead of [0,255], and to 5 places:
     fs << "  deaaCoverage *= clamp(dot(uSSEdges[3], ssPos), 0.0, 1.0);" << endl;
     fs << "  color *= deaaCoverage;" << endl;
   }
-  if (aConfig.mFeatures & ENABLE_MASK_3D) {
+  if (BlendOpIsMixBlendMode(blendOp)) {
+    fs << "  vec4 backdrop = texture2D(uBackdropTexture, vBackdropCoord);" << endl;
+    fs << "  color = mixAndBlend(backdrop, color);" << endl;
+  }
+  if (aConfig.mFeatures & ENABLE_MASK) {
     fs << "  vec2 maskCoords = vMaskCoord.xy / vMaskCoord.z;" << endl;
     fs << "  COLOR_PRECISION float mask = texture2D(uMaskTexture, maskCoords).r;" << endl;
-    fs << "  color *= mask;" << endl;
-  } else if (aConfig.mFeatures & ENABLE_MASK_2D) {
-    fs << "  COLOR_PRECISION float mask = texture2D(uMaskTexture, vMaskCoord.xy).r;" << endl;
     fs << "  color *= mask;" << endl;
   } else {
     fs << "  COLOR_PRECISION float mask = 1.0;" << endl;
@@ -455,18 +523,235 @@ For [0,1] instead of [0,255], and to 5 places:
   } else {
     if (aConfig.mFeatures & ENABLE_TEXTURE_YCBCR) {
       result.mTextureCount = 3;
+    } else if (aConfig.mFeatures & ENABLE_TEXTURE_NV12) {
+      result.mTextureCount = 2;
     } else if (aConfig.mFeatures & ENABLE_TEXTURE_COMPONENT_ALPHA) {
       result.mTextureCount = 2;
     } else {
       result.mTextureCount = 1;
     }
   }
-  if (aConfig.mFeatures & ENABLE_MASK_2D ||
-      aConfig.mFeatures & ENABLE_MASK_3D) {
+  if (aConfig.mFeatures & ENABLE_MASK) {
     result.mTextureCount = 1;
+  }
+  if (BlendOpIsMixBlendMode(blendOp)) {
+    result.mTextureCount += 1;
   }
 
   return result;
+}
+
+void
+ProgramProfileOGL::BuildMixBlender(const ShaderConfigOGL& aConfig, std::ostringstream& fs)
+{
+  // From the "Compositing and Blending Level 1" spec.
+  // Generate helper functions first.
+  switch (aConfig.mCompositionOp) {
+  case gfx::CompositionOp::OP_OVERLAY:
+  case gfx::CompositionOp::OP_HARD_LIGHT:
+    // Note: we substitute (2*src-1) into the screen formula below.
+    fs << "float hardlight(float dest, float src) {" << endl;
+    fs << "  if (src <= 0.5) {" << endl;
+    fs << "    return dest * (2.0 * src);" << endl;
+    fs << "  } else {" << endl;
+    fs << "    return 2.0*dest + 2.0*src - 1.0 - 2.0*dest*src;" << endl;
+    fs << "  }" << endl;
+    fs << "}" << endl;
+    break;
+  case gfx::CompositionOp::OP_COLOR_DODGE:
+    fs << "float dodge(float dest, float src) {" << endl;
+    fs << "  if (dest == 0.0) {" << endl;
+    fs << "    return 0.0;" << endl;
+    fs << "  } else if (src == 1.0) {" << endl;
+    fs << "    return 1.0;" << endl;
+    fs << "  } else {" << endl;
+    fs << "    return min(1.0, dest / (1.0 - src));" << endl;
+    fs << "  }" << endl;
+    fs << "}" << endl;
+    break;
+  case gfx::CompositionOp::OP_COLOR_BURN:
+    fs << "float burn(float dest, float src) {" << endl;
+    fs << "  if (dest == 1.0) {" << endl;
+    fs << "    return 1.0;" << endl;
+    fs << "  } else if (src == 0.0) {" << endl;
+    fs << "    return 0.0;" << endl;
+    fs << "  } else {" << endl;
+    fs << "    return 1.0 - min(1.0, (1.0 - dest) / src);" << endl;
+    fs << "  }" << endl;
+    fs << "}" << endl;
+    break;
+  case gfx::CompositionOp::OP_SOFT_LIGHT:
+    fs << "float darken(float dest) {" << endl;
+    fs << "  if (dest <= 0.25) {" << endl;
+    fs << "    return ((16.0 * dest - 12.0) * dest + 4.0) * dest;" << endl;
+    fs << "  } else {" << endl;
+    fs << "    return sqrt(dest);" << endl;
+    fs << "  }" << endl;
+    fs << "}" << endl;
+    fs << "float softlight(float dest, float src) {" << endl;
+    fs << "  if (src <= 0.5) {" << endl;
+    fs << "    return dest - (1.0 - 2.0 * src) * dest * (1.0 - dest);" << endl;
+    fs << "  } else {" << endl;
+    fs << "    return dest + (2.0 * src - 1.0) * (darken(dest) - dest);" << endl;
+    fs << "  }" << endl;
+    fs << "}" << endl;
+    break;
+  case gfx::CompositionOp::OP_HUE:
+  case gfx::CompositionOp::OP_SATURATION:
+  case gfx::CompositionOp::OP_COLOR:
+  case gfx::CompositionOp::OP_LUMINOSITY:
+    fs << "float Lum(vec3 c) {" << endl;
+    fs << "  return dot(vec3(0.3, 0.59, 0.11), c);" << endl;
+    fs << "}" << endl;
+    fs << "vec3 ClipColor(vec3 c) {" << endl;
+    fs << "  float L = Lum(c);" << endl;
+    fs << "  float n = min(min(c.r, c.g), c.b);" << endl;
+    fs << "  float x = max(max(c.r, c.g), c.b);" << endl;
+    fs << "  if (n < 0.0) {" << endl;
+    fs << "    c = L + (((c - L) * L) / (L - n));" << endl;
+    fs << "  }" << endl;
+    fs << "  if (x > 1.0) {" << endl;
+    fs << "    c = L + (((c - L) * (1.0 - L)) / (x - L));" << endl;
+    fs << "  }" << endl;
+    fs << "  return c;" << endl;
+    fs << "}" << endl;
+    fs << "vec3 SetLum(vec3 c, float L) {" << endl;
+    fs << "  float d = L - Lum(c);" << endl;
+    fs << "  return ClipColor(vec3(" << endl;
+    fs << "    c.r + d," << endl;
+    fs << "    c.g + d," << endl;
+    fs << "    c.b + d));" << endl;
+    fs << "}" << endl;
+    fs << "float Sat(vec3 c) {" << endl;
+    fs << "  return max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);" << endl;
+    fs << "}" << endl;
+
+    // To use this helper, re-arrange rgb such that r=min, g=mid, and b=max.
+    fs << "vec3 SetSatInner(vec3 c, float s) {" << endl;
+    fs << "  if (c.b > c.r) {" << endl;
+    fs << "    c.g = (((c.g - c.r) * s) / (c.b - c.r));" << endl;
+    fs << "    c.b = s;" << endl;
+    fs << "  } else {" << endl;
+    fs << "    c.gb = vec2(0.0, 0.0);" << endl;
+    fs << "  }" << endl;
+    fs << "  return vec3(0.0, c.gb);" << endl;
+    fs << "}" << endl;
+
+    fs << "vec3 SetSat(vec3 c, float s) {" << endl;
+    fs << "  if (c.r <= c.g) {" << endl;
+    fs << "    if (c.g <= c.b) {" << endl;
+    fs << "      c.rgb = SetSatInner(c.rgb, s);" << endl;
+    fs << "    } else if (c.r <= c.b) {" << endl;
+    fs << "      c.rbg = SetSatInner(c.rbg, s);" << endl;
+    fs << "    } else {" << endl;
+    fs << "      c.brg = SetSatInner(c.brg, s);" << endl;
+    fs << "    }" << endl;
+    fs << "  } else if (c.r <= c.b) {" << endl;
+    fs << "    c.grb = SetSatInner(c.grb, s);" << endl;
+    fs << "  } else if (c.g <= c.b) {" << endl;
+    fs << "    c.gbr = SetSatInner(c.gbr, s);" << endl;
+    fs << "  } else {" << endl;
+    fs << "    c.bgr = SetSatInner(c.bgr, s);" << endl;
+    fs << "  }" << endl;
+    fs << "  return c;" << endl;
+    fs << "}" << endl;
+    break;
+  default:
+    break;
+  }
+
+  // Generate the main blending helper.
+  fs << "vec3 blend(vec3 dest, vec3 src) {" << endl;
+  switch (aConfig.mCompositionOp) {
+  case gfx::CompositionOp::OP_MULTIPLY:
+    fs << "  return dest * src;" << endl;
+    break;
+  case gfx::CompositionOp::OP_SCREEN:
+    fs << "  return dest + src - (dest * src);" << endl;
+    break;
+  case gfx::CompositionOp::OP_OVERLAY:
+    fs << "  return vec3(" << endl;
+    fs << "    hardlight(src.r, dest.r)," << endl;
+    fs << "    hardlight(src.g, dest.g)," << endl;
+    fs << "    hardlight(src.b, dest.b));" << endl;
+    break;
+  case gfx::CompositionOp::OP_DARKEN:
+    fs << "  return min(dest, src);" << endl;
+    break;
+  case gfx::CompositionOp::OP_LIGHTEN:
+    fs << "  return max(dest, src);" << endl;
+    break;
+  case gfx::CompositionOp::OP_COLOR_DODGE:
+    fs << "  return vec3(" << endl;
+    fs << "    dodge(dest.r, src.r)," << endl;
+    fs << "    dodge(dest.g, src.g)," << endl;
+    fs << "    dodge(dest.b, src.b));" << endl;
+    break;
+  case gfx::CompositionOp::OP_COLOR_BURN:
+    fs << "  return vec3(" << endl;
+    fs << "    burn(dest.r, src.r)," << endl;
+    fs << "    burn(dest.g, src.g)," << endl;
+    fs << "    burn(dest.b, src.b));" << endl;
+    break;
+  case gfx::CompositionOp::OP_HARD_LIGHT:
+    fs << "  return vec3(" << endl;
+    fs << "    hardlight(dest.r, src.r)," << endl;
+    fs << "    hardlight(dest.g, src.g)," << endl;
+    fs << "    hardlight(dest.b, src.b));" << endl;
+    break;
+  case gfx::CompositionOp::OP_SOFT_LIGHT:
+    fs << "  return vec3(" << endl;
+    fs << "    softlight(dest.r, src.r)," << endl;
+    fs << "    softlight(dest.g, src.g)," << endl;
+    fs << "    softlight(dest.b, src.b));" << endl;
+    break;
+  case gfx::CompositionOp::OP_DIFFERENCE:
+    fs << "  return abs(dest - src);" << endl;
+    break;
+  case gfx::CompositionOp::OP_EXCLUSION:
+    fs << "  return dest + src - 2.0*dest*src;" << endl;
+    break;
+  case gfx::CompositionOp::OP_HUE:
+    fs << "  return SetLum(SetSat(src, Sat(dest)), Lum(dest));" << endl;
+    break;
+  case gfx::CompositionOp::OP_SATURATION:
+    fs << "  return SetLum(SetSat(dest, Sat(src)), Lum(dest));" << endl;
+    break;
+  case gfx::CompositionOp::OP_COLOR:
+    fs << "  return SetLum(src, Lum(dest));" << endl;
+    break;
+  case gfx::CompositionOp::OP_LUMINOSITY:
+    fs << "  return SetLum(dest, Lum(src));" << endl;
+    break;
+  default:
+    MOZ_ASSERT_UNREACHABLE("unknown blend mode");
+  }
+  fs << "}" << endl;
+
+  // Generate the mix-blend function the fragment shader will call.
+  fs << "vec4 mixAndBlend(vec4 backdrop, vec4 color) {" << endl;
+
+  // Shortcut when the backdrop or source alpha is 0, otherwise we may leak
+  // Infinity into the blend function and return incorrect results.
+  fs << "  if (backdrop.a == 0.0) {" << endl;
+  fs << "    return color;" << endl;
+  fs << "  }" << endl;
+  fs << "  if (color.a == 0.0) {" << endl;
+  fs << "    return backdrop;" << endl;
+  fs << "  }" << endl;
+
+  // The spec assumes there is no premultiplied alpha. The backdrop is always
+  // premultiplied, so undo the premultiply. If the source is premultiplied we
+  // must fix that as well.
+  fs << "  backdrop.rgb /= backdrop.a;" << endl;
+  if (!(aConfig.mFeatures & ENABLE_NO_PREMUL_ALPHA)) {
+    fs << "  color.rgb /= color.a;" << endl;
+  }
+  fs << "  vec3 blended = blend(backdrop.rgb, color.rgb);" << endl;
+  fs << "  color.rgb = (1.0 - backdrop.a) * color.rgb + backdrop.a * blended.rgb;" << endl;
+  fs << "  color.rgb *= color.a;" << endl;
+  fs << "  return color;" << endl;
+  fs << "}" << endl;
 }
 
 ShaderProgramOGL::ShaderProgramOGL(GLContext* aGL, const ProgramProfileOGL& aProfile)
@@ -483,7 +768,7 @@ ShaderProgramOGL::~ShaderProgramOGL()
     return;
   }
 
-  nsRefPtr<GLContext> ctx = mGL->GetSharedContext();
+  RefPtr<GLContext> ctx = mGL->GetSharedContext();
   if (!ctx) {
     ctx = mGL;
   }
@@ -535,7 +820,7 @@ ShaderProgramOGL::CreateShader(GLenum aShaderType, const char *aShaderSource)
    */
   if (!success
 #ifdef DEBUG
-      || (len > 10 && PR_GetEnv("MOZ_DEBUG_SHADERS"))
+      || (len > 10 && gfxEnv::DebugShaders())
 #endif
       )
   {
@@ -588,7 +873,7 @@ ShaderProgramOGL::CreateProgram(const char *aVertexShaderString,
    */
   if (!success
 #ifdef DEBUG
-      || (len > 10 && PR_GetEnv("MOZ_DEBUG_SHADERS"))
+      || (len > 10 && gfxEnv::DebugShaders())
 #endif
       )
   {

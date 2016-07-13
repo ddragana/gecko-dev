@@ -137,6 +137,7 @@ enum {
     kKeyRequiresSecureBuffers = 'secu',  // bool (int32_t)
 
     kKeyIsADTS            = 'adts',  // bool (int32_t)
+    kKeyAACAOT            = 'aaot',  // int32_t
 
     // If a MediaBuffer's data represents (at least partially) encrypted
     // data, the following fields aid in decryption.
@@ -248,7 +249,7 @@ private:
             return mSize <= sizeof(u.reservoir);
         }
 
-        void allocateStorage(size_t size);
+        bool allocateStorage(size_t size);
         void freeStorage();
 
         void *storage() {

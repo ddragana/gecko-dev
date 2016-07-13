@@ -11,10 +11,10 @@ for var in ('MOZILLA_EXTERNAL_LINKAGE', 'USE_FAKE_MEDIA_STREAMS', 'USE_FAKE_PCOB
             'NR_SOCKET_IS_VOID_PTR', 'HAVE_STRDUP'):
     DEFINES[var] = True
 
-GENERATED_INCLUDES += [
-  '/dom/bindings',
-]
 LOCAL_INCLUDES += [
+    '!/dist/include/mozilla/dom', # Binding headers (because binding
+                                  # implementations include them).
+    '!/dom/bindings', # Binding implementations (urk).
     '/dom/media/',
     '/ipc/chromium/src',
     '/media/mtransport',
@@ -63,7 +63,8 @@ if CONFIG['OS_TARGET'] == 'Darwin':
         '-framework Carbon',
         '-framework CoreAudio',
         '-framework OpenGL',
-        '-framework QTKit',
+        '-framework AVFoundation',
+        '-framework CoreMedia',
         '-framework QuartzCore',
         '-framework Security',
         '-framework SystemConfiguration',
@@ -79,6 +80,7 @@ if CONFIG['OS_TARGET'] in ('DragonFly', 'FreeBSD', 'NetBSD', 'OpenBSD'):
 
 USE_LIBS += [
     '/media/webrtc/trunk/testing/gtest_gtest/gtest',
+    'chromium_atomics',
     'gkmedias',
     'nksrtp_s',
     'nss',
@@ -105,10 +107,10 @@ OS_LIBS += CONFIG['REALTIME_LIBS']
 if CONFIG['MOZ_ALSA']:
     OS_LIBS += CONFIG['MOZ_ALSA_LIBS']
 
-if CONFIG['MOZ_NATIVE_JPEG']:
+if CONFIG['MOZ_SYSTEM_JPEG']:
     OS_LIBS += CONFIG['MOZ_JPEG_LIBS']
 
-if CONFIG['MOZ_NATIVE_LIBVPX']:
+if CONFIG['MOZ_SYSTEM_LIBVPX']:
     OS_LIBS += CONFIG['MOZ_LIBVPX_LIBS']
 
 if not CONFIG['MOZ_TREE_PIXMAN']:
@@ -140,5 +142,3 @@ if CONFIG['OS_TARGET'] in ('Linux', 'DragonFly', 'FreeBSD', 'NetBSD',
 
 if CONFIG['OS_TARGET'] == 'Darwin':
     OS_LIBS += CONFIG['TK_LIBS']
-
-FAIL_ON_WARNINGS = True

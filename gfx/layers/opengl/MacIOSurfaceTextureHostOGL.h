@@ -28,9 +28,12 @@ public:
                                MacIOSurface* aSurface);
   virtual ~MacIOSurfaceTextureSourceOGL();
 
+  virtual const char* Name() const override { return "MacIOSurfaceTextureSourceOGL"; }
+
   virtual TextureSourceOGL* AsSourceOGL() override { return this; }
 
-  virtual void BindTexture(GLenum activetex, gfx::Filter aFilter) override;
+  virtual void BindTexture(GLenum activetex,
+                           gfx::SamplingFilter aSamplingFilter) override;
 
   virtual bool IsValid() const override { return !!gl(); }
 
@@ -64,15 +67,19 @@ class MacIOSurfaceTextureHostOGL : public TextureHost
 public:
   MacIOSurfaceTextureHostOGL(TextureFlags aFlags,
                              const SurfaceDescriptorMacIOSurface& aDescriptor);
+  virtual ~MacIOSurfaceTextureHostOGL();
 
   // MacIOSurfaceTextureSourceOGL doesn't own any GL texture
   virtual void DeallocateDeviceData() override {}
 
   virtual void SetCompositor(Compositor* aCompositor) override;
 
+  virtual Compositor* GetCompositor() override { return mCompositor; }
+
   virtual bool Lock() override;
 
   virtual gfx::SurfaceFormat GetFormat() const override;
+  virtual gfx::SurfaceFormat GetReadFormat() const override;
 
   virtual bool BindTextureSource(CompositableTextureSourceRef& aTexture) override
   {
@@ -94,6 +101,8 @@ public:
 #endif
 
 protected:
+  GLTextureSource* CreateTextureSourceForPlane(size_t aPlane);
+
   RefPtr<CompositorOGL> mCompositor;
   RefPtr<GLTextureSource> mTextureSource;
   RefPtr<MacIOSurface> mSurface;

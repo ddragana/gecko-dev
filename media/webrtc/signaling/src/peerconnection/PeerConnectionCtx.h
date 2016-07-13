@@ -12,7 +12,7 @@
 #endif
 
 #include "mozilla/Attributes.h"
-#include "StaticPtr.h"
+#include "mozilla/StaticPtr.h"
 #include "PeerConnectionImpl.h"
 #include "mozIGeckoMediaPluginService.h"
 #include "nsIRunnable.h"
@@ -80,9 +80,6 @@ class PeerConnectionCtx {
   EverySecondTelemetryCallback_m(nsITimer* timer, void *);
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  // Telemetry Peer conection counter
-  int mConnectionCounter;
-
   nsCOMPtr<nsITimer> mTelemetryTimer;
 
 public:

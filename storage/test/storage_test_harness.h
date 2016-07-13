@@ -212,7 +212,7 @@ void AsyncStatementSpinner::SpinUntilCompleted()
 void
 blocking_async_execute(mozIStorageBaseStatement *stmt)
 {
-  nsRefPtr<AsyncStatementSpinner> spinner(new AsyncStatementSpinner());
+  RefPtr<AsyncStatementSpinner> spinner(new AsyncStatementSpinner());
 
   nsCOMPtr<mozIStoragePendingStatement> pendy;
   (void)stmt->ExecuteAsync(spinner, getter_AddRefs(pendy));
@@ -226,7 +226,7 @@ blocking_async_execute(mozIStorageBaseStatement *stmt)
 void
 blocking_async_close(mozIStorageConnection *db)
 {
-  nsRefPtr<AsyncStatementSpinner> spinner(new AsyncStatementSpinner());
+  RefPtr<AsyncStatementSpinner> spinner(new AsyncStatementSpinner());
 
   db->AsyncClose(spinner);
   spinner->SpinUntilCompleted();
@@ -318,7 +318,7 @@ void watch_for_mutex_use_on_this_thread()
  *
  * The wedger is self-dispatching, just construct it with its target.
  */
-class ThreadWedger : public nsRunnable
+class ThreadWedger : public mozilla::Runnable
 {
 public:
   explicit ThreadWedger(nsIEventTarget *aTarget)

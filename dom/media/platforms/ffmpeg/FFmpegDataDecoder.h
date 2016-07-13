@@ -8,8 +8,9 @@
 #define __FFmpegDataDecoder_h__
 
 #include "PlatformDecoderModule.h"
-#include "FFmpegLibs.h"
+#include "FFmpegLibWrapper.h"
 #include "mozilla/StaticMutex.h"
+#include "FFmpegLibs.h"
 
 namespace mozilla
 {
@@ -23,30 +24,54 @@ template <>
 class FFmpegDataDecoder<LIBAV_VER> : public MediaDataDecoder
 {
 public:
-  FFmpegDataDecoder(FlushableTaskQueue* aTaskQueue, AVCodecID aCodecID);
+  FFmpegDataDecoder(FFmpegLibWrapper* aLib, TaskQueue* aTaskQueue,
+                    MediaDataDecoderCallback* aCallback,
+                    AVCodecID aCodecID);
   virtual ~FFmpegDataDecoder();
 
   static bool Link();
 
-  virtual nsresult Init() override;
-  virtual nsresult Input(MediaRawData* aSample) override = 0;
-  virtual nsresult Flush() override;
-  virtual nsresult Drain() override = 0;
-  virtual nsresult Shutdown() override;
+  RefPtr<InitPromise> Init() override = 0;
+  nsresult Input(MediaRawData* aSample) override;
+  nsresult Flush() override;
+  nsresult Drain() override;
+  nsresult Shutdown() override;
+
+  static AVCodec* FindAVCodec(FFmpegLibWrapper* aLib, AVCodecID aCodec);
 
 protected:
-  AVFrame*        PrepareFrame();
+  enum DecodeResult {
+    DECODE_FRAME,
+    DECODE_NO_FRAME,
+    DECODE_ERROR,
+    FATAL_ERROR
+  };
 
-  FlushableTaskQueue* mTaskQueue;
+  // Flush and Drain operation, always run
+  virtual void ProcessFlush();
+  virtual void ProcessShutdown();
+  virtual void InitCodecContext() {}
+  AVFrame*        PrepareFrame();
+  nsresult        InitDecoder();
+
+  FFmpegLibWrapper* mLib;
+  MediaDataDecoderCallback* mCallback;
+
   AVCodecContext* mCodecContext;
   AVFrame*        mFrame;
-  nsRefPtr<MediaByteBuffer> mExtraData;
+  RefPtr<MediaByteBuffer> mExtraData;
+  AVCodecID mCodecID;
 
 private:
-  static bool sFFmpegInitDone;
-  static StaticMutex sMonitor;
+  void ProcessDecode(MediaRawData* aSample);
+  virtual DecodeResult DoDecode(MediaRawData* aSample) = 0;
+  virtual void ProcessDrain() = 0;
 
-  AVCodecID mCodecID;
+  static StaticMutex sMonitor;
+  const RefPtr<TaskQueue> mTaskQueue;
+  // Set/cleared on reader thread calling Flush() to indicate that output is
+  // not required and so input samples on mTaskQueue need not be processed.
+  Atomic<bool> mIsFlushing;
 };
 
 } // namespace mozilla

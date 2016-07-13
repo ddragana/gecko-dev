@@ -11,12 +11,10 @@
 
 #include "nsInlineFrame.h"
 
-typedef nsInlineFrame nsRubyContentFrameSuper;
-
-class nsRubyContentFrame : public nsRubyContentFrameSuper
+class nsRubyContentFrame : public nsInlineFrame
 {
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_ABSTRACT_FRAME(nsRubyContentFrame)
 
   // nsIFrame overrides
   virtual bool IsFrameOfType(uint32_t aFlags) const override;
@@ -30,7 +28,7 @@ public:
 
 protected:
   explicit nsRubyContentFrame(nsStyleContext* aContext)
-    : nsRubyContentFrameSuper(aContext) {}
+    : nsInlineFrame(aContext) {}
 };
 
 #endif /* nsRubyContentFrame_h___ */

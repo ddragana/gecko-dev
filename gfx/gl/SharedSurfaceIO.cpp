@@ -30,7 +30,7 @@ SharedSurface_IOSurface::Create(const RefPtr<MacIOSurface>& ioSurf,
 }
 
 void
-SharedSurface_IOSurface::Fence()
+SharedSurface_IOSurface::ProducerReleaseImpl()
 {
     mGL->MakeCurrent();
     mGL->fFlush();
@@ -165,11 +165,10 @@ SharedSurface_IOSurface::SharedSurface_IOSurface(const RefPtr<MacIOSurface>& ioS
 
 SharedSurface_IOSurface::~SharedSurface_IOSurface()
 {
-    if (mProdTex) {
-        DebugOnly<bool> success = mGL->MakeCurrent();
-        MOZ_ASSERT(success);
-        mGL->fDeleteTextures(1, &mProdTex);
-    }
+    if (!mGL->MakeCurrent())
+        return;
+
+    mGL->fDeleteTextures(1, &mProdTex);
 }
 
 bool
@@ -182,12 +181,37 @@ SharedSurface_IOSurface::ToSurfaceDescriptor(layers::SurfaceDescriptor* const ou
     return true;
 }
 
+bool
+SharedSurface_IOSurface::ReadbackBySharedHandle(gfx::DataSourceSurface* out_surface)
+{
+    MOZ_ASSERT(out_surface);
+    mIOSurf->Lock();
+    size_t bytesPerRow = mIOSurf->GetBytesPerRow();
+    size_t ioWidth = mIOSurf->GetDevicePixelWidth();
+    size_t ioHeight = mIOSurf->GetDevicePixelHeight();
+
+    const unsigned char* ioData = (unsigned char*)mIOSurf->GetBaseAddress();
+    gfx::DataSourceSurface::ScopedMap map(out_surface, gfx::DataSourceSurface::WRITE);
+    if (!map.IsMapped()) {
+        mIOSurf->Unlock();
+        return false;
+    }
+
+    for (size_t i = 0; i < ioHeight; i++) {
+        memcpy(map.GetData() + i * map.GetStride(),
+               ioData + i * bytesPerRow, ioWidth * 4);
+    }
+
+    mIOSurf->Unlock();
+    return true;
+}
+
 ////////////////////////////////////////////////////////////////////////
 // SurfaceFactory_IOSurface
 
 /*static*/ UniquePtr<SurfaceFactory_IOSurface>
 SurfaceFactory_IOSurface::Create(GLContext* gl, const SurfaceCaps& caps,
-                                 const RefPtr<layers::ISurfaceAllocator>& allocator,
+                                 const RefPtr<layers::ClientIPCAllocator>& allocator,
                                  const layers::TextureFlags& flags)
 {
     gfx::IntSize maxDims(MacIOSurface::GetMaxWidth(),

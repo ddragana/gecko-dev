@@ -10,8 +10,6 @@
 #include "GLContext.h"
 #include "GLLibraryEGL.h"
 
-class nsIWidget;
-
 namespace mozilla {
 namespace gl {
 
@@ -20,15 +18,18 @@ class GLContextEGL : public GLContext
     friend class TextureImageEGL;
 
     static already_AddRefed<GLContextEGL>
-    CreateGLContext(const SurfaceCaps& caps,
-                    GLContextEGL *shareContext,
+    CreateGLContext(CreateContextFlags flags,
+                    const SurfaceCaps& caps,
+                    GLContextEGL* shareContext,
                     bool isOffscreen,
                     EGLConfig config,
-                    EGLSurface surface);
+                    EGLSurface surface,
+                    nsACString* const out_failureId);
 
 public:
     MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(GLContextEGL, override)
-    GLContextEGL(const SurfaceCaps& caps,
+    GLContextEGL(CreateContextFlags flags,
+                 const SurfaceCaps& caps,
                  GLContext* shareContext,
                  bool isOffscreen,
                  EGLConfig config,
@@ -66,6 +67,10 @@ public:
         return sEGLLibrary.IsANGLE();
     }
 
+    virtual bool IsWARP() const override {
+        return sEGLLibrary.IsWARP();
+    }
+
     virtual bool BindTexImage() override;
 
     virtual bool ReleaseTexImage() override;
@@ -76,7 +81,7 @@ public:
 
     virtual bool IsCurrent() override;
 
-    virtual bool RenewSurface() override;
+    virtual bool RenewSurface(nsIWidget* aWidget) override;
 
     virtual void ReleaseSurface() override;
 
@@ -86,38 +91,38 @@ public:
 
     // hold a reference to the given surface
     // for the lifetime of this context.
-    void HoldSurface(gfxASurface *aSurf);
+    void HoldSurface(gfxASurface* aSurf);
 
-    EGLContext GetEGLContext() {
-        return mContext;
-    }
-
-    EGLSurface GetEGLSurface() {
+    EGLSurface GetEGLSurface() const {
         return mSurface;
     }
 
-    EGLDisplay GetEGLDisplay() {
-        return EGL_DISPLAY();
+    EGLDisplay GetEGLDisplay() const {
+        return sEGLLibrary.Display();
     }
 
-    bool BindTex2DOffscreen(GLContext *aOffscreen);
-    void UnbindTex2DOffscreen(GLContext *aOffscreen);
+    bool BindTex2DOffscreen(GLContext* aOffscreen);
+    void UnbindTex2DOffscreen(GLContext* aOffscreen);
     void BindOffscreenFramebuffer();
 
     static already_AddRefed<GLContextEGL>
-    CreateEGLPixmapOffscreenContext(const gfx::IntSize& size);
-
-    static already_AddRefed<GLContextEGL>
-    CreateEGLPBufferOffscreenContext(const gfx::IntSize& size);
+    CreateEGLPBufferOffscreenContext(CreateContextFlags flags,
+                                     const gfx::IntSize& size,
+                                     const SurfaceCaps& minCaps,
+                                     nsACString* const out_FailureId);
 
 protected:
     friend class GLContextProviderEGL;
 
-    EGLConfig  mConfig;
+public:
+    const EGLConfig  mConfig;
+protected:
     EGLSurface mSurface;
+public:
+    const EGLContext mContext;
+protected:
     EGLSurface mSurfaceOverride;
-    EGLContext mContext;
-    nsRefPtr<gfxASurface> mThebesSurface;
+    RefPtr<gfxASurface> mThebesSurface;
     bool mBound;
 
     bool mIsPBuffer;

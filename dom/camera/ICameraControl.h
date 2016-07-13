@@ -7,7 +7,6 @@
 
 #include "nsCOMPtr.h"
 #include "nsString.h"
-#include "nsAutoPtr.h"
 #include "nsISupportsImpl.h"
 #include "base/basictypes.h"
 
@@ -116,6 +115,11 @@ public:
   struct Size {
     uint32_t  width;
     uint32_t  height;
+
+    bool Equals(const Size& aSize) const
+    {
+      return width == aSize.width && height == aSize.height;
+    }
   };
 
   struct Region {
@@ -219,6 +223,7 @@ public:
     const nsString& GetName() const       { return mName; }
     const nsString& GetContainer() const  { return mContainer; }
     const nsString& GetMimeType() const   { return mMimeType; }
+    uint32_t GetPriority() const          { return mPriority; }
 
     virtual const Video& GetVideo() const = 0;
     virtual const Audio& GetAudio() const = 0;
@@ -229,6 +234,7 @@ public:
     nsString    mName;
     nsString    mContainer;
     nsString    mMimeType;
+    uint32_t    mPriority;
 
   private:
     DISALLOW_EVIL_CONSTRUCTORS(RecorderProfile);
@@ -256,6 +262,8 @@ public:
   virtual nsresult StartRecording(DeviceStorageFileDescriptor* aFileDescriptor,
                                   const StartRecordingOptions* aOptions = nullptr) = 0;
   virtual nsresult StopRecording() = 0;
+  virtual nsresult PauseRecording() = 0;
+  virtual nsresult ResumeRecording() = 0;
   virtual nsresult StartFaceDetection() = 0;
   virtual nsresult StopFaceDetection() = 0;
   virtual nsresult ResumeContinuousFocus() = 0;
@@ -321,7 +329,7 @@ public:
   }
 
 protected:
-  nsRefPtr<ICameraControl> mCameraControl;
+  RefPtr<ICameraControl> mCameraControl;
 };
 
 } // namespace mozilla

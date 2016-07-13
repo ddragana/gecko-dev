@@ -12,16 +12,18 @@ Cu.import("resource://gre/modules/TelemetryController.jsm", this);
 Cu.import("resource://gre/modules/TelemetrySession.jsm", this);
 Cu.import("resource://gre/modules/TelemetrySend.jsm", this);
 
-const PREF_ENABLED = "toolkit.telemetry.enabled";
 const PREF_FHR_UPLOAD_ENABLED = "datareporting.healthreport.uploadEnabled";
 
-let gHttpServer = null;
+var gHttpServer = null;
 
 function run_test() {
   do_test_pending();
   do_get_profile();
 
-  Services.prefs.setBoolPref(PREF_ENABLED, true);
+  // Make sure we don't generate unexpected pings due to pref changes.
+  setEmptyPrefWatchlist();
+
+  Services.prefs.setBoolPref(PREF_TELEMETRY_ENABLED, true);
   Services.prefs.setBoolPref(PREF_FHR_UPLOAD_ENABLED, true);
 
   // Start the webserver to check if the pending ping correctly arrives.
@@ -43,7 +45,7 @@ add_task(function* testSendPendingOnIdleDaily() {
   yield TelemetryStorage.savePing(PENDING_PING, true);
 
   // Telemetry will not send this ping at startup, because it's not overdue.
-  yield TelemetryController.setup();
+  yield TelemetryController.testSetup();
   TelemetrySend.setServer("http://localhost:" + gHttpServer.identity.primaryPort);
 
   let pendingPromise = new Promise(resolve =>

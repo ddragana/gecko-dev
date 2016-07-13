@@ -11,7 +11,6 @@
 #include "mozilla/dom/PannerNodeBinding.h"
 #include "ThreeDPoint.h"
 #include "mozilla/WeakPtr.h"
-#include "mozilla/Preferences.h"
 #include "WebAudioUtils.h"
 #include <set>
 
@@ -28,11 +27,11 @@ public:
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(PannerNode)
   explicit PannerNode(AudioContext* aContext);
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  virtual void DestroyMediaStream() override;
+  void DestroyMediaStream() override;
 
-  virtual void SetChannelCount(uint32_t aChannelCount, ErrorResult& aRv) override
+  void SetChannelCount(uint32_t aChannelCount, ErrorResult& aRv) override
   {
     if (aChannelCount > 2) {
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
@@ -40,7 +39,7 @@ public:
     }
     AudioNode::SetChannelCount(aChannelCount, aRv);
   }
-  virtual void SetChannelCountModeValue(ChannelCountMode aMode, ErrorResult& aRv) override
+  void SetChannelCountModeValue(ChannelCountMode aMode, ErrorResult& aRv) override
   {
     if (aMode == ChannelCountMode::Max) {
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
@@ -56,11 +55,7 @@ public:
   {
     return mPanningModel;
   }
-  void SetPanningModel(PanningModelType aPanningModel)
-  {
-    mPanningModel = aPanningModel;
-    SendInt32ParameterToStream(PANNING_MODEL, int32_t(mPanningModel));
-  }
+  void SetPanningModel(PanningModelType aPanningModel);
 
   DistanceModelType DistanceModel() const
   {
@@ -195,13 +190,13 @@ public:
   void FindConnectedSources();
   void FindConnectedSources(AudioNode* aNode, nsTArray<AudioBufferSourceNode*>& aSources, std::set<AudioNode*>& aSeenNodes);
 
-  virtual const char* NodeType() const override
+  const char* NodeType() const override
   {
     return "PannerNode";
   }
 
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
 protected:
   virtual ~PannerNode();

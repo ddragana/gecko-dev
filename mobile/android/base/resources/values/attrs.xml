@@ -14,22 +14,16 @@
         <attr name="menuItemActionBarStyle" format="reference"/>
 
         <!-- Style for MenuItemActionBar -->
-        <attr name="menuItemActionBarStyleNewTablet" format="reference"/>
-
-        <!-- Style for MenuItemActionBar -->
         <attr name="menuItemActionModeStyle" format="reference"/>
 
-        <!-- Style for MenuItemActionView -->
-        <attr name="menuItemActionViewStyle" format="reference"/>
+        <!-- Style for MenuItemSwitcherLayout -->
+        <attr name="menuItemSwitcherLayoutStyle" format="reference"/>
 
         <!-- Style for MenuItemDefault -->
         <attr name="menuItemDefaultStyle" format="reference"/>
 
         <!-- Style for MenuItemActionBar when shown in SecondaryActionBar -->
         <attr name="menuItemSecondaryActionBarStyle" format="reference"/>
-
-        <!-- Style for MenuItemActionView's ShareActionButton -->
-        <attr name="menuItemShareActionButtonStyle" format="reference"/>
 
         <!-- Default style for the BookmarksListView -->
         <attr name="bookmarksListViewStyle" format="reference" />
@@ -129,10 +123,6 @@
         <attr name="topDivider" format="boolean"/>
     </declare-styleable>
 
-    <declare-styleable name="HomePagerTabStrip">
-        <attr name="tabIndicatorColor" format="color"/>
-    </declare-styleable>
-
     <declare-styleable name="FadedTextView">
         <attr name="fadeWidth" format="dimension"/>
     </declare-styleable>
@@ -141,15 +131,6 @@
         <!-- The background color we should be fading over. Useful because the
              background is full alpha and we need to copy the background underneath. -->
         <attr name="fadeBackgroundColor" format="dimension"/>
-    </declare-styleable>
-
-    <declare-styleable name="BookmarkFolderView">
-        <attr name="state_open" format="boolean"/>
-    </declare-styleable>
-
-    <declare-styleable name="GeckoView">
-        <attr name="url" format="string"/>
-        <attr name="doinit" format="boolean"/>
     </declare-styleable>
 
     <declare-styleable name="IconTabWidget">
@@ -169,7 +150,15 @@
 
     <declare-styleable name="TabMenuStrip">
         <attr name="strip" format="reference"/>
-        <attr name="tabContentStart" format="dimension" />
+        <attr name="tabsMarginLeft" format="dimension" />
+        <attr name="activeTextColor" format="color" />
+        <attr name="inactiveTextColor" format="color" />
+        <attr name="titlebarFill" format="boolean" />
+    </declare-styleable>
+
+    <declare-styleable name="CustomColorPreference">
+        <attr name="titleColor" format="color" />
+        <attr name="summaryColor" format="color" />
     </declare-styleable>
 
     <declare-styleable name="TabPanelBackButton">
@@ -181,10 +170,6 @@
         <attr name="ellipsizeAtLine" format="integer"/>
     </declare-styleable>
 
-    <declare-styleable name="FloatingHintEditText">
-        <attr name="floatingHintEditTextStyle" format="reference" />
-    </declare-styleable>
-
     <declare-styleable name="FaviconView">
         <attr name="dominantBorderEnabled" format="boolean" />
         <attr name="overrideScaleType" format="boolean" />
@@ -194,6 +179,16 @@
         <attr name="drawable" format="reference" />
         <attr name="enabledText" format="string" />
         <attr name="disabledText" format="string" />
+    </declare-styleable>
+
+    <declare-styleable name="ThemedView">
+        <!-- A reimplementation of android:tintList which is
+             otherwise only available on API 21+.
+
+             Using this attribute is mutually exclusive with android:tint
+             and setting colorFilters in code. This is because on pre-Lollipop,
+             android:tint and DrawableCompat.tint* uses colorFilters under the hood. -->
+        <attr name="drawableTintList" format="color" />
     </declare-styleable>
 
 </resources>

@@ -9,6 +9,7 @@
 
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/StyleSheetList.h"
+#include "mozilla/StyleSheetHandle.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsTHashtable.h"
@@ -45,8 +46,8 @@ public:
 
   void AddToIdTable(Element* aElement, nsIAtom* aId);
   void RemoveFromIdTable(Element* aElement, nsIAtom* aId);
-  void InsertSheet(CSSStyleSheet* aSheet, nsIContent* aLinkingContent);
-  void RemoveSheet(CSSStyleSheet* aSheet);
+  void InsertSheet(StyleSheetHandle aSheet, nsIContent* aLinkingContent);
+  void RemoveSheet(StyleSheetHandle aSheet);
   bool ApplyAuthorStyles();
   void SetApplyAuthorStyles(bool aApplyAuthorStyles);
   StyleSheetList* StyleSheets();
@@ -157,20 +158,20 @@ protected:
   // It is necessary to hold a reference to the associated nsXBLBinding
   // because the binding holds a reference on the nsXBLDocumentInfo that
   // owns |mProtoBinding|.
-  nsRefPtr<nsXBLBinding> mAssociatedBinding;
+  RefPtr<nsXBLBinding> mAssociatedBinding;
 
-  nsRefPtr<ShadowRootStyleSheetList> mStyleSheetList;
+  RefPtr<ShadowRootStyleSheetList> mStyleSheetList;
 
   // The current shadow insertion point of this ShadowRoot.
   HTMLShadowElement* mShadowElement;
 
   // The ShadowRoot that was created by the host element before
   // this ShadowRoot was created.
-  nsRefPtr<ShadowRoot> mOlderShadow;
+  RefPtr<ShadowRoot> mOlderShadow;
 
   // The ShadowRoot that was created by the host element after
   // this ShadowRoot was created.
-  nsRefPtr<ShadowRoot> mYoungerShadow;
+  RefPtr<ShadowRoot> mYoungerShadow;
 
   // A boolean that indicates that an insertion point was added or removed
   // from this ShadowRoot and that the nodes need to be redistributed into
@@ -206,7 +207,7 @@ public:
 protected:
   virtual ~ShadowRootStyleSheetList();
 
-  nsRefPtr<ShadowRoot> mShadowRoot;
+  RefPtr<ShadowRoot> mShadowRoot;
 };
 
 } // namespace dom

@@ -9,13 +9,13 @@ const windows = require("sdk/windows").browserWindows;
 const app = require("sdk/system/xul-app");
 const { viewFor } = require("sdk/view/core");
 const { modelFor } = require("sdk/model/core");
-const { getTabId, isTab } = require("sdk/tabs/utils");
+const { getBrowserForTab, getTabId, isTab } = require("sdk/tabs/utils");
 const { defer } = require("sdk/lang/functional");
 
 function tabExistenceInTabs(assert, found, tab, tabs) {
   let tabFound = false;
 
-  for each (let t in tabs) {
+  for (let t of tabs) {
     assert.notEqual(t.title, undefined, 'tab title is not undefined');
     assert.notEqual(t.url, undefined, 'tab url is not undefined');
     assert.notEqual(t.index, undefined, 'tab index is not undefined');
@@ -200,6 +200,16 @@ exports["test tab.readyState"] = (assert, done) => {
       tab.close(defer(done));
     }
   });
+}
+
+exports["test tab.readyState for existent tabs"] = (assert) => {
+  assert.equal(tabs.length, 1, "tabs contains an existent tab");
+
+  for (let tab of tabs) {
+    let browserForTab = getBrowserForTab(viewFor(tab));
+    assert.equal(browserForTab.contentDocument.readyState, tab.readyState,
+                 "tab.readyState has the same value of the associated contentDocument.readyState CPOW");
+  }
 }
 
 require("sdk/test").run(module.exports);

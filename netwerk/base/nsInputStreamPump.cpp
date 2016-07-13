@@ -22,9 +22,9 @@
 static NS_DEFINE_CID(kStreamTransportServiceCID, NS_STREAMTRANSPORTSERVICE_CID);
 
 //
-// NSPR_LOG_MODULES=nsStreamPump:5
+// MOZ_LOG=nsStreamPump:5
 //
-static PRLogModuleInfo *gStreamPumpLog = nullptr;
+static mozilla::LazyLogModule gStreamPumpLog("nsStreamPump");
 #undef LOG
 #define LOG(args) MOZ_LOG(gStreamPumpLog, mozilla::LogLevel::Debug, args)
 
@@ -45,8 +45,6 @@ nsInputStreamPump::nsInputStreamPump()
     , mRetargeting(false)
     , mMonitor("nsInputStreamPump")
 {
-    if (!gStreamPumpLog)
-        gStreamPumpLog = PR_NewLogModule("nsStreamPump");
 }
 
 nsInputStreamPump::~nsInputStreamPump()
@@ -63,7 +61,7 @@ nsInputStreamPump::Create(nsInputStreamPump  **result,
                           bool                 closeWhenDone)
 {
     nsresult rv = NS_ERROR_OUT_OF_MEMORY;
-    nsRefPtr<nsInputStreamPump> pump = new nsInputStreamPump();
+    RefPtr<nsInputStreamPump> pump = new nsInputStreamPump();
     if (pump) {
         rv = pump->Init(stream, streamPos, streamLen,
                         segsize, segcount, closeWhenDone);
@@ -681,7 +679,7 @@ nsInputStreamPump::OnStateStop()
         MOZ_ASSERT(NS_IsMainThread(),
                    "OnStateStop should only be called on the main thread.");
         nsresult rv = NS_DispatchToMainThread(
-            NS_NewRunnableMethod(this, &nsInputStreamPump::CallOnStateStop));
+            NewRunnableMethod(this, &nsInputStreamPump::CallOnStateStop));
         NS_ENSURE_SUCCESS(rv, STATE_IDLE);
         return STATE_IDLE;
     }

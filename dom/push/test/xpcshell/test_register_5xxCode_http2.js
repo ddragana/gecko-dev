@@ -53,12 +53,10 @@ function run_test() {
 
   do_get_profile();
   setPrefs({
+    'testing.allowInsecureServerURL': true,
     'http2.retryInterval': 1000,
     'http2.maxRetries': 2
   });
-  disableServiceWorkerEvents(
-    'https://example.com/retry5xxCode'
-  );
 
   run_next_test();
 }
@@ -79,27 +77,26 @@ add_task(function* test1() {
 
   PushService.init({
     serverURI: serverURL + "/subscribe5xxCode",
-    service: PushServiceHttp2,
     db
   });
 
-  let newRecord = yield PushNotificationService.register(
-    'https://example.com/retry5xxCode',
-    ChromeUtils.originAttributesToSuffix({ appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inBrowser: false })
-  );
+  let originAttributes = ChromeUtils.originAttributesToSuffix({
+    appId: Ci.nsIScriptSecurityManager.NO_APP_ID,
+    inIsolatedMozBrowser: false,
+  });
+  let newRecord = yield PushService.register({
+    scope: 'https://example.com/retry5xxCode',
+    originAttributes: originAttributes,
+  });
 
   var subscriptionUri = serverURL + '/subscription';
   var pushEndpoint = serverURL + '/pushEndpoint';
   var pushReceiptEndpoint = serverURL + '/receiptPushEndpoint';
-  equal(newRecord.subscriptionUri, subscriptionUri,
-    'Wrong subscription ID in registration record');
-  equal(newRecord.pushEndpoint, pushEndpoint,
+  equal(newRecord.endpoint, pushEndpoint,
     'Wrong push endpoint in registration record');
 
   equal(newRecord.pushReceiptEndpoint, pushReceiptEndpoint,
     'Wrong push endpoint receipt in registration record');
-  equal(newRecord.scope, 'https://example.com/retry5xxCode',
-    'Wrong scope in registration record');
 
   let record = yield db.getByKeyID(subscriptionUri);
   equal(record.subscriptionUri, subscriptionUri,

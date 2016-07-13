@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -25,7 +27,7 @@ namespace {
 /**
  * An event used to notify the main thread when an error happens.
  */
-class WatchedErrorEvent final : public nsRunnable
+class WatchedErrorEvent final : public Runnable
 {
 public:
   /**
@@ -63,7 +65,7 @@ public:
 /**
  * An event used to notify the main thread when an operation is successful.
  */
-class WatchedSuccessEvent final : public nsRunnable
+class WatchedSuccessEvent final : public Runnable
 {
 public:
   /**
@@ -101,7 +103,7 @@ public:
  * An event used to notify the main thread of a change in a watched
  * resource.
  */
-class WatchedChangeEvent final : public nsRunnable
+class WatchedChangeEvent final : public Runnable
 {
 public:
   /**
@@ -130,16 +132,8 @@ private:
   nsString mChangedResource;
 };
 
-static PRLogModuleInfo* GetFileWatcherContextLog()
-{
-  static PRLogModuleInfo *gNativeWatcherPRLog;
-  if (!gNativeWatcherPRLog) {
-    gNativeWatcherPRLog = PR_NewLogModule("NativeFileWatcherService");
-  }
-  return gNativeWatcherPRLog;
-}
-
-#define FILEWATCHERLOG(...) MOZ_LOG(GetFileWatcherContextLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
+static mozilla::LazyLogModule gNativeWatcherPRLog("NativeFileWatcherService");
+#define FILEWATCHERLOG(...) MOZ_LOG(gNativeWatcherPRLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 
 // The number of notifications to store within WatchedResourceDescriptor:mNotificationBuffer.
 // If the buffer overflows, its contents are discarded and a change callback is dispatched
@@ -230,7 +224,7 @@ struct PathRunnablesParametersWrapper {
  * This runnable is dispatched to the main thread in order to safely
  * shutdown the worker thread.
  */
-class NativeWatcherIOShutdownTask : public nsRunnable
+class NativeWatcherIOShutdownTask : public Runnable
 {
 public:
   NativeWatcherIOShutdownTask()
@@ -251,21 +245,6 @@ private:
 };
 
 /**
- * An helper callback function used to print information about any
- * pending watch when shutting down the nsINativeFileWatcher service.
- */
-static PLDHashOperator
-WatchedPathsInfoHashtableTraverser(nsVoidPtrHashKey::KeyType key,
-                                   WatchedResourceDescriptor* watchedResource,
-                                   void* userArg)
-{
-  FILEWATCHERLOG("NativeFileWatcherIOTask::DeactivateRunnableMethod - "
-                 "%S is still being watched.", watchedResource->mPath.get());
-
-  return PL_DHASH_NEXT;
-}
-
-/**
  * This runnable is dispatched from the main thread to get the notifications of the
  * changes in the watched resources by continuously calling the blocking function
  * GetQueuedCompletionStatus. This function queries the status of the Completion I/O
@@ -276,7 +255,7 @@ WatchedPathsInfoHashtableTraverser(nsVoidPtrHashKey::KeyType key,
  * by issuing a NS_DispatchToCurrentThread(this) before exiting. This is done to allow
  * the execution of other runnables enqueued within the thread task queue.
  */
-class NativeFileWatcherIOTask : public nsRunnable
+class NativeFileWatcherIOTask : public Runnable
 {
 public:
   NativeFileWatcherIOTask(HANDLE aIOCompletionPort)
@@ -493,7 +472,7 @@ NativeFileWatcherIOTask::RunInternal()
     }
 
     rawNotificationBuffer += notificationInfo->NextEntryOffset;
-  };
+  }
 
   // We need to keep watching for further changes.
   nsresult rv = AddDirectoryToWatchList(changedRes);
@@ -855,8 +834,11 @@ NativeFileWatcherIOTask::DeactivateRunnableMethod()
              "watches manually before quitting.");
 
   // Log any pending watch.
-  (void)mWatchedResourcesByHandle.EnumerateRead(
-    &WatchedPathsInfoHashtableTraverser, nullptr);
+  for (auto it = mWatchedResourcesByHandle.Iter(); !it.Done(); it.Next()) {
+    FILEWATCHERLOG("NativeFileWatcherIOTask::DeactivateRunnableMethod - "
+                   "%S is still being watched.", it.UserData()->mPath.get());
+
+  }
 
   // We return immediately if |mShuttingDown| is true (see below for
   // details about the shutdown protocol being followed).
@@ -894,7 +876,7 @@ NativeFileWatcherIOTask::DeactivateRunnableMethod()
   }
 
   // Now we just need to reschedule a final call to Shutdown() back to the main thread.
-  nsRefPtr<NativeWatcherIOShutdownTask> shutdownRunnable =
+  RefPtr<NativeWatcherIOShutdownTask> shutdownRunnable =
     new NativeWatcherIOShutdownTask();
 
   return NS_DispatchToMainThread(shutdownRunnable);
@@ -949,7 +931,7 @@ NativeFileWatcherIOTask::ReportChange(
   const nsMainThreadPtrHandle<nsINativeFileWatcherCallback>& aOnChange,
   const nsAString& aChangedResource)
 {
-  nsRefPtr<WatchedChangeEvent> changeRunnable =
+  RefPtr<WatchedChangeEvent> changeRunnable =
     new WatchedChangeEvent(aOnChange, aChangedResource);
   return NS_DispatchToMainThread(changeRunnable);
 }
@@ -1007,7 +989,7 @@ NativeFileWatcherIOTask::ReportError(
   const nsMainThreadPtrHandle<nsINativeFileWatcherErrorCallback>& aOnError,
   nsresult anError, DWORD anOSError)
 {
-  nsRefPtr<WatchedErrorEvent> errorRunnable =
+  RefPtr<WatchedErrorEvent> errorRunnable =
     new WatchedErrorEvent(aOnError, anError, anOSError);
   return NS_DispatchToMainThread(errorRunnable);
 }
@@ -1027,7 +1009,7 @@ NativeFileWatcherIOTask::ReportSuccess(
   const nsMainThreadPtrHandle<nsINativeFileWatcherSuccessCallback>& aOnSuccess,
   const nsAString& aResource)
 {
-  nsRefPtr<WatchedSuccessEvent> successRunnable =
+  RefPtr<WatchedSuccessEvent> successRunnable =
     new WatchedSuccessEvent(aOnSuccess, aResource);
   return NS_DispatchToMainThread(successRunnable);
 }
@@ -1329,7 +1311,7 @@ NativeFileWatcherService::AddPath(const nsAString& aPathToWatch,
   nsMainThreadPtrHandle<nsINativeFileWatcherSuccessCallback> successCallbackHandle(
     new nsMainThreadPtrHolder<nsINativeFileWatcherSuccessCallback>(aOnSuccess));
 
-  // Wrap the path and the callbacks in order to pass them using NS_NewRunnableMethodWithArg.
+  // Wrap the path and the callbacks in order to pass them using NewRunnableMethod.
   UniquePtr<PathRunnablesParametersWrapper> wrappedCallbacks(
     new PathRunnablesParametersWrapper(
       aPathToWatch,
@@ -1340,7 +1322,7 @@ NativeFileWatcherService::AddPath(const nsAString& aPathToWatch,
   // Since this function does a bit of I/O stuff , run it in the IO thread.
   nsresult rv =
     mIOThread->Dispatch(
-      NS_NewRunnableMethodWithArg<PathRunnablesParametersWrapper*>(
+      NewRunnableMethod<PathRunnablesParametersWrapper*>(
         static_cast<NativeFileWatcherIOTask*>(mWorkerIORunnable.get()),
         &NativeFileWatcherIOTask::AddPathRunnableMethod,
         wrappedCallbacks.get()),
@@ -1399,7 +1381,7 @@ NativeFileWatcherService::RemovePath(const nsAString& aPathToRemove,
   nsMainThreadPtrHandle<nsINativeFileWatcherSuccessCallback> successCallbackHandle(
     new nsMainThreadPtrHolder<nsINativeFileWatcherSuccessCallback>(aOnSuccess));
 
-  // Wrap the path and the callbacks in order to pass them using NS_NewRunnableMethodWithArg.
+  // Wrap the path and the callbacks in order to pass them using NewRunnableMethod.
   UniquePtr<PathRunnablesParametersWrapper> wrappedCallbacks(
     new PathRunnablesParametersWrapper(
       aPathToRemove,
@@ -1410,7 +1392,7 @@ NativeFileWatcherService::RemovePath(const nsAString& aPathToRemove,
   // Since this function does a bit of I/O stuff, run it in the IO thread.
   nsresult rv =
     mIOThread->Dispatch(
-      NS_NewRunnableMethodWithArg<PathRunnablesParametersWrapper*>(
+      NewRunnableMethod<PathRunnablesParametersWrapper*>(
         static_cast<NativeFileWatcherIOTask*>(mWorkerIORunnable.get()),
         &NativeFileWatcherIOTask::RemovePathRunnableMethod,
         wrappedCallbacks.get()),
@@ -1459,7 +1441,7 @@ NativeFileWatcherService::Uninit()
   // in the IO thread.
   nsresult rv =
     ioThread->Dispatch(
-      NS_NewRunnableMethod(
+      NewRunnableMethod(
         static_cast<NativeFileWatcherIOTask*>(mWorkerIORunnable.get()),
         &NativeFileWatcherIOTask::DeactivateRunnableMethod),
       nsIEventTarget::DISPATCH_NORMAL);

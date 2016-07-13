@@ -25,62 +25,36 @@ header = """
 
 footer = """
 
-# can we find a better way of dealing with asm sources?
-
-# left out of UNIFIED_SOURCES for now; that's not C++ anyway, nothing else to unify it with
-#XXX: doesn't build with Apple's assembler
-if not CONFIG['INTEL_ARCHITECTURE'] and CONFIG['CPU_ARCH'] == 'arm' and CONFIG['GNU_CC'] and CONFIG['OS_TARGET'] != 'Darwin':
-    SOURCES += [
-        'trunk/src/opts/memset.arm.S',
-    ]
-    if CONFIG['BUILD_ARM_NEON']:
-        SOURCES += [
-            'trunk/src/opts/memset16_neon.S',
-            'trunk/src/opts/memset32_neon.S',
-        ]
-
-if CONFIG['INTEL_ARCHITECTURE'] and CONFIG['GNU_CC'] and CONFIG['OS_ARCH'] != 'WINNT':
-    if CONFIG['CPU_ARCH'] == 'x86_64':
-        SOURCES += [
-            'trunk/src/opts/SkBlitRow_opts_SSE4_x64_asm.S',
-        ]
-    else:
-        SOURCES += [
-            'trunk/src/opts/SkBlitRow_opts_SSE4_asm.S',
-        ]
+# We allow warnings for third-party code that can be updated from upstream.
+ALLOW_COMPILER_WARNINGS = True
 
 FINAL_LIBRARY = 'gkmedias'
 LOCAL_INCLUDES += [
-    'trunk/include/config',
-    'trunk/include/core',
-    'trunk/include/effects',
-    'trunk/include/gpu',
-    'trunk/include/images',
-    'trunk/include/pathops',
-    'trunk/include/pipe',
-    'trunk/include/ports',
-    'trunk/include/utils',
-    'trunk/include/utils/mac',
-    'trunk/include/utils/win',
-    'trunk/include/views',
-    'trunk/src/core',
-    'trunk/src/gpu',
-    'trunk/src/gpu/effects',
-    'trunk/src/gpu/gl',
-    'trunk/src/image',
-    'trunk/src/lazy',
-    'trunk/src/opts',
-    'trunk/src/sfnt',
-    'trunk/src/utils',
-    'trunk/src/utils/mac',
-    'trunk/src/utils/win',
+    'skia/include/c',
+    'skia/include/config',
+    'skia/include/core',
+    'skia/include/effects',
+    'skia/include/gpu',
+    'skia/include/images',
+    'skia/include/pathops',
+    'skia/include/ports',
+    'skia/include/private',
+    'skia/include/utils',
+    'skia/include/utils/mac',
+    'skia/include/utils/win',
+    'skia/include/views',
+    'skia/src/core',
+    'skia/src/gpu',
+    'skia/src/gpu/effects',
+    'skia/src/gpu/gl',
+    'skia/src/image',
+    'skia/src/lazy',
+    'skia/src/opts',
+    'skia/src/sfnt',
+    'skia/src/utils',
+    'skia/src/utils/mac',
+    'skia/src/utils/win',
 ]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in {'android', 'gtk2', 'gtk3', 'qt', 'gonk', 'cocoa', 'uikit'}:
-    DEFINES['SK_USE_POSIX_THREADS'] = 1
-
-if CONFIG['INTEL_ARCHITECTURE'] and CONFIG['HAVE_TOOLCHAIN_SUPPORT_MSSSE3']:
-    DEFINES['SK_BUILD_SSSE3'] = 1
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gonk'):
     DEFINES['SK_FONTHOST_CAIRO_STANDALONE'] = 0
@@ -88,62 +62,81 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gonk'):
 if CONFIG['MOZ_WIDGET_TOOLKIT'] in {
     'android',
     'cocoa',
+    'gtk2',
+    'gtk3',
     'uikit',
     'gonk',
     'qt',
-  } or CONFIG['MOZ_WIDGET_GTK']:
+  }:
     DEFINES['SK_FONTHOST_DOES_NOT_USE_FONTMGR'] = 1
 
-if CONFIG['GKMEDIAS_SHARED_LIBRARY']:
-    DEFINES['SKIA_DLL'] = 1
-    DEFINES['GR_DLL'] = 1
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    DEFINES['UNICODE'] = True
+    DEFINES['_UNICODE'] = True
+    # These are the usual dwrite default rendering param values
+    DEFINES['SK_GAMMA_EXPONENT'] = 1.8
+    DEFINES['SK_GAMMA_CONTRAST'] = 0.5
+    UNIFIED_SOURCES += [
+        'skia/src/fonts/SkFontMgr_indirect.cpp',
+        'skia/src/fonts/SkRemotableFontMgr.cpp',
+    ]
 
 # We should autogenerate these SSE related flags.
 
 if CONFIG['_MSC_VER']:
     # MSVC doesn't need special compiler flags, but Skia needs to be told that these files should
     # be built with the required SSE level or it will simply compile in stubs and cause runtime crashes
-    SOURCES['trunk/src/opts/SkBitmapFilter_opts_SSE2.cpp'].flags += ['-DSK_CPU_SSE_LEVEL=20']
-    SOURCES['trunk/src/opts/SkBitmapProcState_opts_SSE2.cpp'].flags += ['-DSK_CPU_SSE_LEVEL=20']
-    SOURCES['trunk/src/opts/SkBitmapProcState_opts_SSSE3.cpp'].flags += ['-DSK_CPU_SSE_LEVEL=31']
-    SOURCES['trunk/src/opts/SkBlitRect_opts_SSE2.cpp'].flags += ['-DSK_CPU_SSE_LEVEL=20']
-    SOURCES['trunk/src/opts/SkBlitRow_opts_SSE2.cpp'].flags += ['-DSK_CPU_SSE_LEVEL=20']
-    SOURCES['trunk/src/opts/SkBlurImage_opts_SSE2.cpp'].flags += ['-DSK_CPU_SSE_LEVEL=20']
-    SOURCES['trunk/src/opts/SkBlurImage_opts_SSE4.cpp'].flags += ['-DSK_CPU_SSE_LEVEL=41']
-    SOURCES['trunk/src/opts/SkMorphology_opts_SSE2.cpp'].flags += ['-DSK_CPU_SSE_LEVEL=20']
-    SOURCES['trunk/src/opts/SkUtils_opts_SSE2.cpp'].flags += ['-DSK_CPU_SSE_LEVEL=20']
-    SOURCES['trunk/src/opts/SkXfermode_opts_SSE2.cpp'].flags += ['-DSK_CPU_SSE_LEVEL=20']
-
+    SOURCES['skia/src/opts/SkBitmapFilter_opts_SSE2.cpp'].flags += ['/arch:SSE2 -DSK_CPU_SSE_LEVEL=20']
+    SOURCES['skia/src/opts/SkBitmapProcState_opts_SSE2.cpp'].flags += ['/arch:SSE2 -DSK_CPU_SSE_LEVEL=20']
+    SOURCES['skia/src/opts/SkBitmapProcState_opts_SSSE3.cpp'].flags += ['/arch:SSE2 -DSK_CPU_SSE_LEVEL=31']
+    SOURCES['skia/src/opts/SkBlitRow_opts_SSE2.cpp'].flags += ['/arch:SSE2 -DSK_CPU_SSE_LEVEL=20']
+    SOURCES['skia/src/opts/SkOpts_sse2.cpp'].flags += ['/arch:SSE2 -DSK_CPU_SSE_LEVEL=20']
+    SOURCES['skia/src/opts/SkOpts_ssse3.cpp'].flags += ['/arch:SSE2 -DSK_CPU_SSE_LEVEL=31']
+    SOURCES['skia/src/opts/SkOpts_sse41.cpp'].flags += ['/arch:SSE2 -DSK_CPU_SSE_LEVEL=41']
 if CONFIG['INTEL_ARCHITECTURE'] and CONFIG['GNU_CC']:
-    SOURCES['trunk/src/opts/SkBitmapFilter_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
-    SOURCES['trunk/src/opts/SkBitmapProcState_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
-    SOURCES['trunk/src/opts/SkBitmapProcState_opts_SSSE3.cpp'].flags += ['-mssse3']
-    SOURCES['trunk/src/opts/SkBlitRect_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
-    SOURCES['trunk/src/opts/SkBlitRow_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
-    SOURCES['trunk/src/opts/SkBlurImage_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
-    SOURCES['trunk/src/opts/SkBlurImage_opts_SSE4.cpp'].flags += ['-msse4.1']
-    SOURCES['trunk/src/opts/SkMorphology_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
-    SOURCES['trunk/src/opts/SkUtils_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
-    SOURCES['trunk/src/opts/SkXfermode_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
+    SOURCES['skia/src/opts/SkBitmapFilter_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
+    SOURCES['skia/src/opts/SkBitmapProcState_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
+    SOURCES['skia/src/opts/SkBitmapProcState_opts_SSSE3.cpp'].flags += ['-mssse3']
+    SOURCES['skia/src/opts/SkBlitRow_opts_SSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
+    SOURCES['skia/src/opts/SkOpts_sse2.cpp'].flags += CONFIG['SSE2_FLAGS']
+    SOURCES['skia/src/opts/SkOpts_ssse3.cpp'].flags += ['-mssse3']
+    SOURCES['skia/src/opts/SkOpts_sse41.cpp'].flags += ['-msse4.1']
 elif CONFIG['CPU_ARCH'] == 'arm' and CONFIG['GNU_CC'] and CONFIG['BUILD_ARM_NEON']:
-    DEFINES['__ARM_HAVE_OPTIONAL_NEON_SUPPORT'] = 1
-    DEFINES['USE_ANDROID_NDK_CPU_FEATURES'] = 0
+    DEFINES['SK_ARM_HAS_OPTIONAL_NEON'] = 1
 elif CONFIG['CLANG_CL']:
-    SOURCES['trunk/src/opts/SkBitmapProcState_opts_SSSE3.cpp'].flags += ['-mssse3']
-    SOURCES['trunk/src/opts/SkBlurImage_opts_SSE4.cpp'].flags += ['-msse4.1']
+    SOURCES['skia/src/opts/SkBitmapProcState_opts_SSSE3.cpp'].flags += ['-mssse3']
+    SOURCES['skia/src/opts/SkOpts_ssse3.cpp'].flags += ['-mssse3']
+    SOURCES['skia/src/opts/SkOpts_sse41.cpp'].flags += ['-msse4.1']
+
+if CONFIG['GNU_CXX'] and CONFIG['CPU_ARCH'] == 'arm':
+    SOURCES['skia/src/opts/SkBlitRow_opts_arm.cpp'].flags += ['-fomit-frame-pointer']
 
 DEFINES['SKIA_IMPLEMENTATION'] = 1
-DEFINES['GR_IMPLEMENTATION'] = 1
 
-if CONFIG['GNU_CXX']:
+if not CONFIG['MOZ_ENABLE_SKIA_GPU']:
+    DEFINES['SK_SUPPORT_GPU'] = 0
+
+# Suppress warnings in third-party code.
+if CONFIG['GNU_CXX'] or CONFIG['CLANG_CL']:
     CXXFLAGS += [
+        '-Wno-deprecated-declarations',
         '-Wno-overloaded-virtual',
+        '-Wno-shadow',
+        '-Wno-sign-compare',
         '-Wno-unused-function',
     ]
-    if not CONFIG['CLANG_CXX']:
-        CXXFLAGS += ['-Wno-logical-op']
-    if CONFIG['CPU_ARCH'] == 'arm':
-        SOURCES['trunk/src/opts/SkBlitRow_opts_arm.cpp'].flags += ['-fomit-frame-pointer']
+if CONFIG['GNU_CXX'] and not CONFIG['CLANG_CXX'] and not CONFIG['CLANG_CL']:
+    CXXFLAGS += [
+        '-Wno-logical-op',
+        '-Wno-maybe-uninitialized',
+    ]
+if CONFIG['CLANG_CXX'] or CONFIG['CLANG_CL']:
+    CXXFLAGS += [
+        '-Wno-implicit-fallthrough',
+        '-Wno-inconsistent-missing-override',
+        '-Wno-macro-redefined',
+        '-Wno-unused-private-field',
+    ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk2', 'gtk3', 'android', 'gonk', 'qt'):
     CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
@@ -157,28 +150,9 @@ import json
 
 platforms = ['linux', 'mac', 'android', 'win']
 
-custom_includes = {
-  'trunk/src/ports/SkAtomics_sync.h': True,
-  'trunk/src/ports/SkAtomics_win.h': True,
-  'trunk/src/ports/SkBarriers_x86.h': True,
-  'trunk/src/ports/SkBarriers_arm.h': True,
-  'trunk/src/ports/SkBarriers_tsan.h': True,
-  'trunk/src/ports/SkMutex_pthread.h': True,
-  'trunk/src/ports/SkMutex_win.h': True
-}
-
-def generate_includes():
-  includes = {}
-  for root, dirs, files in os.walk('trunk/include'):
-    for name in files:
-      if name.endswith('.h'):
-        includes[os.path.join(root, name)] = True
-
-  return dict(includes.items() + custom_includes.items())
-
 def generate_opt_sources():
   opt_sources = {'opts': {''}}
-  for root, dirs, files in os.walk('trunk/src/opts'):
+  for root, dirs, files in os.walk('skia/src/opts'):
     for name in files:
       if name.endswith('.cpp'):
         opt_sources['opts'].add(os.path.join(root, name))
@@ -189,13 +163,13 @@ def generate_platform_sources():
   sources = {}
 
   for plat in platforms:
-    if os.system("cd trunk && GYP_GENERATORS=dump_mozbuild ./gyp_skia -D OS=%s gyp/skia_lib.gyp" % plat) != 0:
+    if os.system("cd skia && GYP_GENERATORS=dump_mozbuild ./gyp_skia -D OS=%s -D host_os=linux gyp/skia_lib.gyp" % plat) != 0:
       print 'Failed to generate sources for ' + plat
       continue
 
 
-    f = open('trunk/sources.json');
-    sources[plat] = set(v.replace('../', 'trunk/') for v in json.load(f));
+    f = open('skia/sources.json');
+    sources[plat] = set(v.replace('../', 'skia/') for v in json.load(f));
     f.close()
 
   return dict(sources.items() + generate_opt_sources().items())
@@ -203,34 +177,56 @@ def generate_platform_sources():
 
 def generate_separated_sources(platform_sources):
   blacklist = [
-    'ChromeUtils',
-    'SkImageDecoder_',
-    '_gif',
-    'SkFontConfigParser_android',
-    'SkJpeg',
+    'experimental',
     'SkXML',
-    'SkCity',
     'GrGLCreateNativeInterface',
+    'GrGLCreateNullInterface',
+    'GrGLAssembleInterface',
+    'GrGLTestInterface',
     'fontconfig',
-    'SkCondVar',
     'SkThreadUtils_pthread_',
-    'SkImage_Codec',
-    'SkBitmapChecksummer',
-    'SkNativeGLContext',
     'SkFontConfig',
-    'SkFontHost_win_dw',
     'SkFontMgr_android',
-    'SkForceLinking',
-    'SkMovie',
-    'SkImageDecoder',
-    'SkImageEncoder',
-    'SkBitmapHasher',
+    'SkFontMgr_custom',
+    'SkFontHost_FreeType.cpp',
+    'Movie',
+    'ImageEncoder',
+    'skia/src/c/',
+    'skia/src/effects/Gr',
+    'skia/src/effects/Sk',
+    'skia/src/fonts/',
+    'skia/src/images/',
+    'skia/src/ports/SkImageGenerator',
+    'SkBitmapRegion',
+    'SkLightingShader',
+    'codec',
     'SkWGL',
-    'SkImages',
-    'SkDiscardableMemory_ashmem',
     'SkMemory_malloc',
+    'SkOpts_',
     'opts_check_x86',
     'third_party',
+    # unused in skia/src/utils
+    'SkBitSet',
+    'SkBoundaryPatch',
+    'SkCamera',
+    'SkCanvasStack',
+    'SkCanvasStateUtils',
+    'SkDumpCanvas',
+    'SkFrontBufferedStream',
+    'SkInterpolator',
+    'SkLayer',
+    'SkMatrix44',
+    'SkMeshUtils',
+    'SkMD5',
+    'SkNinePatch',
+    'SkNullCanvas',
+    'SkNWayCanvas',
+    'SkPaintFilterCanvas',
+    'SkParseColor',
+    'SkPatchGrid',
+    'SkRTConf',
+    'SkTextBox',
+    'SkWhitelistTypefaces',
   ]
 
   def isblacklisted(value):
@@ -242,49 +238,44 @@ def generate_separated_sources(platform_sources):
 
   separated = defaultdict(set, {
     'common': {
-      #'trunk/src/effects/gradients/SkGradientTileProc.cpp',
-      'trunk/src/gpu/gl/GrGLCreateNativeInterface_none.cpp',
-      'trunk/src/ports/SkDiscardableMemory_none.cpp',
-      'trunk/src/ports/SkImageDecoder_empty.cpp',
-      'trunk/src/ports/SkMemory_mozalloc.cpp',
-      # 'trunk/src/images/SkImages.cpp',
-      # 'trunk/src/images/SkImageRef.cpp',
-      # 'trunk/src/images/SkImageRef_GlobalPool.cpp',
-      # 'trunk/src/images/SkImageRefPool.cpp',
-      # 'trunk/src/images/SkImageDecoder.cpp',
-      # 'trunk/src/images/SkImageDecoder_Factory.cpp',
+      'skia/src/effects/SkBlurImageFilter.cpp',
+      'skia/src/effects/SkDashPathEffect.cpp',
+      'skia/src/effects/SkGpuBlurUtils.cpp',
+      'skia/src/effects/SkImageSource.cpp',
+      'skia/src/effects/SkLayerRasterizer.cpp',
+      'skia/src/gpu/gl/GrGLCreateNativeInterface_none.cpp',
+      'skia/src/ports/SkDiscardableMemory_none.cpp',
+      'skia/src/ports/SkMemory_mozalloc.cpp',
+      'skia/src/ports/SkImageEncoder_none.cpp',
+      'skia/src/ports/SkImageGenerator_none.cpp',
     },
     'android': {
-      # 'trunk/src/ports/SkDebug_android.cpp',
-      'trunk/src/ports/SkFontHost_android_old.cpp',
-      'trunk/src/ports/SkFontHost_cairo.cpp',
-      # 'trunk/src/ports/SkFontHost_FreeType.cpp',
-      # 'trunk/src/ports/SkFontHost_FreeType_common.cpp',
-      # 'trunk/src/ports/SkThread_pthread.cpp',
-      # 'trunk/src/ports/SkPurgeableMemoryBlock_android.cpp',
-      # 'trunk/src/ports/SkTime_Unix.cpp',
-      # 'trunk/src/utils/SkThreadUtils_pthread.cpp',
-      # 'trunk/src/images/SkImageRef_ashmem.cpp',
-      # 'trunk/src/utils/android/ashmem.cpp',
+      # 'skia/src/ports/SkDebug_android.cpp',
+      'skia/src/ports/SkFontHost_cairo.cpp',
+      # 'skia/src/ports/SkFontHost_FreeType.cpp',
+      # 'skia/src/ports/SkFontHost_FreeType_common.cpp',
+      # 'skia/src/ports/SkTime_Unix.cpp',
+      # 'skia/src/utils/SkThreadUtils_pthread.cpp',
     },
     'linux': {
-      'trunk/src/ports/SkFontHost_cairo.cpp',
+      'skia/src/ports/SkFontHost_cairo.cpp',
     },
     'intel': {
       # There is currently no x86-specific opt for SkTextureCompression
-      'trunk/src/opts/opts_check_x86.cpp',
-      'trunk/src/opts/SkTextureCompression_opts_none.cpp',
+      'skia/src/opts/opts_check_x86.cpp',
+      'skia/src/opts/SkOpts_sse2.cpp',
+      'skia/src/opts/SkOpts_ssse3.cpp',
+      'skia/src/opts/SkOpts_sse41.cpp',
     },
     'arm': {
-      'trunk/src/opts/SkUtils_opts_arm.cpp',
-      'trunk/src/core/SkUtilsArm.cpp',
+      'skia/src/core/SkUtilsArm.cpp',
     },
     'neon': {
-      'trunk/src/opts/SkBitmapProcState_arm_neon.cpp',
+      'skia/src/opts/SkOpts_neon.cpp',
+      'skia/src/opts/SkBitmapProcState_arm_neon.cpp',
     },
-    'none': {
-      'trunk/src/opts/SkUtils_opts_none.cpp',
-    }
+    'none': set(),
+    'gpu': set()
   })
 
   for plat in platform_sources.keys():
@@ -305,6 +296,8 @@ def generate_separated_sources(platform_sources):
         key = 'arm'
       elif '_none' in value:
         key = 'none'
+      elif 'gpu' in value or 'Gpu' in value:
+        key = 'gpu'
       elif all(value in platform_sources.get(p, {})
                for p in platforms if p != plat):
         key = 'common'
@@ -350,15 +343,21 @@ def write_sources(f, values, indent):
     'SkBlitter_Sprite.cpp',
     'SkBlitRow_opts_arm.cpp',
     'SkScan_Antihair.cpp',
-    'SkCondVar.cpp',
     'SkParse.cpp',
-    'GrAddPathRenderers_default.cpp',
-    'GrDistanceFieldTextContext.cpp',
-    'SkSHA1.cpp',
-    'SkMD5.cpp',
     'SkPictureData.cpp',
-    'SkScaledImageCache.cpp',
+    'SkMatrixConvolutionImageFilter.cpp',
     'opts_check_x86.cpp',
+    'GrDrawContext',
+    'GrResourceCache',
+    'GrAA',
+    'GrGL',
+    'GrBatchAtlas.cpp',
+    'SkImage_Gpu.cpp',
+    'SkPathOpsDebug.cpp',
+    'SkParsePath.cpp',
+    'SkOpts',
+    'SkRecorder.cpp',
+    'SkXfermode',
   ]
 
   def isblacklisted(value):
@@ -400,15 +399,16 @@ def write_list(f, name, values, indent):
   write_indent(indent)
   f.write(']\n')
 
-def write_mozbuild(includes, sources):
+def write_mozbuild(sources):
   filename = 'moz.build'
   f = open(filename, 'w')
 
   f.write(header)
 
-  write_list(f, 'EXPORTS.skia', includes, 0)
-
   write_sources(f, sources['common'], 0)
+
+  f.write("if CONFIG['MOZ_ENABLE_SKIA_GPU']:\n")
+  write_sources(f, sources['gpu'], 4)
 
   f.write("if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gonk'):\n")
   write_sources(f, sources['android'], 4)
@@ -416,7 +416,7 @@ def write_mozbuild(includes, sources):
   f.write("if CONFIG['MOZ_WIDGET_TOOLKIT'] in {'cocoa', 'uikit'}:\n")
   write_sources(f, sources['mac'], 4)
 
-  f.write("if CONFIG['MOZ_WIDGET_GTK']:\n")
+  f.write("if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:\n")
   write_sources(f, sources['linux'], 4)
 
   f.write("if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':\n")
@@ -447,10 +447,9 @@ def write_mozbuild(includes, sources):
   print 'Wrote ' + filename
 
 def main():
-  includes = generate_includes()
   platform_sources = generate_platform_sources()
   separated_sources = generate_separated_sources(platform_sources)
-  write_mozbuild(includes, separated_sources)
+  write_mozbuild(separated_sources)
 
 
 if __name__ == '__main__':

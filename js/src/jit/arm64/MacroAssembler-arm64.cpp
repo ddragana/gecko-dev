@@ -12,6 +12,8 @@
 #include "jit/BaselineFrame.h"
 #include "jit/MacroAssembler.h"
 
+#include "jit/MacroAssembler-inl.h"
+
 namespace js {
 namespace jit {
 
@@ -32,52 +34,6 @@ MacroAssembler::clampDoubleToUint8(FloatRegister input, Register output)
 
     Cmp(dest, Operand(0));
     Csel(dest, dest, wzr, GreaterThan);
-}
-
-void
-MacroAssemblerCompat::buildFakeExitFrame(Register scratch, uint32_t* offset)
-{
-    mozilla::DebugOnly<uint32_t> initialDepth = framePushed();
-    uint32_t descriptor = MakeFrameDescriptor(framePushed(), JitFrame_IonJS);
-
-    asMasm().Push(Imm32(descriptor)); // descriptor_
-
-    enterNoPool(3);
-    Label fakeCallsite;
-    Adr(ARMRegister(scratch, 64), &fakeCallsite);
-    asMasm().Push(scratch);
-    bind(&fakeCallsite);
-    uint32_t pseudoReturnOffset = currentOffset();
-    leaveNoPool();
-
-    MOZ_ASSERT(framePushed() == initialDepth + ExitFrameLayout::Size());
-
-    *offset = pseudoReturnOffset;
-}
-
-void
-MacroAssemblerCompat::callWithExitFrame(Label* target)
-{
-    uint32_t descriptor = MakeFrameDescriptor(framePushed(), JitFrame_IonJS);
-    Push(Imm32(descriptor)); // descriptor
-    asMasm().call(target);
-}
-
-void
-MacroAssemblerCompat::callWithExitFrame(JitCode* target)
-{
-    uint32_t descriptor = MakeFrameDescriptor(framePushed(), JitFrame_IonJS);
-    asMasm().Push(Imm32(descriptor));
-    asMasm().call(target);
-}
-
-void
-MacroAssemblerCompat::callWithExitFrame(JitCode* target, Register dynStack)
-{
-    add32(Imm32(framePushed()), dynStack);
-    makeFrameDescriptor(dynStack, JitFrame_IonJS);
-    Push(dynStack); // descriptor
-    asMasm().call(target);
 }
 
 void
@@ -138,8 +94,8 @@ MacroAssemblerCompat::movePatchablePtr(ImmPtr ptr, Register dest)
 
     // Add the entry to the pool, fix up the LDR imm19 offset,
     // and add the completed instruction to the buffer.
-    return armbuffer_.allocEntry(numInst, numPoolEntries,
-                                 (uint8_t*)&instructionScratch, literalAddr);
+    return allocEntry(numInst, numPoolEntries, (uint8_t*)&instructionScratch,
+                      literalAddr);
 }
 
 BufferOffset
@@ -164,8 +120,15 @@ MacroAssemblerCompat::movePatchablePtr(ImmWord ptr, Register dest)
 
     // Add the entry to the pool, fix up the LDR imm19 offset,
     // and add the completed instruction to the buffer.
-    return armbuffer_.allocEntry(numInst, numPoolEntries,
-                                 (uint8_t*)&instructionScratch, literalAddr);
+    return allocEntry(numInst, numPoolEntries, (uint8_t*)&instructionScratch,
+                      literalAddr);
+}
+
+void
+MacroAssemblerCompat::loadPrivate(const Address& src, Register dest)
+{
+    loadPtr(src, dest);
+    asMasm().lshiftPtr(Imm32(1), dest);
 }
 
 void
@@ -180,9 +143,9 @@ MacroAssemblerCompat::handleFailureWithHandlerTail(void* handler)
     Mov(x0, GetStackPointer64());
 
     // Call the handler.
-    setupUnalignedABICall(1, r1);
-    passABIArg(r0);
-    callWithABI(handler);
+    asMasm().setupUnalignedABICall(r1);
+    asMasm().passABIArg(r0);
+    asMasm().callWithABI(handler);
 
     Label entryFrame;
     Label catch_;
@@ -193,11 +156,13 @@ MacroAssemblerCompat::handleFailureWithHandlerTail(void* handler)
     MOZ_ASSERT(GetStackPointer64().Is(x28)); // Lets the code below be a little cleaner.
 
     loadPtr(Address(r28, offsetof(ResumeFromException, kind)), r0);
-    branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_ENTRY_FRAME), &entryFrame);
-    branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_CATCH), &catch_);
-    branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_FINALLY), &finally);
-    branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_FORCED_RETURN), &return_);
-    branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_BAILOUT), &bailout);
+    asMasm().branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_ENTRY_FRAME),
+                      &entryFrame);
+    asMasm().branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_CATCH), &catch_);
+    asMasm().branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_FINALLY), &finally);
+    asMasm().branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_FORCED_RETURN),
+                      &return_);
+    asMasm().branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_BAILOUT), &bailout);
 
     breakpoint(); // Invalid kind.
 
@@ -253,306 +218,105 @@ MacroAssemblerCompat::handleFailureWithHandlerTail(void* handler)
 }
 
 void
-MacroAssemblerCompat::setupABICall(uint32_t args)
-{
-    MOZ_ASSERT(!inCall_);
-    inCall_ = true;
-
-    args_ = args;
-    usedOutParam_ = false;
-    passedIntArgs_ = 0;
-    passedFloatArgs_ = 0;
-    passedArgTypes_ = 0;
-    stackForCall_ = ShadowStackSpace;
-}
-
-void
-MacroAssemblerCompat::setupUnalignedABICall(uint32_t args, Register scratch)
-{
-    setupABICall(args);
-    dynamicAlignment_ = true;
-
-    int64_t alignment = ~(int64_t(ABIStackAlignment) - 1);
-    ARMRegister scratch64(scratch, 64);
-
-    // Always save LR -- Baseline ICs assume that LR isn't modified.
-    push(lr);
-
-    // Unhandled for sp -- needs slightly different logic.
-    MOZ_ASSERT(!GetStackPointer64().Is(sp));
-
-    // Remember the stack address on entry.
-    Mov(scratch64, GetStackPointer64());
-
-    // Make alignment, including the effective push of the previous sp.
-    Sub(GetStackPointer64(), GetStackPointer64(), Operand(8));
-    And(GetStackPointer64(), GetStackPointer64(), Operand(alignment));
-
-    // If the PseudoStackPointer is used, sp must be <= psp before a write is valid.
-    syncStackPtr();
-
-    // Store previous sp to the top of the stack, aligned.
-    Str(scratch64, MemOperand(GetStackPointer64(), 0));
-}
-
-void
-MacroAssemblerCompat::passABIArg(const MoveOperand& from, MoveOp::Type type)
-{
-    if (!enoughMemory_)
-        return;
-
-    Register activeSP = Register::FromCode(GetStackPointer64().code());
-    if (type == MoveOp::GENERAL) {
-        Register dest;
-        passedArgTypes_ = (passedArgTypes_ << ArgType_Shift) | ArgType_General;
-        if (GetIntArgReg(passedIntArgs_++, passedFloatArgs_, &dest)) {
-            if (!from.isGeneralReg() || from.reg() != dest)
-                enoughMemory_ = moveResolver_.addMove(from, MoveOperand(dest), type);
-            return;
-        }
-
-        enoughMemory_ = moveResolver_.addMove(from, MoveOperand(activeSP, stackForCall_), type);
-        stackForCall_ += sizeof(int64_t);
-        return;
-    }
-
-    MOZ_ASSERT(type == MoveOp::FLOAT32 || type == MoveOp::DOUBLE);
-    if (type == MoveOp::FLOAT32)
-        passedArgTypes_ = (passedArgTypes_ << ArgType_Shift) | ArgType_Float32;
-    else
-        passedArgTypes_ = (passedArgTypes_ << ArgType_Shift) | ArgType_Double;
-
-    FloatRegister fdest;
-    if (GetFloatArgReg(passedIntArgs_, passedFloatArgs_++, &fdest)) {
-        if (!from.isFloatReg() || from.floatReg() != fdest)
-            enoughMemory_ = moveResolver_.addMove(from, MoveOperand(fdest), type);
-        return;
-    }
-
-    enoughMemory_ = moveResolver_.addMove(from, MoveOperand(activeSP, stackForCall_), type);
-    switch (type) {
-      case MoveOp::FLOAT32: stackForCall_ += sizeof(float);  break;
-      case MoveOp::DOUBLE:  stackForCall_ += sizeof(double); break;
-      default: MOZ_CRASH("Unexpected float register class argument type");
-    }
-}
-
-void
-MacroAssemblerCompat::passABIArg(Register reg)
-{
-    passABIArg(MoveOperand(reg), MoveOp::GENERAL);
-}
-
-void
-MacroAssemblerCompat::passABIArg(FloatRegister reg, MoveOp::Type type)
-{
-    passABIArg(MoveOperand(reg), type);
-}
-void
-MacroAssemblerCompat::passABIOutParam(Register reg)
-{
-    if (!enoughMemory_)
-        return;
-    MOZ_ASSERT(!usedOutParam_);
-    usedOutParam_ = true;
-    if (reg == r8)
-        return;
-    enoughMemory_ = moveResolver_.addMove(MoveOperand(reg), MoveOperand(r8), MoveOp::GENERAL);
-
-}
-
-void
-MacroAssemblerCompat::callWithABIPre(uint32_t* stackAdjust)
-{
-    *stackAdjust = stackForCall_;
-    // ARM64 /really/ wants the stack to always be aligned.  Since we're already tracking it
-    // getting it aligned for an abi call is pretty easy.
-    *stackAdjust += ComputeByteAlignment(*stackAdjust, StackAlignment);
-    asMasm().reserveStack(*stackAdjust);
-    {
-        moveResolver_.resolve();
-        MoveEmitter emitter(asMasm());
-        emitter.emit(moveResolver_);
-        emitter.finish();
-    }
-
-    // Call boundaries communicate stack via sp.
-    syncStackPtr();
-}
-
-void
-MacroAssemblerCompat::callWithABIPost(uint32_t stackAdjust, MoveOp::Type result)
-{
-    // Call boundaries communicate stack via sp.
-    if (!GetStackPointer64().Is(sp))
-        Mov(GetStackPointer64(), sp);
-
-    inCall_ = false;
-    asMasm().freeStack(stackAdjust);
-
-    // Restore the stack pointer from entry.
-    if (dynamicAlignment_)
-        Ldr(GetStackPointer64(), MemOperand(GetStackPointer64(), 0));
-
-    // Restore LR.
-    pop(lr);
-
-    // TODO: This one shouldn't be necessary -- check that callers
-    // aren't enforcing the ABI themselves!
-    syncStackPtr();
-
-    // If the ABI's return regs are where ION is expecting them, then
-    // no other work needs to be done.
-}
-
-#if defined(DEBUG) && defined(JS_SIMULATOR_ARM64)
-static void
-AssertValidABIFunctionType(uint32_t passedArgTypes)
-{
-    switch (passedArgTypes) {
-      case Args_General0:
-      case Args_General1:
-      case Args_General2:
-      case Args_General3:
-      case Args_General4:
-      case Args_General5:
-      case Args_General6:
-      case Args_General7:
-      case Args_General8:
-      case Args_Double_None:
-      case Args_Int_Double:
-      case Args_Float32_Float32:
-      case Args_Double_Double:
-      case Args_Double_Int:
-      case Args_Double_DoubleInt:
-      case Args_Double_DoubleDouble:
-      case Args_Double_DoubleDoubleDouble:
-      case Args_Double_DoubleDoubleDoubleDouble:
-      case Args_Double_IntDouble:
-      case Args_Int_IntDouble:
-        break;
-      default:
-        MOZ_CRASH("Unexpected type");
-    }
-}
-#endif // DEBUG && JS_SIMULATOR_ARM64
-
-void
-MacroAssemblerCompat::callWithABI(void* fun, MoveOp::Type result)
-{
-#ifdef JS_SIMULATOR_ARM64
-    MOZ_ASSERT(passedIntArgs_ + passedFloatArgs_ <= 15);
-    passedArgTypes_ <<= ArgType_Shift;
-    switch (result) {
-      case MoveOp::GENERAL: passedArgTypes_ |= ArgType_General; break;
-      case MoveOp::DOUBLE:  passedArgTypes_ |= ArgType_Double;  break;
-      case MoveOp::FLOAT32: passedArgTypes_ |= ArgType_Float32; break;
-      default: MOZ_CRASH("Invalid return type");
-    }
-# ifdef DEBUG
-    AssertValidABIFunctionType(passedArgTypes_);
-# endif
-    ABIFunctionType type = ABIFunctionType(passedArgTypes_);
-    fun = vixl::Simulator::RedirectNativeFunction(fun, type);
-#endif // JS_SIMULATOR_ARM64
-
-    uint32_t stackAdjust;
-    callWithABIPre(&stackAdjust);
-    asMasm().call(ImmPtr(fun));
-    callWithABIPost(stackAdjust, result);
-}
-
-void
-MacroAssemblerCompat::callWithABI(Register fun, MoveOp::Type result)
-{
-    movePtr(fun, ip0);
-
-    uint32_t stackAdjust;
-    callWithABIPre(&stackAdjust);
-    asMasm().call(ip0);
-    callWithABIPost(stackAdjust, result);
-}
-
-void
-MacroAssemblerCompat::callWithABI(AsmJSImmPtr imm, MoveOp::Type result)
-{
-    uint32_t stackAdjust;
-    callWithABIPre(&stackAdjust);
-    asMasm().call(imm);
-    callWithABIPost(stackAdjust, result);
-}
-
-void
-MacroAssemblerCompat::callWithABI(Address fun, MoveOp::Type result)
-{
-    loadPtr(fun, ip0);
-
-    uint32_t stackAdjust;
-    callWithABIPre(&stackAdjust);
-    asMasm().call(ip0);
-    callWithABIPost(stackAdjust, result);
-}
-
-void
-MacroAssemblerCompat::branchPtrInNurseryRange(Condition cond, Register ptr, Register temp,
-                                              Label* label)
-{
-    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
-    MOZ_ASSERT(ptr != temp);
-    MOZ_ASSERT(ptr != ScratchReg && ptr != ScratchReg2); // Both may be used internally.
-    MOZ_ASSERT(temp != ScratchReg && temp != ScratchReg2);
-
-    const Nursery& nursery = GetJitContext()->runtime->gcNursery();
-    movePtr(ImmWord(-ptrdiff_t(nursery.start())), temp);
-    addPtr(ptr, temp);
-    branchPtr(cond == Assembler::Equal ? Assembler::Below : Assembler::AboveOrEqual,
-              temp, ImmWord(nursery.nurserySize()), label);
-}
-
-void
-MacroAssemblerCompat::branchValueIsNurseryObject(Condition cond, ValueOperand value, Register temp,
-                                                 Label* label)
-{
-    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
-    MOZ_ASSERT(temp != ScratchReg && temp != ScratchReg2); // Both may be used internally.
-
-    // 'Value' representing the start of the nursery tagged as a JSObject
-    const Nursery& nursery = GetJitContext()->runtime->gcNursery();
-    Value start = ObjectValue(*reinterpret_cast<JSObject*>(nursery.start()));
-
-    movePtr(ImmWord(-ptrdiff_t(start.asRawBits())), temp);
-    addPtr(value.valueReg(), temp);
-    branchPtr(cond == Assembler::Equal ? Assembler::Below : Assembler::AboveOrEqual,
-              temp, ImmWord(nursery.nurserySize()), label);
-}
-
-void
-MacroAssemblerCompat::callAndPushReturnAddress(Label* label)
-{
-    // FIXME: Jandem said he would refactor the code to avoid making
-    // this instruction required, but probably forgot about it.
-    // Instead of implementing this function, we should make it unnecessary.
-    Label ret;
-    {
-        vixl::UseScratchRegisterScope temps(this);
-        const ARMRegister scratch64 = temps.AcquireX();
-
-        Adr(scratch64, &ret);
-        asMasm().Push(scratch64.asUnsized());
-    }
-
-    Bl(label);
-    bind(&ret);
-}
-
-void
 MacroAssemblerCompat::breakpoint()
 {
     static int code = 0xA77;
     Brk((code++) & 0xffff);
 }
 
+template<typename T>
+void
+MacroAssemblerCompat::compareExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem,
+                                                     Register oldval, Register newval,
+                                                     Register temp, AnyRegister output)
+{
+    switch (arrayType) {
+      case Scalar::Int8:
+        compareExchange8SignExtend(mem, oldval, newval, output.gpr());
+        break;
+      case Scalar::Uint8:
+        compareExchange8ZeroExtend(mem, oldval, newval, output.gpr());
+        break;
+      case Scalar::Int16:
+        compareExchange16SignExtend(mem, oldval, newval, output.gpr());
+        break;
+      case Scalar::Uint16:
+        compareExchange16ZeroExtend(mem, oldval, newval, output.gpr());
+        break;
+      case Scalar::Int32:
+        compareExchange32(mem, oldval, newval, output.gpr());
+        break;
+      case Scalar::Uint32:
+        // At the moment, the code in MCallOptimize.cpp requires the output
+        // type to be double for uint32 arrays.  See bug 1077305.
+        MOZ_ASSERT(output.isFloat());
+        compareExchange32(mem, oldval, newval, temp);
+        convertUInt32ToDouble(temp, output.fpu());
+        break;
+      default:
+        MOZ_CRASH("Invalid typed array type");
+    }
+}
+
+template void
+MacroAssemblerCompat::compareExchangeToTypedIntArray(Scalar::Type arrayType, const Address& mem,
+                                                     Register oldval, Register newval, Register temp,
+                                                     AnyRegister output);
+template void
+MacroAssemblerCompat::compareExchangeToTypedIntArray(Scalar::Type arrayType, const BaseIndex& mem,
+                                                     Register oldval, Register newval, Register temp,
+                                                     AnyRegister output);
+
+template<typename T>
+void
+MacroAssemblerCompat::atomicExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem,
+                                                    Register value, Register temp, AnyRegister output)
+{
+    switch (arrayType) {
+      case Scalar::Int8:
+        atomicExchange8SignExtend(mem, value, output.gpr());
+        break;
+      case Scalar::Uint8:
+        atomicExchange8ZeroExtend(mem, value, output.gpr());
+        break;
+      case Scalar::Int16:
+        atomicExchange16SignExtend(mem, value, output.gpr());
+        break;
+      case Scalar::Uint16:
+        atomicExchange16ZeroExtend(mem, value, output.gpr());
+        break;
+      case Scalar::Int32:
+        atomicExchange32(mem, value, output.gpr());
+        break;
+      case Scalar::Uint32:
+        // At the moment, the code in MCallOptimize.cpp requires the output
+        // type to be double for uint32 arrays.  See bug 1077305.
+        MOZ_ASSERT(output.isFloat());
+        atomicExchange32(mem, value, temp);
+        convertUInt32ToDouble(temp, output.fpu());
+        break;
+      default:
+        MOZ_CRASH("Invalid typed array type");
+    }
+}
+
+template void
+MacroAssemblerCompat::atomicExchangeToTypedIntArray(Scalar::Type arrayType, const Address& mem,
+                                                    Register value, Register temp, AnyRegister output);
+template void
+MacroAssemblerCompat::atomicExchangeToTypedIntArray(Scalar::Type arrayType, const BaseIndex& mem,
+                                                    Register value, Register temp, AnyRegister output);
+
 //{{{ check_macroassembler_style
+// ===============================================================
+// MacroAssembler high-level usage.
+
+void
+MacroAssembler::flush()
+{
+    Assembler::flush();
+}
+
 // ===============================================================
 // Stack manipulation functions.
 
@@ -645,6 +409,13 @@ MacroAssembler::Push(Register reg)
 }
 
 void
+MacroAssembler::Push(Register reg1, Register reg2, Register reg3, Register reg4)
+{
+    push(reg1, reg2, reg3, reg4);
+    adjustFrame(4 * sizeof(intptr_t));
+}
+
+void
 MacroAssembler::Push(const Imm32 imm)
 {
     push(imm);
@@ -687,6 +458,12 @@ MacroAssembler::Pop(Register reg)
 }
 
 void
+MacroAssembler::Pop(FloatRegister f)
+{
+    MOZ_CRASH("NYI: Pop(FloatRegister)");
+}
+
+void
 MacroAssembler::Pop(const ValueOperand& val)
 {
     pop(val);
@@ -705,18 +482,20 @@ MacroAssembler::reserveStack(uint32_t amount)
 // ===============================================================
 // Simple call functions.
 
-void
+CodeOffset
 MacroAssembler::call(Register reg)
 {
     syncStackPtr();
     Blr(ARMRegister(reg, 64));
+    return CodeOffset(currentOffset());
 }
 
-void
+CodeOffset
 MacroAssembler::call(Label* label)
 {
     syncStackPtr();
     Bl(label);
+    return CodeOffset(currentOffset());
 }
 
 void
@@ -734,7 +513,7 @@ MacroAssembler::call(ImmPtr imm)
 }
 
 void
-MacroAssembler::call(AsmJSImmPtr imm)
+MacroAssembler::call(wasm::SymbolicAddress imm)
 {
     vixl::UseScratchRegisterScope temps(this);
     const Register scratch = temps.AcquireX().asUnsized();
@@ -753,6 +532,304 @@ MacroAssembler::call(JitCode* c)
     addPendingJump(off, ImmPtr(c->raw()), Relocation::JITCODE);
     blr(scratch64);
 }
+
+CodeOffset
+MacroAssembler::callWithPatch()
+{
+    MOZ_CRASH("NYI");
+    return CodeOffset();
+}
+void
+MacroAssembler::patchCall(uint32_t callerOffset, uint32_t calleeOffset)
+{
+    MOZ_CRASH("NYI");
+}
+
+CodeOffset
+MacroAssembler::thunkWithPatch()
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::patchThunk(uint32_t thunkOffset, uint32_t targetOffset)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::repatchThunk(uint8_t* code, uint32_t thunkOffset, uint32_t targetOffset)
+{
+    MOZ_CRASH("NYI");
+}
+
+CodeOffset
+MacroAssembler::nopPatchableToNearJump()
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::patchNopToNearJump(uint8_t* jump, uint8_t* target)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::patchNearJumpToNop(uint8_t* jump)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::pushReturnAddress()
+{
+    push(lr);
+}
+
+void
+MacroAssembler::popReturnAddress()
+{
+    pop(lr);
+}
+
+// ===============================================================
+// ABI function calls.
+
+void
+MacroAssembler::setupUnalignedABICall(Register scratch)
+{
+    setupABICall();
+    dynamicAlignment_ = true;
+
+    int64_t alignment = ~(int64_t(ABIStackAlignment) - 1);
+    ARMRegister scratch64(scratch, 64);
+
+    // Always save LR -- Baseline ICs assume that LR isn't modified.
+    push(lr);
+
+    // Unhandled for sp -- needs slightly different logic.
+    MOZ_ASSERT(!GetStackPointer64().Is(sp));
+
+    // Remember the stack address on entry.
+    Mov(scratch64, GetStackPointer64());
+
+    // Make alignment, including the effective push of the previous sp.
+    Sub(GetStackPointer64(), GetStackPointer64(), Operand(8));
+    And(GetStackPointer64(), GetStackPointer64(), Operand(alignment));
+
+    // If the PseudoStackPointer is used, sp must be <= psp before a write is valid.
+    syncStackPtr();
+
+    // Store previous sp to the top of the stack, aligned.
+    Str(scratch64, MemOperand(GetStackPointer64(), 0));
+}
+
+void
+MacroAssembler::callWithABIPre(uint32_t* stackAdjust, bool callFromAsmJS)
+{
+    MOZ_ASSERT(inCall_);
+    uint32_t stackForCall = abiArgs_.stackBytesConsumedSoFar();
+
+    // ARM64 /really/ wants the stack to always be aligned.  Since we're already tracking it
+    // getting it aligned for an abi call is pretty easy.
+    MOZ_ASSERT(dynamicAlignment_);
+    stackForCall += ComputeByteAlignment(stackForCall, StackAlignment);
+    *stackAdjust = stackForCall;
+    reserveStack(*stackAdjust);
+    {
+        moveResolver_.resolve();
+        MoveEmitter emitter(*this);
+        emitter.emit(moveResolver_);
+        emitter.finish();
+    }
+
+    // Call boundaries communicate stack via sp.
+    syncStackPtr();
+}
+
+void
+MacroAssembler::callWithABIPost(uint32_t stackAdjust, MoveOp::Type result)
+{
+    // Call boundaries communicate stack via sp.
+    if (!GetStackPointer64().Is(sp))
+        Mov(GetStackPointer64(), sp);
+
+    freeStack(stackAdjust);
+
+    // Restore the stack pointer from entry.
+    if (dynamicAlignment_)
+        Ldr(GetStackPointer64(), MemOperand(GetStackPointer64(), 0));
+
+    // Restore LR.
+    pop(lr);
+
+    // TODO: This one shouldn't be necessary -- check that callers
+    // aren't enforcing the ABI themselves!
+    syncStackPtr();
+
+    // If the ABI's return regs are where ION is expecting them, then
+    // no other work needs to be done.
+
+#ifdef DEBUG
+    MOZ_ASSERT(inCall_);
+    inCall_ = false;
+#endif
+}
+
+void
+MacroAssembler::callWithABINoProfiler(Register fun, MoveOp::Type result)
+{
+    vixl::UseScratchRegisterScope temps(this);
+    const Register scratch = temps.AcquireX().asUnsized();
+    movePtr(fun, scratch);
+
+    uint32_t stackAdjust;
+    callWithABIPre(&stackAdjust);
+    call(scratch);
+    callWithABIPost(stackAdjust, result);
+}
+
+void
+MacroAssembler::callWithABINoProfiler(const Address& fun, MoveOp::Type result)
+{
+    vixl::UseScratchRegisterScope temps(this);
+    const Register scratch = temps.AcquireX().asUnsized();
+    loadPtr(fun, scratch);
+
+    uint32_t stackAdjust;
+    callWithABIPre(&stackAdjust);
+    call(scratch);
+    callWithABIPost(stackAdjust, result);
+}
+
+// ===============================================================
+// Jit Frames.
+
+uint32_t
+MacroAssembler::pushFakeReturnAddress(Register scratch)
+{
+    enterNoPool(3);
+    Label fakeCallsite;
+
+    Adr(ARMRegister(scratch, 64), &fakeCallsite);
+    Push(scratch);
+    bind(&fakeCallsite);
+    uint32_t pseudoReturnOffset = currentOffset();
+
+    leaveNoPool();
+    return pseudoReturnOffset;
+}
+
+// ===============================================================
+// Branch functions
+
+void
+MacroAssembler::branchPtrInNurseryRange(Condition cond, Register ptr, Register temp,
+                                        Label* label)
+{
+    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+    MOZ_ASSERT(ptr != temp);
+    MOZ_ASSERT(ptr != ScratchReg && ptr != ScratchReg2); // Both may be used internally.
+    MOZ_ASSERT(temp != ScratchReg && temp != ScratchReg2);
+
+    const Nursery& nursery = GetJitContext()->runtime->gcNursery();
+    movePtr(ImmWord(-ptrdiff_t(nursery.start())), temp);
+    addPtr(ptr, temp);
+    branchPtr(cond == Assembler::Equal ? Assembler::Below : Assembler::AboveOrEqual,
+              temp, ImmWord(nursery.nurserySize()), label);
+}
+
+void
+MacroAssembler::branchValueIsNurseryObject(Condition cond, const Address& address, Register temp,
+                                           Label* label)
+{
+    branchValueIsNurseryObjectImpl(cond, address, temp, label);
+}
+
+void
+MacroAssembler::branchValueIsNurseryObject(Condition cond, ValueOperand value, Register temp,
+                                           Label* label)
+{
+    branchValueIsNurseryObjectImpl(cond, value.valueReg(), temp, label);
+}
+
+template <typename T>
+void
+MacroAssembler::branchValueIsNurseryObjectImpl(Condition cond, const T& value, Register temp,
+                                               Label* label)
+{
+   MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+    MOZ_ASSERT(temp != ScratchReg && temp != ScratchReg2); // Both may be used internally.
+
+    const Nursery& nursery = GetJitContext()->runtime->gcNursery();
+
+    // Avoid creating a bogus ObjectValue below.
+    if (!nursery.exists())
+        return;
+
+    // 'Value' representing the start of the nursery tagged as a JSObject
+    Value start = ObjectValue(*reinterpret_cast<JSObject*>(nursery.start()));
+
+    movePtr(ImmWord(-ptrdiff_t(start.asRawBits())), temp);
+    addPtr(value, temp);
+    branchPtr(cond == Assembler::Equal ? Assembler::Below : Assembler::AboveOrEqual,
+              temp, ImmWord(nursery.nurserySize()), label);
+}
+
+void
+MacroAssembler::branchTestValue(Condition cond, const ValueOperand& lhs,
+                                const Value& rhs, Label* label)
+{
+    MOZ_ASSERT(cond == Equal || cond == NotEqual);
+    vixl::UseScratchRegisterScope temps(this);
+    const ARMRegister scratch64 = temps.AcquireX();
+    MOZ_ASSERT(scratch64.asUnsized() != lhs.valueReg());
+    moveValue(rhs, ValueOperand(scratch64.asUnsized()));
+    Cmp(ARMRegister(lhs.valueReg(), 64), scratch64);
+    B(label, cond);
+}
+
+// ========================================================================
+// Memory access primitives.
+template <typename T>
+void
+MacroAssembler::storeUnboxedValue(ConstantOrRegister value, MIRType valueType, const T& dest,
+                                  MIRType slotType)
+{
+    if (valueType == MIRType::Double) {
+        storeDouble(value.reg().typedReg().fpu(), dest);
+        return;
+    }
+
+    // For known integers and booleans, we can just store the unboxed value if
+    // the slot has the same type.
+    if ((valueType == MIRType::Int32 || valueType == MIRType::Boolean) && slotType == valueType) {
+        if (value.constant()) {
+            Value val = value.value();
+            if (valueType == MIRType::Int32)
+                store32(Imm32(val.toInt32()), dest);
+            else
+                store32(Imm32(val.toBoolean() ? 1 : 0), dest);
+        } else {
+            store32(value.reg().typedReg().gpr(), dest);
+        }
+        return;
+    }
+
+    if (value.constant())
+        storeValue(value.value(), dest);
+    else
+        storeValue(ValueTypeFromMIRType(valueType), value.reg().typedReg().gpr(), dest);
+
+}
+
+template void
+MacroAssembler::storeUnboxedValue(ConstantOrRegister value, MIRType valueType,
+                                  const Address& dest, MIRType slotType);
+template void
+MacroAssembler::storeUnboxedValue(ConstantOrRegister value, MIRType valueType,
+                                  const BaseIndex& dest, MIRType slotType);
 
 //}}} check_macroassembler_style
 

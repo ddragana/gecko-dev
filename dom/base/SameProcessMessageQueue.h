@@ -8,13 +8,11 @@
 #define mozilla_dom_SameProcessMessageQueue_h
 
 #include "nsIRunnable.h"
-#include "nsRefPtr.h"
+#include "mozilla/RefPtr.h"
 #include "nsTArray.h"
 
 namespace mozilla {
 namespace dom {
-
-class CancelableRunnable;
 
 class SameProcessMessageQueue
 {
@@ -45,9 +43,7 @@ public:
   static SameProcessMessageQueue* Get();
 
 private:
-  friend class CancelableRunnable;
-
-  nsTArray<nsRefPtr<Runnable>> mQueue;
+  nsTArray<RefPtr<Runnable>> mQueue;
   static SameProcessMessageQueue* sSingleton;
 };
 

@@ -9,16 +9,21 @@
 
 #include "AsyncPanZoomAnimation.h"
 #include "AsyncScrollBase.h"
+#include "InputData.h"
 
 namespace mozilla {
 namespace layers {
+
+class AsyncPanZoomController;
 
 class WheelScrollAnimation
   : public AsyncPanZoomAnimation,
     public AsyncScrollBase
 {
 public:
-  WheelScrollAnimation(AsyncPanZoomController& aApzc, const nsPoint& aInitialPosition);
+  WheelScrollAnimation(AsyncPanZoomController& aApzc,
+                       const nsPoint& aInitialPosition,
+                       ScrollWheelInput::ScrollDeltaType aDeltaType);
 
   bool DoSample(FrameMetrics& aFrameMetrics, const TimeDuration& aDelta) override;
   void Update(TimeStamp aTime, nsPoint aDelta, const nsSize& aCurrentVelocity);
@@ -27,12 +32,17 @@ public:
     return this;
   }
 
+  CSSPoint GetDestination() const {
+    return CSSPoint::FromAppUnits(mFinalDestination);
+  }
+
 private:
   void InitPreferences(TimeStamp aTime);
 
 private:
   AsyncPanZoomController& mApzc;
   nsPoint mFinalDestination;
+  ScrollWheelInput::ScrollDeltaType mDeltaType;
 };
 
 } // namespace layers

@@ -17,6 +17,7 @@
 #include "js/Vector.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/ErrorObject.h"
+#include "vm/RegExpStatics.h"
 #include "vm/Runtime.h"
 
 namespace js {
@@ -26,6 +27,11 @@ InitSharedArrayBufferClass(JSContext* cx, HandleObject obj);
 
 class Debugger;
 class TypedObjectModuleObject;
+class StaticBlockScope;
+class ClonedBlockObject;
+
+class SimdTypeDescr;
+enum class SimdType;
 
 /*
  * Global object slots are reserved as follows:
@@ -90,26 +96,30 @@ class GlobalObject : public NativeObject
         FROM_BUFFER_UINT8CLAMPED,
 
         /* One-off properties stored after slots for built-ins. */
+        LEXICAL_SCOPE,
+        ITERATOR_PROTO,
         ARRAY_ITERATOR_PROTO,
         STRING_ITERATOR_PROTO,
         LEGACY_GENERATOR_OBJECT_PROTO,
         STAR_GENERATOR_OBJECT_PROTO,
+        STAR_GENERATOR_FUNCTION_PROTO,
+        STAR_GENERATOR_FUNCTION,
         MAP_ITERATOR_PROTO,
         SET_ITERATOR_PROTO,
         COLLATOR_PROTO,
         NUMBER_FORMAT_PROTO,
         DATE_TIME_FORMAT_PROTO,
+        MODULE_PROTO,
+        IMPORT_ENTRY_PROTO,
+        EXPORT_ENTRY_PROTO,
         REGEXP_STATICS,
         WARNED_ONCE_FLAGS,
         RUNTIME_CODEGEN_ENABLED,
         DEBUGGERS,
         INTRINSICS,
-        FLOAT32X4_TYPE_DESCR,
-        FLOAT64X2_TYPE_DESCR,
-        INT8X16_TYPE_DESCR,
-        INT16X8_TYPE_DESCR,
-        INT32X4_TYPE_DESCR,
         FOR_OF_PIC_CHAIN,
+        MODULE_RESOLVE_HOOK,
+        WINDOW_PROXY,
 
         /* Total reserved-slot count for global objects. */
         RESERVED_SLOTS
@@ -124,9 +134,7 @@ class GlobalObject : public NativeObject
                   "global object slot counts are inconsistent");
 
     enum WarnOnceFlag : int32_t {
-        WARN_WATCH_DEPRECATED                   = 0x00000001,
-        WARN_PROTO_SETTING_SLOW                 = 0x00000002,
-        WARN_STRING_CONTAINS_DEPRECATED         = 0x00000004
+        WARN_WATCH_DEPRECATED                   = 1 << 0,
     };
 
     // Emit the specified warning if the given slot in |obj|'s global isn't
@@ -138,6 +146,8 @@ class GlobalObject : public NativeObject
 
 
   public:
+    ClonedBlockObject& lexicalScope() const;
+
     void setThrowTypeError(JSFunction* fun) {
         MOZ_ASSERT(getSlotRef(THROWTYPEERROR).isUndefined());
         setSlot(THROWTYPEERROR, ObjectValue(*fun));
@@ -152,6 +162,7 @@ class GlobalObject : public NativeObject
         MOZ_ASSERT(key <= JSProto_LIMIT);
         return getSlot(APPLICATION_SLOTS + key);
     }
+    static bool skipDeselectedConstructor(JSContext* cx, JSProtoKey key);
     static bool ensureConstructor(JSContext* cx, Handle<GlobalObject*> global, JSProtoKey key);
     static bool resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JSProtoKey key);
     static bool initBuiltinConstructor(JSContext* cx, Handle<GlobalObject*> global,
@@ -261,7 +272,6 @@ class GlobalObject : public NativeObject
 
     Value createArrayFromBufferHelper(uint32_t slot) const {
         MOZ_ASSERT(FROM_BUFFER_UINT8 <= slot && slot <= FROM_BUFFER_UINT8CLAMPED);
-        MOZ_ASSERT(!getSlot(slot).isUndefined());
         return getSlot(slot);
     }
 
@@ -298,7 +308,8 @@ class GlobalObject : public NativeObject
      */
     JSFunction*
     createConstructor(JSContext* cx, JSNative ctor, JSAtom* name, unsigned length,
-                      gc::AllocKind kind = gc::AllocKind::FUNCTION);
+                      gc::AllocKind kind = gc::AllocKind::FUNCTION,
+                      const JSJitInfo* jitInfo = nullptr);
 
     /*
      * Create an object to serve as [[Prototype]] for instances of the given
@@ -377,6 +388,12 @@ class GlobalObject : public NativeObject
         return &global->getPrototype(JSProto_Symbol).toObject().as<NativeObject>();
     }
 
+    static NativeObject* getOrCreatePromisePrototype(JSContext* cx, Handle<GlobalObject*> global) {
+        if (!ensureConstructor(cx, global, JSProto_Promise))
+            return nullptr;
+        return &global->getPrototype(JSProto_Promise).toObject().as<NativeObject>();
+    }
+
     static NativeObject* getOrCreateRegExpPrototype(JSContext* cx, Handle<GlobalObject*> global) {
         if (!ensureConstructor(cx, global, JSProto_RegExp))
             return nullptr;
@@ -426,59 +443,19 @@ class GlobalObject : public NativeObject
         return getOrCreateObject(cx, APPLICATION_SLOTS + JSProto_TypedObject, initTypedObjectModule);
     }
 
-    void setFloat32x4TypeDescr(JSObject& obj) {
-        MOZ_ASSERT(getSlotRef(FLOAT32X4_TYPE_DESCR).isUndefined());
-        setSlot(FLOAT32X4_TYPE_DESCR, ObjectValue(obj));
+    JSObject* getOrCreateSimdGlobalObject(JSContext* cx) {
+        return getOrCreateObject(cx, APPLICATION_SLOTS + JSProto_SIMD, initSimdObject);
     }
 
-    JSObject& float32x4TypeDescr() {
-        MOZ_ASSERT(getSlotRef(FLOAT32X4_TYPE_DESCR).isObject());
-        return getSlotRef(FLOAT32X4_TYPE_DESCR).toObject();
-    }
-
-    void setFloat64x2TypeDescr(JSObject& obj) {
-        MOZ_ASSERT(getSlotRef(FLOAT64X2_TYPE_DESCR).isUndefined());
-        setSlot(FLOAT64X2_TYPE_DESCR, ObjectValue(obj));
-    }
-
-    JSObject& float64x2TypeDescr() {
-        MOZ_ASSERT(getSlotRef(FLOAT64X2_TYPE_DESCR).isObject());
-        return getSlotRef(FLOAT64X2_TYPE_DESCR).toObject();
-    }
-
-    void setInt8x16TypeDescr(JSObject& obj) {
-        MOZ_ASSERT(getSlotRef(INT8X16_TYPE_DESCR).isUndefined());
-        setSlot(INT8X16_TYPE_DESCR, ObjectValue(obj));
-    }
-
-    JSObject& int8x16TypeDescr() {
-        MOZ_ASSERT(getSlotRef(INT8X16_TYPE_DESCR).isObject());
-        return getSlotRef(INT8X16_TYPE_DESCR).toObject();
-    }
-
-    void setInt16x8TypeDescr(JSObject& obj) {
-        MOZ_ASSERT(getSlotRef(INT16X8_TYPE_DESCR).isUndefined());
-        setSlot(INT16X8_TYPE_DESCR, ObjectValue(obj));
-    }
-
-    JSObject& int16x8TypeDescr() {
-        MOZ_ASSERT(getSlotRef(INT16X8_TYPE_DESCR).isObject());
-        return getSlotRef(INT16X8_TYPE_DESCR).toObject();
-    }
-
-    void setInt32x4TypeDescr(JSObject& obj) {
-        MOZ_ASSERT(getSlotRef(INT32X4_TYPE_DESCR).isUndefined());
-        setSlot(INT32X4_TYPE_DESCR, ObjectValue(obj));
-    }
-
-    JSObject& int32x4TypeDescr() {
-        MOZ_ASSERT(getSlotRef(INT32X4_TYPE_DESCR).isObject());
-        return getSlotRef(INT32X4_TYPE_DESCR).toObject();
-    }
+    // Get the type descriptor for one of the SIMD types.
+    // simdType is one of the JS_SIMDTYPEREPR_* constants.
+    // Implemented in builtin/SIMD.cpp.
+    static SimdTypeDescr* getOrCreateSimdTypeDescr(JSContext* cx, Handle<GlobalObject*> global,
+                                                   SimdType simdType);
 
     TypedObjectModuleObject& getTypedObjectModule() const;
 
-    JSObject* getIteratorPrototype() {
+    JSObject* getLegacyIteratorPrototype() {
         return &getPrototype(JSProto_Iterator).toObject();
     }
 
@@ -492,6 +469,41 @@ class GlobalObject : public NativeObject
 
     JSObject* getOrCreateDateTimeFormatPrototype(JSContext* cx) {
         return getOrCreateObject(cx, DATE_TIME_FORMAT_PROTO, initDateTimeFormatProto);
+    }
+
+    static bool ensureModulePrototypesCreated(JSContext *cx, Handle<GlobalObject*> global);
+
+    JSObject* maybeGetModulePrototype() {
+        Value value = getSlot(MODULE_PROTO);
+        return value.isUndefined() ? nullptr : &value.toObject();
+    }
+
+    JSObject* maybeGetImportEntryPrototype() {
+        Value value = getSlot(IMPORT_ENTRY_PROTO);
+        return value.isUndefined() ? nullptr : &value.toObject();
+    }
+
+    JSObject* maybeGetExportEntryPrototype() {
+        Value value = getSlot(EXPORT_ENTRY_PROTO);
+        return value.isUndefined() ? nullptr : &value.toObject();
+    }
+
+    JSObject* getModulePrototype() {
+        JSObject* proto = maybeGetModulePrototype();
+        MOZ_ASSERT(proto);
+        return proto;
+    }
+
+    JSObject* getImportEntryPrototype() {
+        JSObject* proto = maybeGetImportEntryPrototype();
+        MOZ_ASSERT(proto);
+        return proto;
+    }
+
+    JSObject* getExportEntryPrototype() {
+        JSObject* proto = maybeGetExportEntryPrototype();
+        MOZ_ASSERT(proto);
+        return proto;
     }
 
     static JSFunction*
@@ -522,62 +534,45 @@ class GlobalObject : public NativeObject
     }
 
   public:
-    static NativeObject* getOrCreateIteratorPrototype(JSContext* cx,
-                                                      Handle<GlobalObject*> global)
+    static NativeObject* getOrCreateIteratorPrototype(JSContext* cx, Handle<GlobalObject*> global)
     {
-        if (!ensureConstructor(cx, global, JSProto_Iterator))
-            return nullptr;
-        size_t slot = APPLICATION_SLOTS + JSProto_LIMIT + JSProto_Iterator;
-        return &global->getSlot(slot).toObject().as<NativeObject>();
+        return MaybeNativeObject(global->getOrCreateObject(cx, ITERATOR_PROTO, initIteratorProto));
     }
 
-    static NativeObject* getOrCreateArrayIteratorPrototype(JSContext* cx,
-                                                           Handle<GlobalObject*> global)
+    static NativeObject* getOrCreateArrayIteratorPrototype(JSContext* cx, Handle<GlobalObject*> global)
     {
-        if (!ensureConstructor(cx, global, JSProto_Iterator))
-            return nullptr;
-        return &global->getSlot(ARRAY_ITERATOR_PROTO).toObject().as<NativeObject>();
+        return MaybeNativeObject(global->getOrCreateObject(cx, ARRAY_ITERATOR_PROTO, initArrayIteratorProto));
     }
 
     static NativeObject* getOrCreateStringIteratorPrototype(JSContext* cx,
                                                             Handle<GlobalObject*> global)
     {
-        if (!ensureConstructor(cx, global, JSProto_Iterator))
-            return nullptr;
-        return &global->getSlot(STRING_ITERATOR_PROTO).toObject().as<NativeObject>();
+        return MaybeNativeObject(global->getOrCreateObject(cx, STRING_ITERATOR_PROTO, initStringIteratorProto));
     }
 
     static NativeObject* getOrCreateLegacyGeneratorObjectPrototype(JSContext* cx,
                                                                    Handle<GlobalObject*> global)
     {
-        if (!ensureConstructor(cx, global, JSProto_Iterator))
-            return nullptr;
-        return &global->getSlot(LEGACY_GENERATOR_OBJECT_PROTO).toObject().as<NativeObject>();
+        return MaybeNativeObject(global->getOrCreateObject(cx, LEGACY_GENERATOR_OBJECT_PROTO,
+                                                           initLegacyGeneratorProto));
     }
 
     static NativeObject* getOrCreateStarGeneratorObjectPrototype(JSContext* cx,
                                                                  Handle<GlobalObject*> global)
     {
-        if (!ensureConstructor(cx, global, JSProto_Iterator))
-            return nullptr;
-        return &global->getSlot(STAR_GENERATOR_OBJECT_PROTO).toObject().as<NativeObject>();
+        return MaybeNativeObject(global->getOrCreateObject(cx, STAR_GENERATOR_OBJECT_PROTO, initStarGenerators));
     }
 
     static NativeObject* getOrCreateStarGeneratorFunctionPrototype(JSContext* cx,
                                                                    Handle<GlobalObject*> global)
     {
-        if (!ensureConstructor(cx, global, JSProto_Iterator))
-            return nullptr;
-        size_t slot = APPLICATION_SLOTS + JSProto_LIMIT + JSProto_GeneratorFunction;
-        return &global->getSlot(slot).toObject().as<NativeObject>();
+        return MaybeNativeObject(global->getOrCreateObject(cx, STAR_GENERATOR_FUNCTION_PROTO, initStarGenerators));
     }
 
     static JSObject* getOrCreateStarGeneratorFunction(JSContext* cx,
                                                       Handle<GlobalObject*> global)
     {
-        if (!ensureConstructor(cx, global, JSProto_Iterator))
-            return nullptr;
-        return &global->getSlot(APPLICATION_SLOTS + JSProto_GeneratorFunction).toObject();
+        return global->getOrCreateObject(cx, STAR_GENERATOR_FUNCTION, initStarGenerators);
     }
 
     static JSObject* getOrCreateMapIteratorPrototype(JSContext* cx,
@@ -599,23 +594,46 @@ class GlobalObject : public NativeObject
         return &self->getPrototype(JSProto_DataView).toObject();
     }
 
+    static JSFunction*
+    getOrCreatePromiseConstructor(JSContext* cx, Handle<GlobalObject*> global) {
+        if (!ensureConstructor(cx, global, JSProto_Promise))
+            return nullptr;
+        return &global->getConstructor(JSProto_Promise).toObject().as<JSFunction>();
+    }
+
     static NativeObject* getIntrinsicsHolder(JSContext* cx, Handle<GlobalObject*> global);
 
-    Value existingIntrinsicValue(PropertyName* name) {
+    bool maybeExistingIntrinsicValue(PropertyName* name, Value* vp) {
         Value slot = getReservedSlot(INTRINSICS);
-        MOZ_ASSERT(slot.isObject(), "intrinsics holder must already exist");
+        // If we're in the self-hosting compartment itself, the
+        // intrinsics-holder isn't initialized at this point.
+        if (slot.isUndefined()) {
+            *vp = UndefinedValue();
+            return false;
+        }
 
         NativeObject* holder = &slot.toObject().as<NativeObject>();
-
         Shape* shape = holder->lookupPure(name);
-        MOZ_ASSERT(shape, "intrinsic must already have been added to holder");
+        if (!shape) {
+            *vp = UndefinedValue();
+            return false;
+        }
 
-        return holder->getSlot(shape->slot());
+        *vp = holder->getSlot(shape->slot());
+        return true;
+    }
+
+    Value existingIntrinsicValue(PropertyName* name) {
+        Value val;
+        mozilla::DebugOnly<bool> exists = maybeExistingIntrinsicValue(name, &val);
+        MOZ_ASSERT(exists, "intrinsic must already have been added to holder");
+
+        return val;
     }
 
     static bool
     maybeGetIntrinsicValue(JSContext* cx, Handle<GlobalObject*> global, Handle<PropertyName*> name,
-                           MutableHandleValue vp)
+                           MutableHandleValue vp, bool* exists)
     {
         NativeObject* holder = getIntrinsicsHolder(cx, global);
         if (!holder)
@@ -623,15 +641,21 @@ class GlobalObject : public NativeObject
 
         if (Shape* shape = holder->lookupPure(name)) {
             vp.set(holder->getSlot(shape->slot()));
-            return true;
+            *exists = true;
+        } else {
+            *exists = false;
         }
-        return false;
+
+        return true;
     }
 
     static bool getIntrinsicValue(JSContext* cx, Handle<GlobalObject*> global,
                                   HandlePropertyName name, MutableHandleValue value)
     {
-        if (GlobalObject::maybeGetIntrinsicValue(cx, global, name, value))
+        bool exists = false;
+        if (!GlobalObject::maybeGetIntrinsicValue(cx, global, name, value, &exists))
+            return false;
+        if (exists)
             return true;
         if (!cx->runtime()->cloneSelfHostedValue(cx, name, value))
             return false;
@@ -685,18 +709,6 @@ class GlobalObject : public NativeObject
         return true;
     }
 
-    // Warn about use of the given __proto__ setter to attempt to mutate an
-    // object's [[Prototype]], if no prior warning was given.
-    static bool warnOnceAboutPrototypeMutation(JSContext* cx, HandleObject protoSetter) {
-        return warnOnceAbout(cx, protoSetter, WARN_PROTO_SETTING_SLOW, JSMSG_PROTO_SETTING_SLOW);
-    }
-
-    // Warn about use of the deprecated String.prototype.contains method
-    static bool warnOnceAboutStringContains(JSContext *cx, HandleObject strContains) {
-        return warnOnceAbout(cx, strContains, WARN_STRING_CONTAINS_DEPRECATED,
-                             JSMSG_DEPRECATED_STRING_CONTAINS);
-    }
-
     static bool getOrCreateEval(JSContext* cx, Handle<GlobalObject*> global,
                                 MutableHandleObject eval);
 
@@ -704,11 +716,13 @@ class GlobalObject : public NativeObject
     bool valueIsEval(Value val);
 
     // Implemented in jsiter.cpp.
-    static bool initIteratorClasses(JSContext* cx, Handle<GlobalObject*> global);
-    static bool initStopIterationClass(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initIteratorProto(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initArrayIteratorProto(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initStringIteratorProto(JSContext* cx, Handle<GlobalObject*> global);
 
     // Implemented in vm/GeneratorObject.cpp.
-    static bool initGeneratorClasses(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initLegacyGeneratorProto(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initStarGenerators(JSContext* cx, Handle<GlobalObject*> global);
 
     // Implemented in builtin/MapObject.cpp.
     static bool initMapIteratorProto(JSContext* cx, Handle<GlobalObject*> global);
@@ -720,14 +734,23 @@ class GlobalObject : public NativeObject
     static bool initNumberFormatProto(JSContext* cx, Handle<GlobalObject*> global);
     static bool initDateTimeFormatProto(JSContext* cx, Handle<GlobalObject*> global);
 
+    // Implemented in builtin/ModuleObject.cpp
+    static bool initModuleProto(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initImportEntryProto(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initExportEntryProto(JSContext* cx, Handle<GlobalObject*> global);
+
     // Implemented in builtin/TypedObject.cpp
     static bool initTypedObjectModule(JSContext* cx, Handle<GlobalObject*> global);
+
+    // Implemented in builtin/SIMD.cpp
+    static bool initSimdObject(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initSimdType(JSContext* cx, Handle<GlobalObject*> global, SimdType simdType);
 
     static bool initStandardClasses(JSContext* cx, Handle<GlobalObject*> global);
     static bool initSelfHostingBuiltins(JSContext* cx, Handle<GlobalObject*> global,
                                         const JSFunctionSpec* builtins);
 
-    typedef js::Vector<js::Debugger*, 0, js::SystemAllocPolicy> DebuggerVector;
+    typedef js::Vector<js::ReadBarriered<js::Debugger*>, 0, js::SystemAllocPolicy> DebuggerVector;
 
     /*
      * The collection of Debugger objects debugging this global. If this global
@@ -748,6 +771,36 @@ class GlobalObject : public NativeObject
         return &forOfPIC.toObject().as<NativeObject>();
     }
     static NativeObject* getOrCreateForOfPICObject(JSContext* cx, Handle<GlobalObject*> global);
+
+    JSObject* windowProxy() const {
+        return &getReservedSlot(WINDOW_PROXY).toObject();
+    }
+    JSObject* maybeWindowProxy() const {
+        Value v = getReservedSlot(WINDOW_PROXY);
+        MOZ_ASSERT(v.isObject() || v.isUndefined());
+        return v.isObject() ? &v.toObject() : nullptr;
+    }
+    void setWindowProxy(JSObject* windowProxy) {
+        setReservedSlot(WINDOW_PROXY, ObjectValue(*windowProxy));
+    }
+
+    void setModuleResolveHook(HandleFunction hook) {
+        MOZ_ASSERT(hook);
+        setSlot(MODULE_RESOLVE_HOOK, ObjectValue(*hook));
+    }
+
+    JSFunction* moduleResolveHook() {
+        Value value = getSlotRef(MODULE_RESOLVE_HOOK);
+        if (value.isUndefined())
+            return nullptr;
+
+        return &value.toObject().as<JSFunction>();
+    }
+
+    // Returns either this global's star-generator function prototype, or null
+    // if that object was never created.  Dodgy; for use only in also-dodgy
+    // GlobalHelperThreadState::mergeParseTaskCompartment().
+    JSObject* getStarGeneratorFunctionPrototype();
 };
 
 template<>
@@ -899,14 +952,14 @@ typedef HashSet<GlobalObject*, DefaultHasher<GlobalObject*>, SystemAllocPolicy> 
  * for ClassSpecs.
  */
 
-template<JSNative ctor, unsigned length, gc::AllocKind kind>
+template<JSNative ctor, unsigned length, gc::AllocKind kind, const JSJitInfo* jitInfo = nullptr>
 JSObject*
 GenericCreateConstructor(JSContext* cx, JSProtoKey key)
 {
     // Note - We duplicate the trick from ClassName() so that we don't need to
     // include jsatominlines.h here.
     PropertyName* name = (&cx->names().Null)[key];
-    return cx->global()->createConstructor(cx, ctor, name, length, kind);
+    return cx->global()->createConstructor(cx, ctor, name, length, kind, jitInfo);
 }
 
 inline JSObject*

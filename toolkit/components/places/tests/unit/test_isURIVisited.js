@@ -23,18 +23,7 @@ const SCHEMES = {
   "javascript:": false,
 };
 
-const TRANSITIONS = [
-  TRANSITION_LINK,
-  TRANSITION_TYPED,
-  TRANSITION_BOOKMARK,
-  TRANSITION_EMBED,
-  TRANSITION_FRAMED_LINK,
-  TRANSITION_REDIRECT_PERMANENT,
-  TRANSITION_REDIRECT_TEMPORARY,
-  TRANSITION_DOWNLOAD,
-];
-
-let gRunner;
+var gRunner;
 function run_test()
 {
   do_test_pending();
@@ -42,16 +31,16 @@ function run_test()
   gRunner.next();
 }
 
-function step()
+function* step()
 {
   let history = Cc["@mozilla.org/browser/history;1"]
                   .getService(Ci.mozIAsyncHistory);
 
   for (let scheme in SCHEMES) {
     do_print("Testing scheme " + scheme);
-    for (let i = 0; i < TRANSITIONS.length; i++) {
-      let transition = TRANSITIONS[i];
-      do_print("With transition " + transition);
+    for (let t in PlacesUtils.history.TRANSITIONS) {
+      do_print("With transition " + t);
+      let transition = PlacesUtils.history.TRANSITIONS[t];
 
       let uri = NetUtil.newURI(scheme + "mozilla.org/");
 

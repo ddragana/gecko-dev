@@ -7,11 +7,12 @@
 #ifndef IndexedDatabaseInlines_h
 #define IndexedDatabaseInlines_h
 
-#ifndef mozilla_dom_indexeddb_indexeddatabase_h__
+#ifndef mozilla_dom_indexeddatabase_h__
 #error Must include IndexedDatabase.h first
 #endif
 
 #include "FileInfo.h"
+#include "IDBMutableFile.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
 #include "mozilla/dom/File.h"
 #include "nsIInputStream.h"
@@ -22,6 +23,7 @@ namespace indexedDB {
 
 inline
 StructuredCloneFile::StructuredCloneFile()
+  : mMutable(false)
 {
   MOZ_COUNT_CTOR(StructuredCloneFile);
 }
@@ -37,7 +39,9 @@ bool
 StructuredCloneFile::operator==(const StructuredCloneFile& aOther) const
 {
   return this->mBlob == aOther.mBlob &&
-         this->mFileInfo == aOther.mFileInfo;
+         this->mMutableFile == aOther.mMutableFile &&
+         this->mFileInfo == aOther.mFileInfo &&
+         this->mMutable == aOther.mMutable;
 }
 
 inline

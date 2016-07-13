@@ -35,7 +35,7 @@ typedef void (*TestFunc)(nsIAppShell*);
 
 bool gStableStateEventHasRun = false;
 
-class ExitAppShellRunnable : public nsRunnable
+class ExitAppShellRunnable : public Runnable
 {
   nsCOMPtr<nsIAppShell> mAppShell;
 
@@ -51,7 +51,7 @@ public:
   }
 };
 
-class StableStateRunnable : public nsRunnable
+class StableStateRunnable : public Runnable
 {
 public:
   NS_IMETHOD
@@ -65,7 +65,7 @@ public:
   }
 };
 
-class CheckStableStateRunnable : public nsRunnable
+class CheckStableStateRunnable : public Runnable
 {
   bool mShouldHaveRun;
 
@@ -112,7 +112,7 @@ public:
   }
 };
 
-class NextTestRunnable : public nsRunnable
+class NextTestRunnable : public Runnable
 {
   nsCOMPtr<nsIAppShell> mAppShell;
 
@@ -391,8 +391,7 @@ Test4Internal(nsIAppShell* aAppShell)
 #ifndef XP_WIN
   // Not sure how to test on other platforms.
   return false;
-#endif
-
+#else
   nsCOMPtr<nsIAppShellService> appService =
     do_GetService(NS_APPSHELLSERVICE_CONTRACTID);
   if (!appService) {
@@ -437,6 +436,7 @@ Test4Internal(nsIAppShell* aAppShell)
   }
 
   return true;
+#endif
 }
 
 void

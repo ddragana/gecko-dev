@@ -5,49 +5,95 @@
 
 #include "mozilla/layers/Compositor.h"
 #include "base/message_loop.h"          // for MessageLoop
-#include "mozilla/layers/CompositorParent.h"  // for CompositorParent
+#include "mozilla/layers/CompositorBridgeParent.h"  // for CompositorBridgeParent
 #include "mozilla/layers/Effects.h"     // for Effect, EffectChain, etc
+#include "mozilla/layers/TextureClient.h"
+#include "mozilla/layers/TextureHost.h"
+#include "mozilla/layers/CompositorThread.h"
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "gfx2DGlue.h"
 #include "nsAppRunner.h"
 
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
+#include "libdisplay/GonkDisplay.h"     // for GonkDisplay
+#include <ui/Fence.h>
+#include "nsWindow.h"
+#include "nsScreenManagerGonk.h"
+#endif
+
 namespace mozilla {
-namespace gfx {
-class Matrix4x4;
-} // namespace gfx
 
 namespace layers {
 
-/* static */ LayersBackend Compositor::sBackend = LayersBackend::LAYERS_NONE;
-/* static */ LayersBackend
-Compositor::GetBackend()
+Compositor::Compositor(widget::CompositorWidget* aWidget,
+                      CompositorBridgeParent* aParent)
+  : mCompositorID(0)
+  , mDiagnosticTypes(DiagnosticTypes::NO_DIAGNOSTIC)
+  , mParent(aParent)
+  , mPixelsPerFrame(0)
+  , mPixelsFilled(0)
+  , mScreenRotation(ROTATION_0)
+  , mWidget(aWidget)
+  , mIsDestroyed(false)
 {
-  if (sBackend != LayersBackend::LAYERS_NONE) {
-    AssertOnCompositorThread();
-  }
-  return sBackend;
 }
 
-/* static */ void
-Compositor::SetBackend(LayersBackend backend)
+Compositor::~Compositor()
 {
-  if (!gIsGtest && sBackend != backend &&
-      sBackend != LayersBackend::LAYERS_NONE &&
-      backend != LayersBackend::LAYERS_NONE) {
-    // Assert this once we figure out bug 972891.
-#ifdef XP_MACOSX
-    gfxWarning() << "Changing compositor from " << unsigned(sBackend) << " to " << unsigned(backend);
-#endif
-  }
+  ReadUnlockTextures();
+}
 
-  sBackend = backend;
+void
+Compositor::Destroy()
+{
+  ReadUnlockTextures();
+  FlushPendingNotifyNotUsed();
+  mIsDestroyed = true;
+}
+
+void
+Compositor::EndFrame()
+{
+  ReadUnlockTextures();
+}
+
+void
+Compositor::ReadUnlockTextures()
+{
+  for (auto& texture : mUnlockAfterComposition) {
+    texture->ReadUnlock();
+  }
+  mUnlockAfterComposition.Clear();
+}
+
+void
+Compositor::UnlockAfterComposition(TextureHost* aTexture)
+{
+  mUnlockAfterComposition.AppendElement(aTexture);
+}
+
+void
+Compositor::NotifyNotUsedAfterComposition(TextureHost* aTextureHost)
+{
+  MOZ_ASSERT(!mIsDestroyed);
+
+  mNotifyNotUsedAfterComposition.AppendElement(aTextureHost);
+}
+
+void
+Compositor::FlushPendingNotifyNotUsed()
+{
+  for (auto& textureHost : mNotifyNotUsedAfterComposition) {
+    textureHost->CallNotifyNotUsed();
+  }
+  mNotifyNotUsedAfterComposition.Clear();
 }
 
 /* static */ void
 Compositor::AssertOnCompositorThread()
 {
-  MOZ_ASSERT(!CompositorParent::CompositorLoop() ||
-             CompositorParent::CompositorLoop() == MessageLoop::current(),
+  MOZ_ASSERT(!CompositorThreadHolder::Loop() ||
+             CompositorThreadHolder::Loop() == MessageLoop::current(),
              "Can only call this from the compositor thread!");
 }
 
@@ -70,7 +116,7 @@ Compositor::ShouldDrawDiagnostics(DiagnosticFlags aFlags)
 void
 Compositor::DrawDiagnostics(DiagnosticFlags aFlags,
                             const nsIntRegion& aVisibleRegion,
-                            const gfx::Rect& aClipRect,
+                            const gfx::IntRect& aClipRect,
                             const gfx::Matrix4x4& aTransform,
                             uint32_t aFlashCounter)
 {
@@ -79,23 +125,21 @@ Compositor::DrawDiagnostics(DiagnosticFlags aFlags,
   }
 
   if (aVisibleRegion.GetNumRects() > 1) {
-    nsIntRegionRectIterator screenIter(aVisibleRegion);
-
-    while (const gfx::IntRect* rect = screenIter.Next())
-    {
+    for (auto iter = aVisibleRegion.RectIter(); !iter.Done(); iter.Next()) {
       DrawDiagnostics(aFlags | DiagnosticFlags::REGION_RECT,
-                      ToRect(*rect), aClipRect, aTransform, aFlashCounter);
+                      IntRectToRect(iter.Get()), aClipRect, aTransform,
+                      aFlashCounter);
     }
   }
 
-  DrawDiagnostics(aFlags, ToRect(aVisibleRegion.GetBounds()),
+  DrawDiagnostics(aFlags, IntRectToRect(aVisibleRegion.GetBounds()),
                   aClipRect, aTransform, aFlashCounter);
 }
 
 void
 Compositor::DrawDiagnostics(DiagnosticFlags aFlags,
                             const gfx::Rect& aVisibleRect,
-                            const gfx::Rect& aClipRect,
+                            const gfx::IntRect& aClipRect,
                             const gfx::Matrix4x4& aTransform,
                             uint32_t aFlashCounter)
 {
@@ -110,7 +154,7 @@ Compositor::DrawDiagnostics(DiagnosticFlags aFlags,
 void
 Compositor::DrawDiagnosticsInternal(DiagnosticFlags aFlags,
                                     const gfx::Rect& aVisibleRect,
-                                    const gfx::Rect& aClipRect,
+                                    const gfx::IntRect& aClipRect,
                                     const gfx::Matrix4x4& aTransform,
                                     uint32_t aFlashCounter)
 {
@@ -121,7 +165,6 @@ Compositor::DrawDiagnosticsInternal(DiagnosticFlags aFlags,
 #else
   int lWidth = 2;
 #endif
-  float opacity = 0.7f;
 
   gfx::Color color;
   if (aFlags & DiagnosticFlags::CONTENT) {
@@ -130,7 +173,13 @@ Compositor::DrawDiagnosticsInternal(DiagnosticFlags aFlags,
       color = gfx::Color(0.0f, 1.0f, 1.0f, 1.0f); // greenish blue
     }
   } else if (aFlags & DiagnosticFlags::IMAGE) {
-    color = gfx::Color(1.0f, 0.0f, 0.0f, 1.0f); // red
+    if (aFlags & DiagnosticFlags::NV12) {
+      color = gfx::Color(1.0f, 1.0f, 0.0f, 1.0f); // yellow
+    } else if (aFlags & DiagnosticFlags::YCBCR) {
+      color = gfx::Color(1.0f, 0.55f, 0.0f, 1.0f); // orange
+    } else {
+      color = gfx::Color(1.0f, 0.0f, 0.0f, 1.0f); // red
+    }
   } else if (aFlags & DiagnosticFlags::COLOR) {
     color = gfx::Color(0.0f, 0.0f, 1.0f, 1.0f); // blue
   } else if (aFlags & DiagnosticFlags::CONTAINER) {
@@ -142,11 +191,14 @@ Compositor::DrawDiagnosticsInternal(DiagnosticFlags aFlags,
       aFlags & DiagnosticFlags::BIGIMAGE ||
       aFlags & DiagnosticFlags::REGION_RECT) {
     lWidth = 1;
-    opacity = 0.5f;
     color.r *= 0.7f;
     color.g *= 0.7f;
     color.b *= 0.7f;
+    color.a = color.a * 0.5f;
+  } else {
+    color.a = color.a * 0.7f;
   }
+
 
   if (mDiagnosticTypes & DiagnosticTypes::FLASH_BORDERS) {
     float flash = (float)aFlashCounter / (float)DIAGNOSTIC_FLASH_COUNTER_MAX;
@@ -155,43 +207,62 @@ Compositor::DrawDiagnosticsInternal(DiagnosticFlags aFlags,
     color.b *= flash;
   }
 
+  SlowDrawRect(aVisibleRect, color, aClipRect, aTransform, lWidth);
+}
+
+void
+Compositor::SlowDrawRect(const gfx::Rect& aRect, const gfx::Color& aColor,
+                     const gfx::IntRect& aClipRect,
+                     const gfx::Matrix4x4& aTransform, int aStrokeWidth)
+{
+  // TODO This should draw a rect using a single draw call but since
+  // this is only used for debugging overlays it's not worth optimizing ATM.
+  float opacity = 1.0f;
   EffectChain effects;
 
-  effects.mPrimaryEffect = new EffectSolidColor(color);
+  effects.mPrimaryEffect = new EffectSolidColor(aColor);
   // left
-  this->DrawQuad(gfx::Rect(aVisibleRect.x, aVisibleRect.y,
-                           lWidth, aVisibleRect.height),
+  this->DrawQuad(gfx::Rect(aRect.x, aRect.y,
+                           aStrokeWidth, aRect.height),
                  aClipRect, effects, opacity,
                  aTransform);
   // top
-  this->DrawQuad(gfx::Rect(aVisibleRect.x + lWidth, aVisibleRect.y,
-                           aVisibleRect.width - 2 * lWidth, lWidth),
+  this->DrawQuad(gfx::Rect(aRect.x + aStrokeWidth, aRect.y,
+                           aRect.width - 2 * aStrokeWidth, aStrokeWidth),
                  aClipRect, effects, opacity,
                  aTransform);
   // right
-  this->DrawQuad(gfx::Rect(aVisibleRect.x + aVisibleRect.width - lWidth, aVisibleRect.y,
-                           lWidth, aVisibleRect.height),
+  this->DrawQuad(gfx::Rect(aRect.x + aRect.width - aStrokeWidth, aRect.y,
+                           aStrokeWidth, aRect.height),
                  aClipRect, effects, opacity,
                  aTransform);
   // bottom
-  this->DrawQuad(gfx::Rect(aVisibleRect.x + lWidth, aVisibleRect.y + aVisibleRect.height-lWidth,
-                           aVisibleRect.width - 2 * lWidth, lWidth),
+  this->DrawQuad(gfx::Rect(aRect.x + aStrokeWidth, aRect.y + aRect.height - aStrokeWidth,
+                           aRect.width - 2 * aStrokeWidth, aStrokeWidth),
                  aClipRect, effects, opacity,
                  aTransform);
 }
 
+void
+Compositor::FillRect(const gfx::Rect& aRect, const gfx::Color& aColor,
+                     const gfx::IntRect& aClipRect,
+                     const gfx::Matrix4x4& aTransform)
+{
+  float opacity = 1.0f;
+  EffectChain effects;
+
+  effects.mPrimaryEffect = new EffectSolidColor(aColor);
+  this->DrawQuad(aRect,
+                 aClipRect, effects, opacity,
+                 aTransform);
+}
+
+
 static float
 WrapTexCoord(float v)
 {
-    // fmodf gives negative results for negative numbers;
-    // that is, fmodf(0.75, 1.0) == 0.75, but
-    // fmodf(-0.75, 1.0) == -0.75.  For the negative case,
-    // the result we need is 0.25, so we add 1.0f.
-    if (v < 0.0f) {
-        return 1.0f + fmodf(v, 1.0f);
-    }
-
-    return fmodf(v, 1.0f);
+    // This should return values in range [0, 1.0)
+    return v - floorf(v);
 }
 
 static void
@@ -349,6 +420,105 @@ DecomposeIntoNoRepeatRects(const gfx::Rect& aRect,
            flipped);
   return 4;
 }
+
+gfx::IntRect
+Compositor::ComputeBackdropCopyRect(const gfx::Rect& aRect,
+                                    const gfx::IntRect& aClipRect,
+                                    const gfx::Matrix4x4& aTransform,
+                                    gfx::Matrix4x4* aOutTransform,
+                                    gfx::Rect* aOutLayerQuad)
+{
+  // Compute the clip.
+  gfx::IntPoint rtOffset = GetCurrentRenderTarget()->GetOrigin();
+  gfx::IntSize rtSize = GetCurrentRenderTarget()->GetSize();
+
+  gfx::IntRect renderBounds(0, 0, rtSize.width, rtSize.height);
+  renderBounds.IntersectRect(renderBounds, aClipRect);
+  renderBounds.MoveBy(rtOffset);
+
+  // Apply the layer transform.
+  gfx::RectDouble dest = aTransform.TransformAndClipBounds(
+    gfx::RectDouble(aRect.x, aRect.y, aRect.width, aRect.height),
+    gfx::RectDouble(renderBounds.x, renderBounds.y, renderBounds.width, renderBounds.height));
+  dest -= rtOffset;
+
+  // Ensure we don't round out to -1, which trips up Direct3D.
+  dest.IntersectRect(dest, gfx::RectDouble(0, 0, rtSize.width, rtSize.height));
+
+  if (aOutLayerQuad) {
+    *aOutLayerQuad = gfx::Rect(dest.x, dest.y, dest.width, dest.height);
+  }
+
+  // Round out to integer.
+  gfx::IntRect result;
+  dest.RoundOut();
+  dest.ToIntRect(&result);
+
+  // Create a transform from adjusted clip space to render target space,
+  // translate it for the backdrop rect, then transform it into the backdrop's
+  // uv-space.
+  gfx::Matrix4x4 transform;
+  transform.PostScale(rtSize.width, rtSize.height, 1.0);
+  transform.PostTranslate(-result.x, -result.y, 0.0);
+  transform.PostScale(1 / float(result.width), 1 / float(result.height), 1.0);
+  *aOutTransform = transform;
+  return result;
+}
+
+void
+Compositor::SetInvalid()
+{
+  mParent = nullptr;
+}
+
+bool
+Compositor::IsValid() const
+{
+  return !mParent;
+}
+
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
+void
+Compositor::SetDispAcquireFence(Layer* aLayer)
+{
+  // OpenGL does not provide ReleaseFence for rendering.
+  // Instead use DispAcquireFence as layer buffer's ReleaseFence
+  // to prevent flickering and tearing.
+  // DispAcquireFence is DisplaySurface's AcquireFence.
+  // AcquireFence will be signaled when a buffer's content is available.
+  // See Bug 974152.
+  if (!aLayer || !mWidget) {
+    return;
+  }
+  nsWindow* window = static_cast<nsWindow*>(mWidget->RealWidget());
+  RefPtr<FenceHandle::FdObj> fence = new FenceHandle::FdObj(
+      window->GetScreen()->GetPrevDispAcquireFd());
+  mReleaseFenceHandle.Merge(FenceHandle(fence));
+}
+
+FenceHandle
+Compositor::GetReleaseFence()
+{
+  if (!mReleaseFenceHandle.IsValid()) {
+    return FenceHandle();
+  }
+
+  RefPtr<FenceHandle::FdObj> fdObj = mReleaseFenceHandle.GetDupFdObj();
+  return FenceHandle(fdObj);
+}
+
+#else
+void
+Compositor::SetDispAcquireFence(Layer* aLayer)
+{
+}
+
+FenceHandle
+Compositor::GetReleaseFence()
+{
+  return FenceHandle();
+}
+#endif
 
 } // namespace layers
 } // namespace mozilla

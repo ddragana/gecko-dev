@@ -22,10 +22,10 @@
 using namespace mozilla;
 
 // These columns sit to the right of the kGetInfoIndex_* columns.
-const int32_t nsNavBookmarks::kGetChildrenIndex_Guid = 15;
-const int32_t nsNavBookmarks::kGetChildrenIndex_Position = 16;
-const int32_t nsNavBookmarks::kGetChildrenIndex_Type = 17;
-const int32_t nsNavBookmarks::kGetChildrenIndex_PlaceID = 18;
+const int32_t nsNavBookmarks::kGetChildrenIndex_Guid = 18;
+const int32_t nsNavBookmarks::kGetChildrenIndex_Position = 19;
+const int32_t nsNavBookmarks::kGetChildrenIndex_Type = 20;
+const int32_t nsNavBookmarks::kGetChildrenIndex_PlaceID = 21;
 
 using namespace mozilla::places;
 
@@ -53,14 +53,14 @@ public:
 
   void Init()
   {
-    nsRefPtr<Database> DB = Database::GetDatabase();
+    RefPtr<Database> DB = Database::GetDatabase();
     if (DB) {
       nsCOMPtr<mozIStorageAsyncStatement> stmt = DB->GetAsyncStatement(
         "/* do not warn (bug 1175249) */ "
         "SELECT b.id, b.guid, b.parent, b.lastModified, t.guid, t.parent "
         "FROM moz_bookmarks b "
         "JOIN moz_bookmarks t on t.id = b.parent "
-        "WHERE b.fk = (SELECT id FROM moz_places WHERE url = :page_url) "
+        "WHERE b.fk = (SELECT id FROM moz_places WHERE url_hash = hash(:page_url) AND url = :page_url) "
         "ORDER BY b.lastModified DESC, b.id DESC "
       );
       if (stmt) {
@@ -105,7 +105,7 @@ public:
   }
 
 private:
-  nsRefPtr<nsNavBookmarks> mBookmarksSvc;
+  RefPtr<nsNavBookmarks> mBookmarksSvc;
   Method mCallback;
   DataType mData;
 };
@@ -551,7 +551,8 @@ nsNavBookmarks::InsertBookmark(int64_t aFolder,
                                      TYPE_BOOKMARK,
                                      bookmarks[i].parentId,
                                      bookmarks[i].guid,
-                                     bookmarks[i].parentGuid));
+                                     bookmarks[i].parentGuid,
+                                     EmptyCString()));
     }
   }
 
@@ -625,6 +626,8 @@ nsNavBookmarks::RemoveItem(int64_t aItemId)
     }
     // A broken url should not interrupt the removal process.
     (void)NS_NewURI(getter_AddRefs(uri), bookmark.url);
+    // We cannot assert since some automated tests are checking this path.
+    NS_WARN_IF_FALSE(uri, "Invalid URI in RemoveItem");
   }
 
   NOTIFY_OBSERVERS(mCanNotify, mCacheObservers, mObservers,
@@ -656,7 +659,8 @@ nsNavBookmarks::RemoveItem(int64_t aItemId)
                                      TYPE_BOOKMARK,
                                      bookmarks[i].parentId,
                                      bookmarks[i].guid,
-                                     bookmarks[i].parentGuid));
+                                     bookmarks[i].parentGuid,
+                                     EmptyCString()));
     }
 
   }
@@ -958,8 +962,8 @@ nsNavBookmarks::GetDescendantChildren(int64_t aFolderId,
     nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
       "SELECT h.id, h.url, IFNULL(b.title, h.title), h.rev_host, h.visit_count, "
              "h.last_visit_date, f.url, b.id, b.dateAdded, b.lastModified, "
-             "b.parent, null, h.frecency, h.hidden, h.guid, b.guid, "
-             "b.position, b.type, b.fk "
+             "b.parent, null, h.frecency, h.hidden, h.guid, null, null, null, "
+             "b.guid, b.position, b.type, b.fk "
       "FROM moz_bookmarks b "
       "LEFT JOIN moz_places h ON b.fk = h.id "
       "LEFT JOIN moz_favicons f ON h.favicon_id = f.id "
@@ -1100,6 +1104,8 @@ nsNavBookmarks::RemoveFolderChildren(int64_t aFolderId)
       }
       // A broken url should not interrupt the removal process.
       (void)NS_NewURI(getter_AddRefs(uri), child.url);
+      // We cannot assert since some automated tests are checking this path.
+      NS_WARN_IF_FALSE(uri, "Invalid URI in RemoveFolderChildren");
     }
 
     NOTIFY_OBSERVERS(mCanNotify, mCacheObservers, mObservers,
@@ -1132,7 +1138,8 @@ nsNavBookmarks::RemoveFolderChildren(int64_t aFolderId)
                                        TYPE_BOOKMARK,
                                        bookmarks[i].parentId,
                                        bookmarks[i].guid,
-                                       bookmarks[i].parentGuid));
+                                       bookmarks[i].parentGuid,
+                                       EmptyCString()));
       }
     }
   }
@@ -1413,7 +1420,8 @@ nsNavBookmarks::SetItemDateAdded(int64_t aItemId, PRTime aDateAdded)
                                  bookmark.type,
                                  bookmark.parentId,
                                  bookmark.guid,
-                                 bookmark.parentGuid));
+                                 bookmark.parentGuid,
+                                 EmptyCString()));
   return NS_OK;
 }
 
@@ -1459,7 +1467,8 @@ nsNavBookmarks::SetItemLastModified(int64_t aItemId, PRTime aLastModified)
                                  bookmark.type,
                                  bookmark.parentId,
                                  bookmark.guid,
-                                 bookmark.parentGuid));
+                                 bookmark.parentGuid,
+                                 EmptyCString()));
   return NS_OK;
 }
 
@@ -1527,7 +1536,8 @@ nsNavBookmarks::SetItemTitle(int64_t aItemId, const nsACString& aTitle)
                                  bookmark.type,
                                  bookmark.parentId,
                                  bookmark.guid,
-                                 bookmark.parentGuid));
+                                 bookmark.parentGuid,
+                                 EmptyCString()));
   return NS_OK;
 }
 
@@ -1625,8 +1635,8 @@ nsNavBookmarks::QueryFolderChildren(
   nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
     "SELECT h.id, h.url, IFNULL(b.title, h.title), h.rev_host, h.visit_count, "
            "h.last_visit_date, f.url, b.id, b.dateAdded, b.lastModified, "
-           "b.parent, null, h.frecency, h.hidden, h.guid, b.guid, "
-           "b.position, b.type, b.fk "
+           "b.parent, null, h.frecency, h.hidden, h.guid, null, null, null, "
+           "b.guid, b.position, b.type, b.fk "
     "FROM moz_bookmarks b "
     "LEFT JOIN moz_places h ON b.fk = h.id "
     "LEFT JOIN moz_favicons f ON h.favicon_id = f.id "
@@ -1676,7 +1686,7 @@ nsNavBookmarks::ProcessFolderNodeRow(
   rv = aRow->GetInt64(nsNavHistory::kGetInfoIndex_ItemId, &id);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsRefPtr<nsNavHistoryResultNode> node;
+  RefPtr<nsNavHistoryResultNode> node;
 
   if (itemType == TYPE_BOOKMARK) {
     nsNavHistory* history = nsNavHistory::GetHistoryService();
@@ -1763,8 +1773,8 @@ nsNavBookmarks::QueryFolderChildrenAsync(
   nsCOMPtr<mozIStorageAsyncStatement> stmt = mDB->GetAsyncStatement(
     "SELECT h.id, h.url, IFNULL(b.title, h.title), h.rev_host, h.visit_count, "
            "h.last_visit_date, f.url, b.id, b.dateAdded, b.lastModified, "
-           "b.parent, null, h.frecency, h.hidden, h.guid, b.guid, "
-           "b.position, b.type, b.fk "
+           "b.parent, null, h.frecency, h.hidden, h.guid, null, null, null, "
+           "b.guid, b.position, b.type, b.fk "
     "FROM moz_bookmarks b "
     "LEFT JOIN moz_places h ON b.fk = h.id "
     "LEFT JOIN moz_favicons f ON h.favicon_id = f.id "
@@ -1843,7 +1853,7 @@ nsNavBookmarks::IsBookmarked(nsIURI* aURI, bool* aBookmarked)
   nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
     "SELECT 1 FROM moz_bookmarks b "
     "JOIN moz_places h ON b.fk = h.id "
-    "WHERE h.url = :page_url"
+    "WHERE h.url_hash = hash(:page_url) AND h.url = :page_url"
   );
   NS_ENSURE_STATE(stmt);
   mozStorageStatementScoper scoper(stmt);
@@ -2010,7 +2020,8 @@ nsNavBookmarks::ChangeBookmarkURI(int64_t aBookmarkId, nsIURI* aNewURI)
                                  bookmark.type,
                                  bookmark.parentId,
                                  bookmark.guid,
-                                 bookmark.parentGuid));
+                                 bookmark.parentGuid,
+                                 bookmark.url));
   return NS_OK;
 }
 
@@ -2044,10 +2055,11 @@ nsNavBookmarks::GetBookmarkIdsForURITArray(nsIURI* aURI,
   // importing, syncing or due to extensions.
   // Note: not using a JOIN is cheaper in this case.
   nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
+    "/* do not warn (bug 1175249) */ "
     "SELECT b.id, b.guid, b.parent, b.lastModified, t.guid, t.parent "
     "FROM moz_bookmarks b "
     "JOIN moz_bookmarks t on t.id = b.parent "
-    "WHERE b.fk = (SELECT id FROM moz_places WHERE url = :page_url) "
+    "WHERE b.fk = (SELECT id FROM moz_places WHERE url_hash = hash(:page_url) AND url = :page_url) "
     "ORDER BY b.lastModified DESC, b.id DESC "
   );
   NS_ENSURE_STATE(stmt);
@@ -2087,10 +2099,11 @@ nsNavBookmarks::GetBookmarksForURI(nsIURI* aURI,
   // importing, syncing or due to extensions.
   // Note: not using a JOIN is cheaper in this case.
   nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
+    "/* do not warn (bug 1175249) */ "
     "SELECT b.id, b.guid, b.parent, b.lastModified, t.guid, t.parent "
     "FROM moz_bookmarks b "
     "JOIN moz_bookmarks t on t.id = b.parent "
-    "WHERE b.fk = (SELECT id FROM moz_places WHERE url = :page_url) "
+    "WHERE b.fk = (SELECT id FROM moz_places WHERE url_hash = hash(:page_url) AND url = :page_url) "
     "ORDER BY b.lastModified DESC, b.id DESC "
   );
   NS_ENSURE_STATE(stmt);
@@ -2302,7 +2315,8 @@ nsNavBookmarks::SetKeywordForBookmark(int64_t aBookmarkId,
                                      TYPE_BOOKMARK,
                                      bookmarks[i].parentId,
                                      bookmarks[i].guid,
-                                     bookmarks[i].parentGuid));
+                                     bookmarks[i].parentGuid,
+                                     EmptyCString()));
     }
 
     return NS_OK;
@@ -2354,7 +2368,8 @@ nsNavBookmarks::SetKeywordForBookmark(int64_t aBookmarkId,
                                      TYPE_BOOKMARK,
                                      bookmarks[i].parentId,
                                      bookmarks[i].guid,
-                                     bookmarks[i].parentGuid));
+                                     bookmarks[i].parentGuid,
+                                     EmptyCString()));
     }
 
     stmt = mDB->GetStatement(
@@ -2393,7 +2408,8 @@ nsNavBookmarks::SetKeywordForBookmark(int64_t aBookmarkId,
                                    TYPE_BOOKMARK,
                                    bookmarks[i].parentId,
                                    bookmarks[i].guid,
-                                   bookmarks[i].parentGuid));
+                                   bookmarks[i].parentGuid,
+                                   EmptyCString()));
   }
 
   return NS_OK;
@@ -2506,6 +2522,10 @@ nsNavBookmarks::AddObserver(nsINavBookmarkObserver* aObserver,
                             bool aOwnsWeak)
 {
   NS_ENSURE_ARG(aObserver);
+
+  if (NS_WARN_IF(!mCanNotify))
+    return NS_ERROR_UNEXPECTED;
+
   return mObservers.AppendWeakElement(aObserver, aOwnsWeak);
 }
 
@@ -2536,7 +2556,7 @@ nsNavBookmarks::GetObservers(uint32_t* _count,
 
   // Then add the other observers.
   for (uint32_t i = 0; i < mObservers.Length(); ++i) {
-    const nsCOMPtr<nsINavBookmarkObserver> &observer = mObservers.ElementAt(i);
+    const nsCOMPtr<nsINavBookmarkObserver> &observer = mObservers.ElementAt(i).GetValue();
     // Skip nullified weak observers.
     if (observer)
       observers.AppendElement(observer);
@@ -2561,17 +2581,22 @@ void
 nsNavBookmarks::NotifyItemVisited(const ItemVisitData& aData)
 {
   nsCOMPtr<nsIURI> uri;
-  (void)NS_NewURI(getter_AddRefs(uri), aData.bookmark.url);
-  NOTIFY_OBSERVERS(mCanNotify, mCacheObservers, mObservers,
-                   nsINavBookmarkObserver,
-                   OnItemVisited(aData.bookmark.id,
-                                 aData.visitId,
-                                 aData.time,
-                                 aData.transitionType,
-                                 uri,
-                                 aData.bookmark.parentId,
-                                 aData.bookmark.guid,
-                                 aData.bookmark.parentGuid));
+  MOZ_ALWAYS_SUCCEEDS(NS_NewURI(getter_AddRefs(uri), aData.bookmark.url));
+  // Notify the visit only if we have a valid uri, otherwise the observer
+  // couldn't gather enough data from the notification.
+  // This should be false only if there's a bug in the code preceding us.
+  if (uri) {
+    NOTIFY_OBSERVERS(mCanNotify, mCacheObservers, mObservers,
+                     nsINavBookmarkObserver,
+                     OnItemVisited(aData.bookmark.id,
+                                   aData.visitId,
+                                   aData.time,
+                                   aData.transitionType,
+                                   uri,
+                                   aData.bookmark.parentId,
+                                   aData.bookmark.guid,
+                                   aData.bookmark.parentGuid));
+  }
 }
 
 void
@@ -2589,7 +2614,8 @@ nsNavBookmarks::NotifyItemChanged(const ItemChangeData& aData)
                                  aData.bookmark.type,
                                  aData.bookmark.parentId,
                                  aData.bookmark.guid,
-                                 aData.bookmark.parentGuid));
+                                 aData.bookmark.parentGuid,
+                                 aData.oldValue));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2612,6 +2638,7 @@ nsNavBookmarks::Observe(nsISupports *aSubject, const char *aTopic,
     // Don't even try to notify observers from this point on, the category
     // cache would init services that could try to use our APIs.
     mCanNotify = false;
+    mObservers.Clear();
   }
 
   return NS_OK;
@@ -2646,8 +2673,10 @@ NS_IMETHODIMP
 nsNavBookmarks::OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,
                         int64_t aSessionID, int64_t aReferringID,
                         uint32_t aTransitionType, const nsACString& aGUID,
-                        bool aHidden)
+                        bool aHidden, uint32_t aVisitCount, uint32_t aTyped)
 {
+  NS_ENSURE_ARG(aURI);
+
   // If the page is bookmarked, notify observers for each associated bookmark.
   ItemVisitData visitData;
   nsresult rv = aURI->GetSpec(visitData.bookmark.url);
@@ -2656,7 +2685,7 @@ nsNavBookmarks::OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,
   visitData.time = aTime;
   visitData.transitionType = aTransitionType;
 
-  nsRefPtr< AsyncGetBookmarksForURI<ItemVisitMethod, ItemVisitData> > notifier =
+  RefPtr< AsyncGetBookmarksForURI<ItemVisitMethod, ItemVisitData> > notifier =
     new AsyncGetBookmarksForURI<ItemVisitMethod, ItemVisitData>(this, &nsNavBookmarks::NotifyItemVisited, visitData);
   notifier->Init();
   return NS_OK;
@@ -2668,6 +2697,8 @@ nsNavBookmarks::OnDeleteURI(nsIURI* aURI,
                             const nsACString& aGUID,
                             uint16_t aReason)
 {
+  NS_ENSURE_ARG(aURI);
+
 #ifdef DEBUG
   nsNavHistory* history = nsNavHistory::GetHistoryService();
   int64_t placeId;
@@ -2724,6 +2755,8 @@ nsNavBookmarks::OnPageChanged(nsIURI* aURI,
                               const nsAString& aNewValue,
                               const nsACString& aGUID)
 {
+  NS_ENSURE_ARG(aURI);
+
   nsresult rv;
   if (aChangedAttribute == nsINavHistoryObserver::ATTRIBUTE_FAVICON) {
     ItemChangeData changeData;
@@ -2757,7 +2790,7 @@ nsNavBookmarks::OnPageChanged(nsIURI* aURI,
       }
     }
     else {
-      nsRefPtr< AsyncGetBookmarksForURI<ItemChangeMethod, ItemChangeData> > notifier =
+      RefPtr< AsyncGetBookmarksForURI<ItemChangeMethod, ItemChangeData> > notifier =
         new AsyncGetBookmarksForURI<ItemChangeMethod, ItemChangeData>(this, &nsNavBookmarks::NotifyItemChanged, changeData);
       notifier->Init();
     }
@@ -2771,6 +2804,8 @@ nsNavBookmarks::OnDeleteVisits(nsIURI* aURI, PRTime aVisitTime,
                                const nsACString& aGUID,
                                uint16_t aReason, uint32_t aTransitionType)
 {
+  NS_ENSURE_ARG(aURI);
+
   // Notify "cleartime" only if all visits to the page have been removed.
   if (!aVisitTime) {
     // If the page is bookmarked, notify observers for each associated bookmark.
@@ -2782,7 +2817,7 @@ nsNavBookmarks::OnDeleteVisits(nsIURI* aURI, PRTime aVisitTime,
     changeData.bookmark.lastModified = 0;
     changeData.bookmark.type = TYPE_BOOKMARK;
 
-    nsRefPtr< AsyncGetBookmarksForURI<ItemChangeMethod, ItemChangeData> > notifier =
+    RefPtr< AsyncGetBookmarksForURI<ItemChangeMethod, ItemChangeData> > notifier =
       new AsyncGetBookmarksForURI<ItemChangeMethod, ItemChangeData>(this, &nsNavBookmarks::NotifyItemChanged, changeData);
     notifier->Init();
   }
@@ -2820,7 +2855,8 @@ nsNavBookmarks::OnItemAnnotationSet(int64_t aItemId, const nsACString& aName)
                                  bookmark.type,
                                  bookmark.parentId,
                                  bookmark.guid,
-                                 bookmark.parentGuid));
+                                 bookmark.parentGuid,
+                                 EmptyCString()));
   return NS_OK;
 }
 

@@ -1,5 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- *//* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,14 +9,19 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/NotificationBinding.h"
-#include "mozilla/dom/workers/bindings/WorkerFeature.h"
+#include "mozilla/dom/workers/bindings/WorkerHolder.h"
 
 #include "nsIObserver.h"
 
 #include "nsCycleCollectionParticipant.h"
+#include "nsHashKeys.h"
+#include "nsTHashtable.h"
+#include "nsWeakReference.h"
+
+#define NOTIFICATIONTELEMETRYSERVICE_CONTRACTID \
+  "@mozilla.org/notificationTelemetryService;1"
 
 class nsIPrincipal;
-class nsIStructuredCloneContainer;
 class nsIVariant;
 
 namespace mozilla {
@@ -32,19 +36,48 @@ namespace workers {
 } // namespace workers
 
 class Notification;
-class NotificationFeature final : public workers::WorkerFeature
+class NotificationWorkerHolder final : public workers::WorkerHolder
 {
   // Since the feature is strongly held by a Notification, it is ok to hold
   // a raw pointer here.
   Notification* mNotification;
 
 public:
-  explicit NotificationFeature(Notification* aNotification);
+  explicit NotificationWorkerHolder(Notification* aNotification);
 
   bool
-  Notify(JSContext* aCx, workers::Status aStatus) override;
+  Notify(workers::Status aStatus) override;
 };
 
+// Records telemetry probes at application startup, when a notification is
+// shown, and when the notification permission is revoked for a site.
+class NotificationTelemetryService final : public nsIObserver
+{
+public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIOBSERVER
+
+  NotificationTelemetryService();
+
+  static already_AddRefed<NotificationTelemetryService> GetInstance();
+
+  nsresult Init();
+  void RecordDNDSupported();
+  void RecordPermissions();
+  nsresult RecordSender(nsIPrincipal* aPrincipal);
+
+private:
+  virtual ~NotificationTelemetryService();
+
+  nsresult AddPermissionChangeObserver();
+  nsresult RemovePermissionChangeObserver();
+
+  bool GetNotificationPermission(nsISupports* aSupports,
+                                 uint32_t* aCapability);
+
+  bool mDNDRecorded;
+  nsTHashtable<nsStringHashKey> mOrigins;
+};
 
 /*
  * Notifications on workers introduce some lifetime issues. The property we
@@ -90,34 +123,27 @@ public:
  * Note that the Notification's JS wrapper does it's standard
  * AddRef()/Release() and is not affected by any of this.
  *
- * There is one case related to the WorkerNotificationObserver having to
- * dispatch WorkerRunnables to the worker thread which will use the
- * Notification object. We can end up in a situation where an event runnable is
- * dispatched to the worker, gets queued in the worker's event queue, but then,
- * the worker yields to the main thread. Here the main thread observer is
- * destroyed, which frees its NotificationRef. The NotificationRef dispatches
- * a ControlRunnable to the worker, which runs before the event runnable,
- * leading to the event runnable possibly not having a valid Notification
- * reference.
- * We solve this problem by having WorkerNotificationObserver's dtor
- * dispatching a standard WorkerRunnable to do the release (this guarantees the
- * ordering of the release is after the event runnables). All WorkerRunnables
- * that get dispatched successfully are guaranteed to run on the worker before
- * it shuts down. If that dispatch fails, the standard ControlRunnable based
- * shutdown is acceptable since the already dispatched event runnables have
- * already run or canceled (the worker is already past Running).
+ * Since the worker event queue can have runnables that will dispatch events on
+ * the Notification, the NotificationRef destructor will first try to release
+ * the Notification by dispatching a normal runnable to the worker so that it is
+ * queued after any event runnables. If that dispatch fails, it means the worker
+ * is no longer running and queued WorkerRunnables will be canceled, so we
+ * dispatch a control runnable instead.
  *
  */
 class Notification : public DOMEventTargetHelper
+                   , public nsIObserver
+                   , public nsSupportsWeakReference
 {
   friend class CloseNotificationRunnable;
   friend class NotificationTask;
   friend class NotificationPermissionRequest;
-  friend class NotificationObserver;
+  friend class MainThreadNotificationObserver;
   friend class NotificationStorageCallback;
   friend class ServiceWorkerNotificationObserver;
   friend class WorkerGetRunnable;
   friend class WorkerNotificationObserver;
+  friend class NotificationTelemetryService;
 
 public:
   IMPL_EVENT_HANDLER(click)
@@ -126,7 +152,8 @@ public:
   IMPL_EVENT_HANDLER(close)
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(Notification, DOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(Notification, DOMEventTargetHelper)
+  NS_DECL_NSIOBSERVER
 
   static bool PrefEnabled(JSContext* aCx, JSObject* aObj);
   // Returns if Notification.get() is allowed for the current global.
@@ -158,7 +185,7 @@ public:
     const nsAString& aTag,
     const nsAString& aIcon,
     const nsAString& aData,
-    const nsAString& aServiceWorkerRegistrationID,
+    const nsAString& aServiceWorkerRegistrationScope,
     ErrorResult& aRv);
 
   void GetID(nsAString& aRetval) {
@@ -205,19 +232,18 @@ public:
     return mIsStored;
   }
 
-  nsIStructuredCloneContainer* GetDataCloneContainer();
-
   static bool RequestPermissionEnabledForScope(JSContext* aCx, JSObject* /* unused */);
 
-  static void RequestPermission(const GlobalObject& aGlobal,
-                                const Optional<OwningNonNull<NotificationPermissionCallback> >& aCallback,
-                                ErrorResult& aRv);
+  static already_AddRefed<Promise>
+  RequestPermission(const GlobalObject& aGlobal,
+                    const Optional<OwningNonNull<NotificationPermissionCallback> >& aCallback,
+                    ErrorResult& aRv);
 
   static NotificationPermission GetPermission(const GlobalObject& aGlobal,
                                               ErrorResult& aRv);
 
   static already_AddRefed<Promise>
-  Get(nsPIDOMWindow* aWindow,
+  Get(nsPIDOMWindowInner* aWindow,
       const GetNotificationOptions& aFilter,
       const nsAString& aScope,
       ErrorResult& aRv);
@@ -233,8 +259,13 @@ public:
 
   // Notification implementation of
   // ServiceWorkerRegistration.showNotification.
+  //
+  //
+  // Note that aCx may not be in the compartment of aGlobal, but aOptions will
+  // have its JS things in the compartment of aCx.
   static already_AddRefed<Promise>
-  ShowPersistentNotification(nsIGlobalObject* aGlobal,
+  ShowPersistentNotification(JSContext* aCx,
+                             nsIGlobalObject* aGlobal,
                              const nsAString& aScope,
                              const nsAString& aTitle,
                              const NotificationOptions& aOptions,
@@ -242,7 +273,7 @@ public:
 
   void Close();
 
-  nsPIDOMWindow* GetParentObject()
+  nsPIDOMWindowInner* GetParentObject()
   {
     return GetOwner();
   }
@@ -253,7 +284,7 @@ public:
 
   void InitFromJSVal(JSContext* aCx, JS::Handle<JS::Value> aData, ErrorResult& aRv);
 
-  void InitFromBase64(JSContext* aCx, const nsAString& aData, ErrorResult& aRv);
+  void InitFromBase64(const nsAString& aData, ErrorResult& aRv);
 
   void AssertIsOnTargetThread() const
   {
@@ -286,8 +317,13 @@ public:
   static NotificationPermission GetPermissionInternal(nsIPrincipal* aPrincipal,
                                                       ErrorResult& rv);
 
+  static NotificationPermission TestPermission(nsIPrincipal* aPrincipal);
+
   bool DispatchClickEvent();
   bool DispatchNotificationClickEvent();
+
+  static nsresult RemovePermission(nsIPrincipal* aPrincipal);
+  static nsresult OpenSettings(nsIPrincipal* aPrincipal);
 protected:
   Notification(nsIGlobalObject* aGlobal, const nsAString& aID,
                const nsAString& aTitle, const nsAString& aBody,
@@ -300,6 +336,8 @@ protected:
                                                        const nsAString& aTitle,
                                                        const NotificationOptions& aOptions);
 
+  nsresult Init();
+  bool IsInPrivateBrowsing();
   void ShowInternal();
   void CloseInternal();
 
@@ -318,7 +356,7 @@ protected:
     }
   }
 
-  static const NotificationDirection StringToDirection(const nsAString& aDirection)
+  static NotificationDirection StringToDirection(const nsAString& aDirection)
   {
     if (aDirection.EqualsLiteral("ltr")) {
       return NotificationDirection::Ltr;
@@ -359,11 +397,11 @@ protected:
   const nsString mLang;
   const nsString mTag;
   const nsString mIconUrl;
-  nsCOMPtr<nsIStructuredCloneContainer> mDataObjectContainer;
+  nsString mDataAsBase64;
   const NotificationBehavior mBehavior;
 
   // It's null until GetData is first called
-  nsCOMPtr<nsIVariant> mData;
+  JS::Heap<JS::Value> mData;
 
   nsString mAlertName;
   nsString mScope;
@@ -386,8 +424,12 @@ private:
   // Notification if result is NS_OK. The lifetime of this Notification is tied
   // to an underlying NotificationRef. Do not hold a non-stack raw pointer to
   // it. Be careful about thread safety if acquiring a strong reference.
+  //
+  // Note that aCx may not be in the compartment of aGlobal, but aOptions will
+  // have its JS things in the compartment of aCx.
   static already_AddRefed<Notification>
-  CreateAndShow(nsIGlobalObject* aGlobal,
+  CreateAndShow(JSContext* aCx,
+                nsIGlobalObject* aGlobal,
                 const nsAString& aTitle,
                 const NotificationOptions& aOptions,
                 const nsAString& aScope,
@@ -406,13 +448,13 @@ private:
     return NS_IsMainThread() == !mWorkerPrivate;
   }
 
-  bool RegisterFeature();
-  void UnregisterFeature();
+  bool RegisterWorkerHolder();
+  void UnregisterWorkerHolder();
 
   nsresult ResolveIconAndSoundURL(nsString&, nsString&);
 
   // Only used for Notifications on Workers, worker thread only.
-  UniquePtr<NotificationFeature> mFeature;
+  UniquePtr<NotificationWorkerHolder> mWorkerHolder;
   // Target thread only.
   uint32_t mTaskCount;
 };

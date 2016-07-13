@@ -7,15 +7,15 @@
 #ifndef nsTHashtable_h__
 #define nsTHashtable_h__
 
-#include "nscore.h"
-#include "pldhash.h"
-#include "nsDebug.h"
+#include "PLDHashTable.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/fallible.h"
 #include "mozilla/MemoryChecking.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Move.h"
-#include "mozilla/fallible.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/TypeTraits.h"
 
 #include <new>
 
@@ -37,8 +37,8 @@
  *     // this should either be a simple datatype (uint32_t, nsISupports*) or
  *     // a const reference (const nsAString&)
  *     typedef something KeyType;
- *     // KeyTypePointer is the pointer-version of KeyType, because pldhash.h
- *     // requires keys to cast to <code>const void*</code>
+ *     // KeyTypePointer is the pointer-version of KeyType, because
+ *     // PLDHashTable.h requires keys to cast to <code>const void*</code>
  *     typedef const something* KeyTypePointer;
  *
  *     EntryType(KeyTypePointer aKey);
@@ -71,20 +71,12 @@
  * @author "Benjamin Smedberg <bsmedberg@covad.net>"
  */
 
-// These are the codes returned by |Enumerator| functions, which control
-// EnumerateEntry()'s behavior. The PLD/PL_D prefix is because they originated
-// in PLDHashTable, but that class no longer uses them.
-enum PLDHashOperator
-{
-  PL_DHASH_NEXT = 0,          // enumerator says continue
-  PL_DHASH_STOP = 1,          // enumerator says stop
-  PL_DHASH_REMOVE = 2         // enumerator says remove
-};
-
 template<class EntryType>
-class nsTHashtable
+class MOZ_NEEDS_NO_VTABLE_TYPE nsTHashtable
 {
   typedef mozilla::fallible_t fallible_t;
+  static_assert(mozilla::IsPointer<typename EntryType::KeyTypePointer>::value,
+                "KeyTypePointer should be a pointer");
 
 public:
   // Separate constructors instead of default aInitLength parameter since
@@ -126,6 +118,11 @@ public:
   uint32_t Count() const { return mTable.EntryCount(); }
 
   /**
+   * Return true if the hashtable is empty.
+   */
+  bool IsEmpty() const { return Count() == 0; }
+
+  /**
    * Get the entry associated with a key.
    * @param     aKey the key to retrieve
    * @return    pointer to the entry class, if the key exists; nullptr if the
@@ -134,8 +131,7 @@ public:
   EntryType* GetEntry(KeyType aKey) const
   {
     return static_cast<EntryType*>(
-      PL_DHashTableSearch(const_cast<PLDHashTable*>(&mTable),
-                          EntryType::KeyToPointer(aKey)));
+      const_cast<PLDHashTable*>(&mTable)->Search(EntryType::KeyToPointer(aKey)));
   }
 
   /**
@@ -153,16 +149,15 @@ public:
    */
   EntryType* PutEntry(KeyType aKey)
   {
-    return static_cast<EntryType*>  // infallible add
-      (PL_DHashTableAdd(&mTable, EntryType::KeyToPointer(aKey)));
+    // infallible add
+    return static_cast<EntryType*>(mTable.Add(EntryType::KeyToPointer(aKey)));
   }
 
-  MOZ_WARN_UNUSED_RESULT
+  MOZ_MUST_USE
   EntryType* PutEntry(KeyType aKey, const fallible_t&)
   {
-    return static_cast<EntryType*>
-      (PL_DHashTableAdd(&mTable, EntryType::KeyToPointer(aKey),
-                        mozilla::fallible));
+    return static_cast<EntryType*>(mTable.Add(EntryType::KeyToPointer(aKey),
+                                              mozilla::fallible));
   }
 
   /**
@@ -171,61 +166,28 @@ public:
    */
   void RemoveEntry(KeyType aKey)
   {
-    PL_DHashTableRemove(&mTable,
-                        EntryType::KeyToPointer(aKey));
+    mTable.Remove(EntryType::KeyToPointer(aKey));
+  }
+
+  /**
+   * Remove the entry associated with a key.
+   * @param aEntry   the entry-pointer to remove (obtained from GetEntry)
+   */
+  void RemoveEntry(EntryType* aEntry)
+  {
+    mTable.RemoveEntry(aEntry);
   }
 
   /**
    * Remove the entry associated with a key, but don't resize the hashtable.
    * This is a low-level method, and is not recommended unless you know what
-   * you're doing and you need the extra performance. This method can be used
-   * during enumeration, while RemoveEntry() cannot.
-   * @param aEntry   the entry-pointer to remove (obtained from GetEntry or
-   *                 the enumerator
+   * you're doing. If you use it, please add a comment explaining why you
+   * didn't use RemoveEntry().
+   * @param aEntry   the entry-pointer to remove (obtained from GetEntry)
    */
   void RawRemoveEntry(EntryType* aEntry)
   {
-    PL_DHashTableRawRemove(&mTable, aEntry);
-  }
-
-  /**
-   * client must provide an <code>Enumerator</code> function for
-   *   EnumerateEntries
-   * @param     aEntry the entry being enumerated
-   * @param     userArg passed unchanged from <code>EnumerateEntries</code>
-   * @return    combination of flags
-   *            @link PLDHashOperator::PL_DHASH_NEXT PL_DHASH_NEXT @endlink ,
-   *            @link PLDHashOperator::PL_DHASH_STOP PL_DHASH_STOP @endlink ,
-   *            @link PLDHashOperator::PL_DHASH_REMOVE PL_DHASH_REMOVE @endlink
-   */
-  typedef PLDHashOperator (*Enumerator)(EntryType* aEntry, void* userArg);
-
-  /**
-   * Enumerate all the entries of the function. If any entries are removed via
-   * a PL_DHASH_REMOVE return value from |aEnumFunc|, the table may be shrunk
-   * at the end. Use RawRemoveEntry() instead if you wish to remove an entry
-   * without possibly shrinking the table.
-   * WARNING: this function is deprecated. Please use Iterator instead.
-   * @param     enumFunc the <code>Enumerator</code> function to call
-   * @param     userArg a pointer to pass to the
-   *            <code>Enumerator</code> function
-   * @return    the number of entries actually enumerated
-   */
-  uint32_t EnumerateEntries(Enumerator aEnumFunc, void* aUserArg)
-  {
-    uint32_t n = 0;
-    for (auto iter = mTable.Iter(); !iter.Done(); iter.Next()) {
-      auto entry = static_cast<EntryType*>(iter.Get());
-      PLDHashOperator op = aEnumFunc(entry, aUserArg);
-      n++;
-      if (op & PL_DHASH_REMOVE) {
-        iter.Remove();
-      }
-      if (op & PL_DHASH_STOP) {
-        break;
-      }
-    }
-    return n;
+    mTable.RawRemove(aEntry);
   }
 
   // This is an iterator that also allows entry removal. Example usage:
@@ -272,68 +234,47 @@ public:
   }
 
   /**
-   * client must provide a <code>SizeOfEntryExcludingThisFun</code> function for
-   *   SizeOfExcludingThis.
-   * @param     aEntry the entry being enumerated
-   * @param     mallocSizeOf the function used to measure heap-allocated blocks
-   * @param     arg passed unchanged from <code>SizeOf{In,Ex}cludingThis</code>
-   * @return    summed size of the things pointed to by the entries
-   */
-  typedef size_t (*SizeOfEntryExcludingThisFun)(EntryType* aEntry,
-                                                mozilla::MallocSizeOf aMallocSizeOf,
-                                                void* aArg);
-
-  /**
-   * Measure the size of the table's entry storage, and if
-   * |aSizeOfEntryExcludingThis| is non-nullptr, measure the size of things
-   * pointed to by entries.
+   * Measure the size of the table's entry storage. Does *not* measure anything
+   * hanging off table entries; hence the "Shallow" prefix. To measure that,
+   * either use SizeOfExcludingThis() or iterate manually over the entries,
+   * calling SizeOfExcludingThis() on each one.
    *
-   * @param     sizeOfEntryExcludingThis the
-   *            <code>SizeOfEntryExcludingThisFun</code> function to call
-   * @param     mallocSizeOf the function used to measure heap-allocated blocks
-   * @param     userArg a pointer to pass to the
-   *            <code>SizeOfEntryExcludingThisFun</code> function
-   * @return    the summed size of all the entries
+   * @param     aMallocSizeOf the function used to measure heap-allocated blocks
+   * @return    the measured shallow size of the table
    */
-  size_t SizeOfExcludingThis(SizeOfEntryExcludingThisFun aSizeOfEntryExcludingThis,
-                             mozilla::MallocSizeOf aMallocSizeOf,
-                             void* aUserArg = nullptr) const
+  size_t ShallowSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
-    if (aSizeOfEntryExcludingThis) {
-      s_SizeOfArgs args = { aSizeOfEntryExcludingThis, aUserArg };
-      return PL_DHashTableSizeOfExcludingThis(&mTable, s_SizeOfStub,
-                                              aMallocSizeOf, &args);
-    }
-    return PL_DHashTableSizeOfExcludingThis(&mTable, nullptr, aMallocSizeOf);
+    return mTable.ShallowSizeOfExcludingThis(aMallocSizeOf);
   }
 
   /**
-   * If the EntryType defines SizeOfExcludingThis, there's no need to define a new
-   * SizeOfEntryExcludingThisFun.
+   * Like ShallowSizeOfExcludingThis, but includes sizeof(*this).
+   */
+  size_t ShallowSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+  {
+    return aMallocSizeOf(this) + ShallowSizeOfExcludingThis(aMallocSizeOf);
+  }
+
+  /**
+   * This is a "deep" measurement of the table. To use it, |EntryType| must
+   * define SizeOfExcludingThis, and that method will be called on all live
+   * entries.
    */
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
-    return SizeOfExcludingThis(BasicSizeOfEntryExcludingThisFun, aMallocSizeOf);
+    size_t n = ShallowSizeOfExcludingThis(aMallocSizeOf);
+    for (auto iter = ConstIter(); !iter.Done(); iter.Next()) {
+      n += (*iter.Get()).SizeOfExcludingThis(aMallocSizeOf);
+    }
+    return n;
   }
 
   /**
    * Like SizeOfExcludingThis, but includes sizeof(*this).
    */
-  size_t SizeOfIncludingThis(SizeOfEntryExcludingThisFun aSizeOfEntryExcludingThis,
-                             mozilla::MallocSizeOf aMallocSizeOf,
-                             void* aUserArg = nullptr) const
-  {
-    return aMallocSizeOf(this) +
-      SizeOfExcludingThis(aSizeOfEntryExcludingThis, aMallocSizeOf, aUserArg);
-  }
-
-  /**
-   * If the EntryType defines SizeOfExcludingThis, there's no need to define a new
-   * SizeOfEntryExcludingThisFun.
-   */
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
-    return SizeOfIncludingThis(BasicSizeOfEntryExcludingThisFun, aMallocSizeOf);
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
   /**
@@ -355,18 +296,16 @@ public:
    */
   void MarkImmutable()
   {
-    PL_DHashMarkTableImmutable(&mTable);
+    mTable.MarkImmutable();
   }
 #endif
 
 protected:
   PLDHashTable mTable;
 
-  static const void* s_GetKey(PLDHashTable* aTable, PLDHashEntryHdr* aEntry);
+  static PLDHashNumber s_HashKey(const void* aKey);
 
-  static PLDHashNumber s_HashKey(PLDHashTable* aTable, const void* aKey);
-
-  static bool s_MatchEntry(PLDHashTable* aTable, const PLDHashEntryHdr* aEntry,
+  static bool s_MatchEntry(const PLDHashEntryHdr* aEntry,
                            const void* aKey);
 
   static void s_CopyEntry(PLDHashTable* aTable, const PLDHashEntryHdr* aFrom,
@@ -376,22 +315,6 @@ protected:
 
   static void s_InitEntry(PLDHashEntryHdr* aEntry, const void* aKey);
 
-  /**
-   * passed internally during sizeOf counting.  Allocated on the stack.
-   *
-   * @param userFunc the SizeOfEntryExcludingThisFun passed to
-   *                 SizeOf{In,Ex}cludingThis by the client
-   * @param userArg the userArg passed unaltered
-   */
-  struct s_SizeOfArgs
-  {
-    SizeOfEntryExcludingThisFun userFunc;
-    void* userArg;
-  };
-
-  static size_t s_SizeOfStub(PLDHashEntryHdr* aEntry,
-                             mozilla::MallocSizeOf aMallocSizeOf, void* aArg);
-
 private:
   // copy constructor, not implemented
   nsTHashtable(nsTHashtable<EntryType>& aToCopy) = delete;
@@ -400,14 +323,6 @@ private:
    * Gets the table's ops.
    */
   static const PLDHashTableOps* Ops();
-
-  /**
-   * An implementation of SizeOfEntryExcludingThisFun that calls SizeOfExcludingThis()
-   * on each entry.
-   */
-  static size_t BasicSizeOfEntryExcludingThisFun(EntryType* aEntry,
-                                                 mozilla::MallocSizeOf aMallocSizeOf,
-                                                 void*);
 
   // assignment operator, not implemented
   nsTHashtable<EntryType>& operator=(nsTHashtable<EntryType>& aToEqual) = delete;
@@ -442,40 +357,29 @@ nsTHashtable<EntryType>::Ops()
   {
     s_HashKey,
     s_MatchEntry,
-    EntryType::ALLOW_MEMMOVE ? ::PL_DHashMoveEntryStub : s_CopyEntry,
+    EntryType::ALLOW_MEMMOVE ? PLDHashTable::MoveEntryStub : s_CopyEntry,
     s_ClearEntry,
     s_InitEntry
   };
   return &sOps;
 }
 
-// static
-template<class EntryType>
-size_t
-nsTHashtable<EntryType>::BasicSizeOfEntryExcludingThisFun(EntryType* aEntry,
-                                                          mozilla::MallocSizeOf aMallocSizeOf,
-                                                          void*)
-{
-  return aEntry->SizeOfExcludingThis(aMallocSizeOf);
-}
-
 // static definitions
 
 template<class EntryType>
 PLDHashNumber
-nsTHashtable<EntryType>::s_HashKey(PLDHashTable* aTable, const void* aKey)
+nsTHashtable<EntryType>::s_HashKey(const void* aKey)
 {
-  return EntryType::HashKey(reinterpret_cast<const KeyTypePointer>(aKey));
+  return EntryType::HashKey(static_cast<const KeyTypePointer>(aKey));
 }
 
 template<class EntryType>
 bool
-nsTHashtable<EntryType>::s_MatchEntry(PLDHashTable* aTable,
-                                      const PLDHashEntryHdr* aEntry,
+nsTHashtable<EntryType>::s_MatchEntry(const PLDHashEntryHdr* aEntry,
                                       const void* aKey)
 {
   return ((const EntryType*)aEntry)->KeyEquals(
-    reinterpret_cast<const KeyTypePointer>(aKey));
+    static_cast<const KeyTypePointer>(aKey));
 }
 
 template<class EntryType>
@@ -485,7 +389,7 @@ nsTHashtable<EntryType>::s_CopyEntry(PLDHashTable* aTable,
                                      PLDHashEntryHdr* aTo)
 {
   EntryType* fromEntry =
-    const_cast<EntryType*>(reinterpret_cast<const EntryType*>(aFrom));
+    const_cast<EntryType*>(static_cast<const EntryType*>(aFrom));
 
   new (aTo) EntryType(mozilla::Move(*fromEntry));
 
@@ -505,20 +409,7 @@ void
 nsTHashtable<EntryType>::s_InitEntry(PLDHashEntryHdr* aEntry,
                                      const void* aKey)
 {
-  new (aEntry) EntryType(reinterpret_cast<KeyTypePointer>(aKey));
-}
-
-template<class EntryType>
-size_t
-nsTHashtable<EntryType>::s_SizeOfStub(PLDHashEntryHdr* aEntry,
-                                      mozilla::MallocSizeOf aMallocSizeOf,
-                                      void* aArg)
-{
-  // dereferences the function-pointer to the user's enumeration function
-  return (*reinterpret_cast<s_SizeOfArgs*>(aArg)->userFunc)(
-    static_cast<EntryType*>(aEntry),
-    aMallocSizeOf,
-    reinterpret_cast<s_SizeOfArgs*>(aArg)->userArg);
+  new (aEntry) EntryType(static_cast<KeyTypePointer>(aKey));
 }
 
 class nsCycleCollectionTraversalCallback;

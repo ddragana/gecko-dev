@@ -15,13 +15,13 @@ const MANIFEST_HANDLER         = "manifests/handler";
 const SEC_IN_ONE_DAY  = 24 * 60 * 60;
 const MS_IN_ONE_DAY   = SEC_IN_ONE_DAY * 1000;
 
-let gProfileDir          = null;
-let gHttpServer          = null;
-let gHttpRoot            = null;
-let gDataRoot            = null;
-let gPolicy              = null;
-let gManifestObject      = null;
-let gManifestHandlerURI  = null;
+var gProfileDir          = null;
+var gHttpServer          = null;
+var gHttpRoot            = null;
+var gDataRoot            = null;
+var gPolicy              = null;
+var gManifestObject      = null;
+var gManifestHandlerURI  = null;
 
 function run_test() {
   run_next_test();
@@ -156,8 +156,11 @@ add_task(function* test_disableExperiments() {
 
   try {
     yield experiments.updateManifest();
-  } catch (e if e.message == "experiments are disabled") {
-    // This exception is expected.
+  } catch (e) {
+    // This exception is expected, we rethrow everything else
+    if (e.message != "experiments are disabled") {
+      throw e;
+    }
   }
 
   experiments.notify();

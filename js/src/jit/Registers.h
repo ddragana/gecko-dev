@@ -16,8 +16,10 @@
 # include "jit/arm/Architecture-arm.h"
 #elif defined(JS_CODEGEN_ARM64)
 # include "jit/arm64/Architecture-arm64.h"
-#elif defined(JS_CODEGEN_MIPS)
-# include "jit/mips/Architecture-mips.h"
+#elif defined(JS_CODEGEN_MIPS32)
+# include "jit/mips32/Architecture-mips32.h"
+#elif defined(JS_CODEGEN_MIPS64)
+# include "jit/mips64/Architecture-mips64.h"
 #elif defined(JS_CODEGEN_NONE)
 # include "jit/none/Architecture-none.h"
 #else
@@ -42,6 +44,10 @@ struct Register {
     static Register FromName(const char* name) {
         Code code = Registers::FromName(name);
         Register r = { Encoding(code) };
+        return r;
+    }
+    static Register Invalid() {
+        Register r = { Encoding(Codes::Invalid) };
         return r;
     }
     MOZ_CONSTEXPR Code code() const {
@@ -93,6 +99,42 @@ struct Register {
     }
 };
 
+struct Register64
+{
+#ifdef JS_PUNBOX64
+    Register reg;
+#else
+    Register high;
+    Register low;
+#endif
+
+#ifdef JS_PUNBOX64
+    explicit MOZ_CONSTEXPR Register64(Register r)
+      : reg(r)
+    {}
+    bool operator ==(Register64 other) const {
+        return reg == other.reg;
+    }
+    bool operator !=(Register64 other) const {
+        return reg != other.reg;
+    }
+#else
+    explicit Register64(Register r)
+      : high(Register::Invalid()), low(Register::Invalid())
+    {}
+
+    MOZ_CONSTEXPR Register64(Register h, Register l)
+      : high(h), low(l)
+    {}
+    bool operator ==(Register64 other) const {
+        return high == other.high && low == other.low;
+    }
+    bool operator !=(Register64 other) const {
+        return high != other.high || low != other.low;
+    }
+#endif
+};
+
 class RegisterDump
 {
   public:
@@ -124,9 +166,9 @@ class MachineState
   public:
     MachineState() {
 #ifndef JS_CODEGEN_NONE
-        for (unsigned i = 0; i < Registers::Total; i++)
+        for (uintptr_t i = 0; i < Registers::Total; i++)
             regs_[i] = reinterpret_cast<Registers::RegisterContent*>(i + 0x100);
-        for (unsigned i = 0; i < FloatRegisters::Total; i++)
+        for (uintptr_t i = 0; i < FloatRegisters::Total; i++)
             fpregs_[i] = reinterpret_cast<FloatRegisters::RegisterContent*>(i + 0x200);
 #endif
     }
@@ -166,6 +208,34 @@ class MachineState
         return fpregs_[reg.code()];
     }
 };
+
+class MacroAssembler;
+
+// Declares a register as owned within the scope of the object.
+// In debug mode, owned register state is tracked within the MacroAssembler,
+// and an assert will fire if ownership is conflicting.
+// In contrast to ARM64's UseScratchRegisterScope, this class has no overhead
+// in non-debug builds.
+template <class RegisterType>
+struct AutoGenericRegisterScope : public RegisterType
+{
+    // Prevent MacroAssembler templates from creating copies,
+    // which causes the destructor to fire more than once.
+    AutoGenericRegisterScope(const AutoGenericRegisterScope& other) = delete;
+
+#ifdef DEBUG
+    MacroAssembler& masm_;
+    explicit AutoGenericRegisterScope(MacroAssembler& masm, RegisterType reg);
+    ~AutoGenericRegisterScope();
+#else
+    MOZ_CONSTEXPR explicit AutoGenericRegisterScope(MacroAssembler& masm, RegisterType reg)
+      : RegisterType(reg)
+    { }
+#endif
+};
+
+typedef AutoGenericRegisterScope<Register> AutoRegisterScope;
+typedef AutoGenericRegisterScope<FloatRegister> AutoFloatRegisterScope;
 
 } // namespace jit
 } // namespace js

@@ -4,6 +4,8 @@
 
 /*** =================== REJECTED SIGNONS CODE =================== ***/
 
+Components.utils.import("resource://gre/modules/AppConstants.jsm");
+
 function RejectsStartup() {
   LoadRejects();
 
@@ -14,10 +16,10 @@ function RejectsStartup() {
 var rejectsTreeView = {
   rowCount : 0,
   setTree : function(tree){},
-  getImageSrc : function(row,column) {},
-  getProgressMode : function(row,column) {},
-  getCellValue : function(row,column) {},
-  getCellText : function(row,column){
+  getImageSrc : function(row, column) {},
+  getProgressMode : function(row, column) {},
+  getCellValue : function(row, column) {},
+  getCellText : function(row, column){
     var rv="";
     if (column.id=="rejectCol") {
       rv = rejects[row].host;
@@ -30,7 +32,7 @@ var rejectsTreeView = {
   cycleHeader : function(column) {},
   getRowProperties : function(row){ return ""; },
   getColumnProperties : function(column){ return ""; },
-  getCellProperties : function(row,column){
+  getCellProperties : function(row, column) {
     if (column.element.getAttribute("id") == "rejectCol")
       return "ltr";
 
@@ -54,7 +56,7 @@ function LoadRejects() {
 
   var element = document.getElementById("removeAllRejects");
   if (rejects.length == 0) {
-    element.setAttribute("disabled","true");
+    element.setAttribute("disabled", "true");
   } else {
     element.removeAttribute("disabled");
   }
@@ -89,11 +91,10 @@ function FinalizeRejectDeletions() {
 }
 
 function HandleRejectKeyPress(e) {
-  if (e.keyCode == KeyEvent.DOM_VK_DELETE
-#ifdef XP_MACOSX
-      || e.keyCode == KeyEvent.DOM_VK_BACK_SPACE
-#endif
-     ) {
+  if (e.keyCode == KeyEvent.DOM_VK_DELETE ||
+      (AppConstants.platform == "macosx" &&
+       e.keyCode == KeyEvent.DOM_VK_BACK_SPACE))
+  {
     DeleteReject();
   }
 }

@@ -9,7 +9,5 @@
 
 interface DummyInterface {
   void lifecycleCallbacks(optional LifecycleCallbacks arg);
-};
-
-interface DummyInterfaceWorkers {
+  void promiseJobCallback(PromiseJobCallback arg);
 };

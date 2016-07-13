@@ -5,6 +5,7 @@
 
 #include "nsISupports.idl"
 
+interface mozIApplication;
 interface nsFrameLoader;
 interface nsIDocShell;
 interface nsIURI;
@@ -15,8 +16,10 @@ interface nsIVariant;
 interface nsIDOMElement;
 interface nsITabParent;
 interface nsILoadContext;
+interface nsIPrintSettings;
+interface nsIWebProgressListener;
 
-[scriptable, builtinclass, uuid(d24f9330-ae4e-11e4-ab27-0800200c9a66)]
+[scriptable, builtinclass, uuid(1645af04-1bc7-4363-8f2c-eb9679220ab1)]
 interface nsIFrameLoader : nsISupports
 {
   /**
@@ -50,9 +53,23 @@ interface nsIFrameLoader : nsISupports
   void loadURI(in nsIURI aURI);
 
   /**
+   * Loads the specified URI in this frame but using a different process.
+   * Behaves identically to loadURI, except that this method only works
+   * with remote frame. For a signed package, we need to specifiy the
+   * package identifier.
+   * Throws an exception with non-remote frames.
+   */
+  void switchProcessAndLoadURI(in nsIURI aURI, in ACString aPackageId);
+
+  /**
    * Puts the frameloader in prerendering mode.
    */
   void setIsPrerendered();
+
+  /**
+   * Make the prerendered frameloader being active (and clear isPrerendered flag).
+   */
+  void makePrerenderedLoaderActive();
 
   /**
    * Destroy the frame loader and everything inside it. This will
@@ -130,6 +147,18 @@ interface nsIFrameLoader : nsISupports
   void requestNotifyLayerTreeCleared();
 
   /**
+   * Print the current document.
+   *
+   * @param aOuterWindowID the ID of the outer window to print
+   * @param aPrintSettings optional print settings to use; printSilent can be
+   *                       set to prevent prompting.
+   * @param aProgressListener optional print progress listener.
+   */
+  void print(in unsigned long long aOuterWindowID,
+             in nsIPrintSettings aPrintSettings,
+             in nsIWebProgressListener aProgressListener);
+
+  /**
    * The default event mode automatically forwards the events
    * handled in EventStateManager::HandleCrossProcessEvent to
    * the child content process when these events are targeted to
@@ -140,7 +169,7 @@ interface nsIFrameLoader : nsISupports
   const unsigned long EVENT_MODE_NORMAL_DISPATCH = 0x00000000;
 
   /**
-   * With this event mode, it's the application's responsability to 
+   * With this event mode, it's the application's responsability to
    * convert and forward events to the content process
    */
   const unsigned long EVENT_MODE_DONT_FORWARD_TO_CHILD = 0x00000001;
@@ -186,17 +215,33 @@ interface nsIFrameLoader : nsISupports
   [infallible] attribute boolean visible;
 
   /**
-   * Find out whether the owner content really is a browser or app frame
-   * Especially, a widget frame is regarded as an app frame.
+   * Find out whether the owner content really is a mozbrowser or app frame
+   * Especially, a widget frame is regarded as an app frame.  <xul:browser> is
+   * not considered to be a mozbrowser frame.
    */
-  readonly attribute boolean ownerIsBrowserOrAppFrame;
+  readonly attribute boolean ownerIsMozBrowserOrAppFrame;
 
   /**
    * Find out whether the owner content really is a widget. If this attribute
-   * returns true, |ownerIsBrowserOrAppFrame| must return true.
+   * returns true, |ownerIsMozBrowserOrAppFrame| must return true.
    */
   readonly attribute boolean ownerIsWidget;
 
+  /**
+   * The last known width of the frame. Reading this property will not trigger
+   * a reflow, and therefore may not reflect the current state of things. It
+   * should only be used in asynchronous APIs where values are not guaranteed
+   * to be up-to-date when received.
+   */
+  readonly attribute unsigned long lazyWidth;
+
+  /**
+   * The last known height of the frame. Reading this property will not trigger
+   * a reflow, and therefore may not reflect the current state of things. It
+   * should only be used in asynchronous APIs where values are not guaranteed
+   * to be up-to-date when received.
+   */
+  readonly attribute unsigned long lazyHeight;
 };
 
 %{C++
@@ -205,7 +250,7 @@ class nsFrameLoader;
 
 native alreadyAddRefed_nsFrameLoader(already_AddRefed<nsFrameLoader>);
 
-[scriptable, uuid(c4abebcf-55f3-47d4-af15-151311971255)]
+[scriptable, uuid(adc1b3ba-8deb-4943-8045-e6de0044f2ce)]
 interface nsIFrameLoaderOwner : nsISupports
 {
   /**
@@ -215,19 +260,13 @@ interface nsIFrameLoaderOwner : nsISupports
   [noscript, notxpcom] alreadyAddRefed_nsFrameLoader GetFrameLoader();
 
   /**
+   * The principal of parent mozIApplication in case of nested mozbrowser
+   * iframes.
+   */
+  readonly attribute mozIApplication parentApplication;
+
+  /**
    * Puts the FrameLoaderOwner in prerendering mode.
    */
   void setIsPrerendered();
-
-  /**
-   * Swap frame loaders with the given nsIFrameLoaderOwner.  This may
-   * only be posible in a very limited range of circumstances, or
-   * never, depending on the object implementing this interface.
-   *
-   * @throws NS_ERROR_NOT_IMPLEMENTED if the swapping logic is not
-   *   implemented for the two given frame loader owners.
-   * @throws NS_ERROR_DOM_SECURITY_ERR if the swap is not allowed on
-   *   security grounds.
-   */
-  void swapFrameLoaders(in nsIFrameLoaderOwner aOtherOwner);
 };

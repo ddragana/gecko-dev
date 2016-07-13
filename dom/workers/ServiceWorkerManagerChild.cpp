@@ -23,7 +23,7 @@ ServiceWorkerManagerChild::RecvNotifyRegister(
     return true;
   }
 
-  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   MOZ_ASSERT(swm);
 
   swm->LoadRegistration(aData);
@@ -32,14 +32,14 @@ ServiceWorkerManagerChild::RecvNotifyRegister(
 
 bool
 ServiceWorkerManagerChild::RecvNotifySoftUpdate(
-                                      const OriginAttributes& aOriginAttributes,
+                                      const PrincipalOriginAttributes& aOriginAttributes,
                                       const nsString& aScope)
 {
   if (mShuttingDown) {
     return true;
   }
 
-  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   MOZ_ASSERT(swm);
 
   swm->SoftUpdate(aOriginAttributes, NS_ConvertUTF16toUTF8(aScope));
@@ -54,7 +54,7 @@ ServiceWorkerManagerChild::RecvNotifyUnregister(const PrincipalInfo& aPrincipalI
     return true;
   }
 
-  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   MOZ_ASSERT(swm);
 
   nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(aPrincipalInfo);
@@ -62,8 +62,8 @@ ServiceWorkerManagerChild::RecvNotifyUnregister(const PrincipalInfo& aPrincipalI
     return true;
   }
 
-  nsresult rv = swm->Unregister(principal, nullptr, aScope);
-  unused << NS_WARN_IF(NS_FAILED(rv));
+  nsresult rv = swm->NotifyUnregister(principal, aScope);
+  Unused << NS_WARN_IF(NS_FAILED(rv));
   return true;
 }
 
@@ -74,7 +74,7 @@ ServiceWorkerManagerChild::RecvNotifyRemove(const nsCString& aHost)
     return true;
   }
 
-  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   MOZ_ASSERT(swm);
 
   swm->Remove(aHost);
@@ -88,7 +88,7 @@ ServiceWorkerManagerChild::RecvNotifyRemoveAll()
     return true;
   }
 
-  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   MOZ_ASSERT(swm);
 
   swm->RemoveAll();

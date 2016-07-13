@@ -8,24 +8,34 @@
 #define jit_JitSpewer_h
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/IntegerPrintfMacros.h"
 
 #include <stdarg.h>
 
 #include "jit/C1Spewer.h"
 #include "jit/JSONSpewer.h"
+
 #include "js/RootingAPI.h"
+
+#include "vm/Printer.h"
 
 namespace js {
 namespace jit {
 
 // New channels may be added below.
 #define JITSPEW_CHANNEL_LIST(_)             \
+    /* Information during sinking */        \
+    _(Prune)                                \
     /* Information during escape analysis */\
     _(Escape)                               \
     /* Information during alias analysis */ \
     _(Alias)                                \
+    /* Information during alias analysis */ \
+    _(AliasSummaries)                       \
     /* Information during GVN */            \
     _(GVN)                                  \
+    /* Information during sincos */         \
+    _(Sincos)                               \
     /* Information during sinking */        \
     _(Sink)                                 \
     /* Information during Range analysis */ \
@@ -96,14 +106,17 @@ enum JitSpewChannel {
     JitSpew_Terminator
 };
 
+class BacktrackingAllocator;
+class MDefinition;
 class MIRGenerator;
+class MIRGraph;
 class TempAllocator;
 
 // The JitSpewer is only available on debug builds.
 // None of the global functions have effect on non-debug builds.
 static const int NULL_ID = -1;
 
-#ifdef DEBUG
+#ifdef JS_JITSPEW
 
 // Class made to hold the MIR and LIR graphs of an AsmJS / Ion compilation.
 class GraphSpewer
@@ -116,13 +129,7 @@ class GraphSpewer
     JSONSpewer jsonSpewer_;
 
   public:
-    explicit GraphSpewer(TempAllocator *alloc)
-      : graph_(nullptr),
-        c1Printer_(alloc->lifoAlloc()),
-        jsonPrinter_(alloc->lifoAlloc()),
-        c1Spewer_(c1Printer_),
-        jsonSpewer_(jsonPrinter_)
-    { }
+    explicit GraphSpewer(TempAllocator *alloc);
 
     bool isSpewing() const {
         return graph_;
@@ -251,7 +258,7 @@ static inline void EnableIonDebugSyncLogging()
 static inline void EnableIonDebugAsyncLogging()
 { }
 
-#endif /* DEBUG */
+#endif /* JS_JITSPEW */
 
 template <JitSpewChannel Channel>
 class AutoDisableSpew
@@ -267,7 +274,7 @@ class AutoDisableSpew
 
     ~AutoDisableSpew()
     {
-#ifdef DEBUG
+#ifdef JS_JITSPEW
         if (enabled_)
             EnableChannel(Channel);
 #endif

@@ -34,7 +34,7 @@ namespace mozilla {
  * designing for touch events will take their own steps to account for
  * inaccurate touch events.
  *
- * IsElementClickable() encapsulates the heuristic that determines whether an
+ * GetClickableAncestor() encapsulates the heuristic that determines whether an
  * element is expected to respond to mouse events. An element is deemed
  * "clickable" if it has registered listeners for "click", "mousedown" or
  * "mouseup", or is on a whitelist of element tags (<a>, <button>, <input>,
@@ -48,7 +48,7 @@ namespace mozilla {
  * event radii are disabled), we always use that element. Otherwise we collect
  * all frames intersecting a rectangle around the event position (taking CSS
  * transforms into account) and choose the best candidate in GetClosest().
- * Only IsElementClickable() candidates are considered; if none are found,
+ * Only GetClickableAncestor() candidates are considered; if none are found,
  * then we revert to targeting the element under the event position.
  * We ignore candidates outside the document subtree rooted by the
  * document of the element directly under the event position. This ensures that
@@ -76,8 +76,10 @@ struct EventRadiusPrefs
   bool mRegistered;
   bool mTouchOnly;
   bool mRepositionEventCoords;
-  bool mTouchClusterDetectionDisabled;
+  bool mTouchClusterDetectionEnabled;
+  bool mSimplifiedClusterDetection;
   uint32_t mLimitReadableSize;
+  uint32_t mKeepLimitSizeForCluster;
 };
 
 static EventRadiusPrefs sMouseEventRadiusPrefs;
@@ -125,11 +127,17 @@ GetPrefsFor(EventClassID aEventClassID)
     nsPrintfCString repositionPref("ui.%s.radius.reposition", prefBranch);
     Preferences::AddBoolVarCache(&prefs->mRepositionEventCoords, repositionPref.get(), false);
 
-    nsPrintfCString touchClusterPref("ui.zoomedview.disabled", prefBranch);
-    Preferences::AddBoolVarCache(&prefs->mTouchClusterDetectionDisabled, touchClusterPref.get(), true);
+    nsPrintfCString touchClusterPref("ui.zoomedview.enabled", prefBranch);
+    Preferences::AddBoolVarCache(&prefs->mTouchClusterDetectionEnabled, touchClusterPref.get(), false);
+
+    nsPrintfCString simplifiedClusterDetectionPref("ui.zoomedview.simplified", prefBranch);
+    Preferences::AddBoolVarCache(&prefs->mSimplifiedClusterDetection, simplifiedClusterDetectionPref.get(), false);
 
     nsPrintfCString limitReadableSizePref("ui.zoomedview.limitReadableSize", prefBranch);
     Preferences::AddUintVarCache(&prefs->mLimitReadableSize, limitReadableSizePref.get(), 8);
+
+    nsPrintfCString keepLimitSize("ui.zoomedview.keepLimitSize", prefBranch);
+    Preferences::AddUintVarCache(&prefs->mKeepLimitSizeForCluster, keepLimitSize.get(), 16);
   }
 
   return prefs;
@@ -187,8 +195,8 @@ IsDescendant(nsIFrame* aFrame, nsIContent* aAncestor, nsAutoString* aLabelTarget
   return false;
 }
 
-static bool
-IsElementClickable(nsIFrame* aFrame, nsIAtom* stopAt = nullptr, nsAutoString* aLabelTargetId = nullptr)
+static nsIContent*
+GetClickableAncestor(nsIFrame* aFrame, nsIAtom* stopAt = nullptr, nsAutoString* aLabelTargetId = nullptr)
 {
   // Input events propagate up the content tree so we'll follow the content
   // ancestors to look for elements accepting the click.
@@ -198,19 +206,19 @@ IsElementClickable(nsIFrame* aFrame, nsIAtom* stopAt = nullptr, nsAutoString* aL
       break;
     }
     if (HasTouchListener(content) || HasMouseListener(content)) {
-      return true;
+      return content;
     }
     if (content->IsAnyOfHTMLElements(nsGkAtoms::button,
                                      nsGkAtoms::input,
                                      nsGkAtoms::select,
                                      nsGkAtoms::textarea)) {
-      return true;
+      return content;
     }
     if (content->IsHTMLElement(nsGkAtoms::label)) {
       if (aLabelTargetId) {
         content->GetAttr(kNameSpaceID_None, nsGkAtoms::_for, *aLabelTargetId);
       }
-      return true;
+      return content;
     }
 
     // Bug 921928: we don't have access to the content of remote iframe.
@@ -221,7 +229,7 @@ IsElementClickable(nsIFrame* aFrame, nsIAtom* stopAt = nullptr, nsAutoString* aL
                              nsGkAtoms::_true, eIgnoreCase) &&
         content->AttrValueIs(kNameSpaceID_None, nsGkAtoms::Remote,
                              nsGkAtoms::_true, eIgnoreCase)) {
-      return true;
+      return content;
     }
 
     // See nsCSSFrameConstructor::FindXULTagData. This code is not
@@ -236,32 +244,36 @@ IsElementClickable(nsIFrame* aFrame, nsIAtom* stopAt = nullptr, nsAutoString* aL
                                     nsGkAtoms::menulist,
                                     nsGkAtoms::scrollbarbutton,
                                     nsGkAtoms::resizer)) {
-      return true;
+      return content;
     }
 
     static nsIContent::AttrValuesArray clickableRoles[] =
       { &nsGkAtoms::button, &nsGkAtoms::key, nullptr };
     if (content->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::role,
                                  clickableRoles, eIgnoreCase) >= 0) {
-      return true;
+      return content;
     }
     if (content->IsEditable()) {
-      return true;
+      return content;
     }
     nsCOMPtr<nsIURI> linkURI;
     if (content->IsLink(getter_AddRefs(linkURI))) {
-      return true;
+      return content;
     }
   }
-  return false;
+  return nullptr;
 }
 
 static nscoord
-AppUnitsFromMM(nsIFrame* aFrame, uint32_t aMM, bool aVertical)
+AppUnitsFromMM(nsIFrame* aFrame, uint32_t aMM)
 {
   nsPresContext* pc = aFrame->PresContext();
+  nsIPresShell* presShell = pc->PresShell();
   float result = float(aMM) *
     (pc->DeviceContext()->AppUnitsPerPhysicalInch() / MM_PER_INCH_FLOAT);
+  if (presShell->ScaleToResolution()) {
+    result = result / presShell->GetResolution();
+  }
   return NSToCoordRound(result);
 }
 
@@ -283,10 +295,10 @@ GetTargetRect(nsIFrame* aRootFrame, const nsPoint& aPointRelativeToRootFrame,
               nsIFrame* aRestrictToDescendants, const EventRadiusPrefs* aPrefs,
               uint32_t aFlags)
 {
-  nsMargin m(AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[0], true),
-             AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[1], false),
-             AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[2], true),
-             AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[3], false));
+  nsMargin m(AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[0]),
+             AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[1]),
+             AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[2]),
+             AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[3]));
   nsRect r(aPointRelativeToRootFrame, nsSize(0,0));
   r.Inflate(m);
   if (!(aFlags & INPUT_IGNORE_ROOT_SCROLL_FRAME)) {
@@ -310,11 +322,9 @@ static float
 ComputeDistanceFromRegion(const nsPoint& aPoint, const nsRegion& aRegion)
 {
   MOZ_ASSERT(!aRegion.IsEmpty(), "can't compute distance between point and empty region");
-  nsRegionRectIterator iter(aRegion);
-  const nsRect* r;
   float minDist = -1;
-  while ((r = iter.Next()) != nullptr) {
-    float dist = ComputeDistanceFromRect(aPoint, *r);
+  for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
+    float dist = ComputeDistanceFromRect(aPoint, iter.Get());
     if (dist < minDist || minDist < 0) {
       minDist = dist;
     }
@@ -356,12 +366,28 @@ static bool IsElementPresent(nsTArray<nsIFrame*>& aCandidates, const nsAutoStrin
   return false;
 }
 
+static bool
+IsLargeElement(nsIFrame* aFrame, const EventRadiusPrefs* aPrefs)
+{
+  uint32_t keepLimitSizeForCluster = aPrefs->mKeepLimitSizeForCluster;
+  nsSize frameSize = aFrame->GetSize();
+  nsPresContext* pc = aFrame->PresContext();
+  nsIPresShell* presShell = pc->PresShell();
+  float cumulativeResolution = presShell->GetCumulativeResolution();
+  if ((pc->AppUnitsToGfxUnits(frameSize.height) * cumulativeResolution) > keepLimitSizeForCluster &&
+      (pc->AppUnitsToGfxUnits(frameSize.width) * cumulativeResolution) > keepLimitSizeForCluster) {
+    return true;
+  }
+  return false;
+}
+
 static nsIFrame*
 GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
            const nsRect& aTargetRect, const EventRadiusPrefs* aPrefs,
            nsIFrame* aRestrictToDescendants, nsIContent* aClickableAncestor,
            nsTArray<nsIFrame*>& aCandidates, int32_t* aElementsInCluster)
 {
+  std::vector<nsIContent*> mContentsInCluster;  // List of content elements in the cluster without duplicate
   nsIFrame* bestTarget = nullptr;
   // Lower is better; distance is in appunits
   float bestDistance = 1e6f;
@@ -375,7 +401,6 @@ GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
         nsRect(nsPoint(0, 0), f->GetSize()), aRoot, &preservesAxisAlignedRectangles);
     nsRegion region;
     region.And(exposedRegion, borderBox);
-
     if (region.IsEmpty()) {
       PET_LOG("  candidate %p had empty hit region\n", f);
       continue;
@@ -388,12 +413,13 @@ GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
     }
 
     nsAutoString labelTargetId;
-    if (aClickableAncestor) {
-      if (!IsDescendant(f, aClickableAncestor, &labelTargetId)) {
-        PET_LOG("  candidate %p is not a descendant of required ancestor\n", f);
-        continue;
-      }
-    } else if (!IsElementClickable(f, nsGkAtoms::body, &labelTargetId)) {
+    if (aClickableAncestor && !IsDescendant(f, aClickableAncestor, &labelTargetId)) {
+      PET_LOG("  candidate %p is not a descendant of required ancestor\n", f);
+      continue;
+    }
+
+    nsIContent* clickableContent = GetClickableAncestor(f, nsGkAtoms::body, &labelTargetId);
+    if (!aClickableAncestor && !clickableContent) {
       PET_LOG("  candidate %p was not clickable\n", f);
       continue;
     }
@@ -403,7 +429,7 @@ GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
       PET_LOG("  candidate %p was ancestor for bestTarget %p\n", f, bestTarget);
       continue;
     }
-    if (!nsLayoutUtils::IsAncestorFrameCrossDoc(aRestrictToDescendants, f, aRoot)) {
+    if (!aClickableAncestor && !nsLayoutUtils::IsAncestorFrameCrossDoc(aRestrictToDescendants, f, aRoot)) {
       PET_LOG("  candidate %p was not descendant of restrictroot %p\n", f, aRestrictToDescendants);
       continue;
     }
@@ -412,8 +438,11 @@ GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
     // and "for" attribute is present in label element, search the frame list for the "for" element
     // If this element is present in the current list, do not count the frame in
     // the cluster elements counter
-    if (labelTargetId.IsEmpty() || !IsElementPresent(aCandidates, labelTargetId)) {
-      (*aElementsInCluster)++;
+    if ((labelTargetId.IsEmpty() || !IsElementPresent(aCandidates, labelTargetId)) &&
+        !IsLargeElement(f, aPrefs)) {
+      if (std::find(mContentsInCluster.begin(), mContentsInCluster.end(), clickableContent) == mContentsInCluster.end()) {
+        mContentsInCluster.push_back(clickableContent);
+      }
     }
 
     // distance is in appunits
@@ -430,6 +459,7 @@ GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
       bestTarget = f;
     }
   }
+  *aElementsInCluster = mContentsInCluster.size();
   return bestTarget;
 }
 
@@ -447,7 +477,11 @@ GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
 static bool
 IsElementClickableAndReadable(nsIFrame* aFrame, WidgetGUIEvent* aEvent, const EventRadiusPrefs* aPrefs)
 {
-  if (aPrefs->mTouchClusterDetectionDisabled) {
+  if (!aPrefs->mTouchClusterDetectionEnabled) {
+    return true;
+  }
+
+  if (aPrefs->mSimplifiedClusterDetection) {
     return true;
   }
 
@@ -491,9 +525,8 @@ IsElementClickableAndReadable(nsIFrame* aFrame, WidgetGUIEvent* aEvent, const Ev
   }
 
   if (testFontSize) {
-    nsRefPtr<nsFontMetrics> fm;
-    nsLayoutUtils::GetFontMetricsForFrame(aFrame, getter_AddRefs(fm),
-      nsLayoutUtils::FontSizeInflationFor(aFrame));
+    RefPtr<nsFontMetrics> fm =
+      nsLayoutUtils::GetInflatedFontMetricsForFrame(aFrame);
     if (fm && fm->EmHeight() > 0 && // See bug 1171731
         (pc->AppUnitsToGfxUnits(fm->EmHeight()) * cumulativeResolution) < limitReadableSize) {
       return false;
@@ -524,12 +557,19 @@ FindFrameTargetedByInputEvent(WidgetGUIEvent* aEvent,
     return target;
   }
   nsIContent* clickableAncestor = nullptr;
-  if (target && IsElementClickable(target, nsGkAtoms::body)) {
-    if (!IsElementClickableAndReadable(target, aEvent, prefs)) {
-      aEvent->AsMouseEventBase()->hitCluster = true;
+  if (target) {
+    clickableAncestor = GetClickableAncestor(target, nsGkAtoms::body);
+    if (clickableAncestor) {
+      if (!IsElementClickableAndReadable(target, aEvent, prefs)) {
+        aEvent->AsMouseEventBase()->hitCluster = true;
+      }
+      PET_LOG("Target %p is clickable\n", target);
+      // If the target that was directly hit has a clickable ancestor, that
+      // means it too is clickable. And since it is the same as or a descendant
+      // of clickableAncestor, it should become the root for the GetClosest
+      // search.
+      clickableAncestor = target->GetContent();
     }
-    PET_LOG("Target %p is clickable\n", target);
-    clickableAncestor = target->GetContent();
   }
 
   // Do not modify targeting for actual mouse hardware; only for mouse
@@ -544,7 +584,7 @@ FindFrameTargetedByInputEvent(WidgetGUIEvent* aEvent,
 
   // If the exact target is non-null, only consider candidate targets in the same
   // document as the exact target. Otherwise, if an ancestor document has
-  // a mouse event handler for example, targets that are !IsElementClickable can
+  // a mouse event handler for example, targets that are !GetClickableAncestor can
   // never be targeted --- something nsSubDocumentFrame in an ancestor document
   // would be targeted instead.
   nsIFrame* restrictToDescendants = target ?
@@ -554,7 +594,7 @@ FindFrameTargetedByInputEvent(WidgetGUIEvent* aEvent,
                                     restrictToDescendants, prefs, aFlags);
   PET_LOG("Expanded point to target rect %s\n",
     mozilla::layers::Stringify(targetRect).c_str());
-  nsAutoTArray<nsIFrame*,8> candidates;
+  AutoTArray<nsIFrame*,8> candidates;
   nsresult rv = nsLayoutUtils::GetFramesForArea(aRootFrame, targetRect, candidates, flags);
   if (NS_FAILED(rv)) {
     return target;
@@ -567,7 +607,7 @@ FindFrameTargetedByInputEvent(WidgetGUIEvent* aEvent,
                restrictToDescendants, clickableAncestor, candidates,
                &elementsInCluster);
   if (closestClickable) {
-    if ((!prefs->mTouchClusterDetectionDisabled && elementsInCluster > 1) ||
+    if ((prefs->mTouchClusterDetectionEnabled && elementsInCluster > 1) ||
         (!IsElementClickableAndReadable(closestClickable, aEvent, prefs))) {
       if (aEvent->mClass == eMouseEventClass) {
         WidgetMouseEventBase* mouseEventBase = aEvent->AsMouseEventBase();
@@ -605,10 +645,10 @@ FindFrameTargetedByInputEvent(WidgetGUIEvent* aEvent,
     return target;
   }
   LayoutDeviceIntPoint widgetPoint = nsLayoutUtils::TranslateViewToWidget(
-        aRootFrame->PresContext(), view, point, aEvent->widget);
+        aRootFrame->PresContext(), view, point, aEvent->mWidget);
   if (widgetPoint.x != NS_UNCONSTRAINEDSIZE) {
     // If that succeeded, we update the point in the event
-    aEvent->refPoint = widgetPoint;
+    aEvent->mRefPoint = widgetPoint;
   }
   return target;
 }

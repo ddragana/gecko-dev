@@ -25,7 +25,6 @@ import os
 import sys
 import textwrap
 import time
-import tokenize
 import traceback
 import types
 
@@ -37,8 +36,15 @@ from io import StringIO
 
 from mozbuild.util import (
     EmptyValue,
+    HierarchicalStringList,
     memoize,
     ReadOnlyDefaultDict,
+)
+
+from mozbuild.testing import (
+    TEST_MANIFESTS,
+    REFTEST_FLAVORS,
+    WEB_PLATFORM_TESTS_FLAVORS,
 )
 
 from mozbuild.backend.configenvironment import ConfigEnvironment
@@ -72,6 +78,9 @@ from .context import (
     SubContext,
     TemplateContext,
 )
+
+from mozbuild.base import ExecutionSummary
+
 
 if sys.version_info.major == 2:
     text_type = unicode
@@ -125,6 +134,7 @@ class EmptyConfig(object):
         self.substs_unicode = self.PopulateOnGetDict(EmptyValue, udict)
         self.defines = self.substs
         self.external_source_dir = None
+        self.error_is_fatal = False
 
 
 def is_read_allowed(path, config):
@@ -211,6 +221,8 @@ class MozbuildSandbox(Sandbox):
         return Sandbox.__contains__(self, key)
 
     def __setitem__(self, key, value):
+        if key in self.special_variables and value is self[key]:
+            return
         if key in self.special_variables or key in self.functions or key in self.subcontext_types:
             raise KeyError('Cannot set "%s" because it is a reserved keyword'
                            % key)
@@ -314,7 +326,10 @@ class MozbuildSandbox(Sandbox):
         print('WARNING: %s' % message, file=sys.stderr)
 
     def _error(self, message):
-        raise SandboxCalledError(self._context.source_stack, message)
+        if self._context.error_is_fatal:
+            raise SandboxCalledError(self._context.source_stack, message)
+        else:
+            self._warning(message)
 
     def _template_decorator(self, func):
         """Registers a template function."""
@@ -405,7 +420,7 @@ class MozbuildSandbox(Sandbox):
             for key, value in context.items():
                 if isinstance(value, dict):
                     self[key].update(value)
-                elif isinstance(value, list):
+                elif isinstance(value, (list, HierarchicalStringList)):
                     self[key] += value
                 else:
                     self[key] = value
@@ -864,6 +879,16 @@ class BuildReader(object):
         self._execution_stack = []
         self._finder = finder
 
+        self._execution_time = 0.0
+        self._file_count = 0
+
+    def summary(self):
+        return ExecutionSummary(
+            'Finished reading {file_count:d} moz.build files in '
+            '{execution_time:.2f}s',
+            file_count=self._file_count,
+            execution_time=self._execution_time)
+
     def read_topsrcdir(self):
         """Read the tree of linked moz.build files.
 
@@ -1094,24 +1119,20 @@ class BuildReader(object):
             config.topobjdir = topobjdir
             config.external_source_dir = None
 
-        context = Context(VARIABLES, config)
+        context = Context(VARIABLES, config, self._finder)
         sandbox = MozbuildSandbox(context, metadata=metadata,
                                   finder=self._finder)
         sandbox.exec_file(path)
-        context.execution_time = time.time() - time_start
+        self._execution_time += time.time() - time_start
+        self._file_count += len(context.all_paths)
 
         # Yield main context before doing any processing. This gives immediate
         # consumers an opportunity to change state before our remaining
         # processing is performed.
         yield context
 
-        # We first collect directories populated in variables.
-        dir_vars = ['DIRS']
-
-        if context.config.substs.get('ENABLE_TESTS', False) == '1':
-            dir_vars.append('TEST_DIRS')
-
-        dirs = [(v, context[v]) for v in dir_vars if v in context]
+        # We need the list of directories pre-gyp processing for later.
+        dirs = list(context.get('DIRS', []))
 
         curdir = mozpath.dirname(path)
 
@@ -1136,6 +1157,7 @@ class BuildReader(object):
                     raise SandboxValidationError('Cannot find %s.' % source,
                         context)
                 non_unified_sources.add(source)
+            time_start = time.time()
             for gyp_context in read_from_gyp(context.config,
                                              mozpath.join(curdir, gyp_dir.input),
                                              mozpath.join(context.objdir,
@@ -1144,6 +1166,8 @@ class BuildReader(object):
                                              non_unified_sources = non_unified_sources):
                 gyp_context.update(gyp_dir.sandbox_vars)
                 gyp_contexts.append(gyp_context)
+                self._file_count += len(gyp_context.all_paths)
+            self._execution_time += time.time() - time_start
 
         for gyp_context in gyp_contexts:
             context['DIRS'].append(mozpath.relpath(gyp_context.objdir, context.objdir))
@@ -1158,20 +1182,19 @@ class BuildReader(object):
         # make backend needs order preserved. Once we autogenerate all backend
         # files, we should be able to convert this to a set.
         recurse_info = OrderedDict()
-        for var, var_dirs in dirs:
-            for d in var_dirs:
-                if d in recurse_info:
-                    raise SandboxValidationError(
-                        'Directory (%s) registered multiple times in %s' % (
-                            mozpath.relpath(d.full_path, context.srcdir), var),
-                        context)
+        for d in dirs:
+            if d in recurse_info:
+                raise SandboxValidationError(
+                    'Directory (%s) registered multiple times' % (
+                        mozpath.relpath(d.full_path, context.srcdir)),
+                    context)
 
-                recurse_info[d] = {}
-                for key in sandbox.metadata:
-                    if key == 'exports':
-                        sandbox.recompute_exports()
+            recurse_info[d] = {}
+            for key in sandbox.metadata:
+                if key == 'exports':
+                    sandbox.recompute_exports()
 
-                    recurse_info[d][key] = dict(sandbox.metadata[key])
+                recurse_info[d][key] = dict(sandbox.metadata[key])
 
         for path, child_metadata in recurse_info.items():
             child_path = path.join('moz.build').full_path
@@ -1293,7 +1316,7 @@ class BuildReader(object):
             # Explicitly set directory traversal variables to override default
             # traversal rules.
             if not isinstance(context, SubContext):
-                for v in ('DIRS', 'GYP_DIRS', 'TEST_DIRS'):
+                for v in ('DIRS', 'GYP_DIRS'):
                     context[v][:] = []
 
                 context['DIRS'] = sorted(dirs[context.main_path])
@@ -1346,6 +1369,40 @@ class BuildReader(object):
                         ('*' in pattern and mozpath.match(relpath, pattern)):
                     flags += ctx
 
+            if not any([flags.test_tags, flags.test_files, flags.test_flavors]):
+                flags += self.test_defaults_for_path(ctxs)
+
             r[path] = flags
 
         return r
+
+    def test_defaults_for_path(self, ctxs):
+        # This names the context keys that will end up emitting a test
+        # manifest.
+        test_manifest_contexts = set(
+            ['%s_MANIFESTS' % key for key in TEST_MANIFESTS] +
+            ['%s_MANIFESTS' % flavor.upper() for flavor in REFTEST_FLAVORS] +
+            ['%s_MANIFESTS' % flavor.upper().replace('-', '_') for flavor in WEB_PLATFORM_TESTS_FLAVORS]
+        )
+
+        result_context = Files(Context())
+        for ctx in ctxs:
+            for key in ctx:
+                if key not in test_manifest_contexts:
+                    continue
+                for paths, obj in ctx[key]:
+                    if isinstance(paths, tuple):
+                        path, tests_root = paths
+                        tests_root = mozpath.join(ctx.relsrcdir, tests_root)
+                        for t in (mozpath.join(tests_root, path) for path, _ in obj):
+                            result_context.test_files.add(mozpath.dirname(t) + '/**')
+                    else:
+                        for t in obj.tests:
+                            if isinstance(t, tuple):
+                                path, _ = t
+                                relpath = mozpath.relpath(path,
+                                                          self.config.topsrcdir)
+                            else:
+                                relpath = t['relpath']
+                            result_context.test_files.add(mozpath.dirname(relpath) + '/**')
+        return result_context

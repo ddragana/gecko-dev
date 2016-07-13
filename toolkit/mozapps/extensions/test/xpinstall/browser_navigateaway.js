@@ -12,14 +12,14 @@ function test() {
   pm.add(makeURI("http://example.com/"), "install", pm.ALLOW_ACTION);
 
   var triggers = encodeURIComponent(JSON.stringify({
-    "Unsigned XPI": TESTROOT + "unsigned.xpi"
+    "Unsigned XPI": TESTROOT + "amosigned.xpi"
   }));
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 }
 
 function download_progress(addon, value, maxValue) {
-  gBrowser.loadURI("about:blank");
+  gBrowser.loadURI(TESTROOT + "enabled.html");
 }
 
 function install_ended(install, addon) {

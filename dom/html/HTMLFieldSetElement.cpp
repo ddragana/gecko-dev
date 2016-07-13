@@ -63,7 +63,7 @@ NS_IMPL_STRING_ATTR(HTMLFieldSetElement, Name, name)
 NS_IMPL_NSICONSTRAINTVALIDATION(HTMLFieldSetElement)
 
 bool
-HTMLFieldSetElement::IsDisabledForEvents(uint32_t aMessage)
+HTMLFieldSetElement::IsDisabledForEvents(EventMessage aMessage)
 {
   return IsElementDisabledForEvents(aMessage, nullptr);
 }
@@ -74,7 +74,7 @@ HTMLFieldSetElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   // Do not process any DOM events if the element is disabled.
   aVisitor.mCanHandle = false;
-  if (IsDisabledForEvents(aVisitor.mEvent->message)) {
+  if (IsDisabledForEvents(aVisitor.mEvent->mMessage)) {
     return NS_OK;
   }
 
@@ -124,7 +124,7 @@ HTMLFieldSetElement::MatchListedElements(nsIContent* aContent, int32_t aNamespac
                                          nsIAtom* aAtom, void* aData)
 {
   nsCOMPtr<nsIFormControl> formControl = do_QueryInterface(aContent);
-  return formControl && formControl->GetType() != NS_FORM_LABEL;
+  return formControl;
 }
 
 NS_IMETHODIMP
@@ -154,7 +154,7 @@ HTMLFieldSetElement::Reset()
 }
 
 NS_IMETHODIMP
-HTMLFieldSetElement::SubmitNamesValues(nsFormSubmission* aFormSubmission)
+HTMLFieldSetElement::SubmitNamesValues(HTMLFormSubmission* aFormSubmission)
 {
   return NS_OK;
 }

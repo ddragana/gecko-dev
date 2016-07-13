@@ -25,7 +25,7 @@
     COMPONENT(TIMER, nsTimerImplConstructor)
 
 #define COMPONENT_SUPPORTS(TYPE, Type)                                         \
-  COMPONENT(SUPPORTS_##TYPE, nsSupports##Type##ImplConstructor)
+  COMPONENT(SUPPORTS_##TYPE, nsSupports##Type##Constructor)
 
     COMPONENT_SUPPORTS(ID, ID)
     COMPONENT_SUPPORTS(STRING, String)
@@ -57,7 +57,7 @@
     COMPONENT(STRINGINPUTSTREAM, nsStringInputStreamConstructor)
     COMPONENT(MULTIPLEXINPUTSTREAM, nsMultiplexInputStreamConstructor)
 
-    COMPONENT(VARIANT, nsVariantConstructor)
+    COMPONENT(VARIANT, nsVariantCCConstructor)
     COMPONENT(INTERFACEINFOMANAGER_SERVICE, nsXPTIInterfaceInfoManagerGetSingleton)
 
     COMPONENT(HASH_PROPERTY_BAG, nsHashPropertyBagCCConstructor)

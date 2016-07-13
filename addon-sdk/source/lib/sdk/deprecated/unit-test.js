@@ -33,8 +33,8 @@ const findAndRunTests = function findAndRunTests(options) {
 };
 exports.findAndRunTests = findAndRunTests;
 
-let runnerWindows = new WeakMap();
-let runnerTabs = new WeakMap();
+var runnerWindows = new WeakMap();
+var runnerTabs = new WeakMap();
 
 const TestRunner = function TestRunner(options) {
   options = options || {};
@@ -54,7 +54,9 @@ const TestRunner = function TestRunner(options) {
 };
 
 TestRunner.prototype = {
-  toString: function toString() "[object TestRunner]",
+  toString: function toString() {
+    return "[object TestRunner]";
+  },
 
   DEFAULT_PAUSE_TIMEOUT: (cfxArgs.parseable ? 300000 : 15000), //Five minutes (5*60*1000ms)
   PAUSE_DELAY: 500,
@@ -378,7 +380,7 @@ TestRunner.prototype = {
         name: this.test.name,
         passed: this.test.passed,
         failed: this.test.failed,
-        errors: [error for (error in this.test.errors)].join(", ")
+        errors: Object.keys(this.test.errors).join(", ")
       });
 
       if (this.onDone !== null) {

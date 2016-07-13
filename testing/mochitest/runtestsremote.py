@@ -2,12 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import base64
-import json
 import os
-import shutil
 import sys
-import tempfile
 import traceback
 
 sys.path.insert(
@@ -17,39 +13,39 @@ sys.path.insert(
 
 from automation import Automation
 from remoteautomation import RemoteAutomation, fennecLogcatFilters
-from runtests import Mochitest, MessageLogger
+from runtests import MochitestDesktop, MessageLogger
 from mochitest_options import MochitestArgumentParser
 
-from manifestparser import TestManifest
-from manifestparser.filters import chunk_by_slice
-import devicemanager
+import mozdevice
 import mozinfo
 
 SCRIPT_DIR = os.path.abspath(os.path.realpath(os.path.dirname(__file__)))
 
 
-class MochiRemote(Mochitest):
+# TODO inherit from MochitestBase instead
+class MochiRemote(MochitestDesktop):
     _automation = None
     _dm = None
     localProfile = None
     logMessages = []
 
     def __init__(self, automation, devmgr, options):
-        Mochitest.__init__(self, options)
+        MochitestDesktop.__init__(self, options)
 
         self._automation = automation
         self._dm = devmgr
         self.environment = self._automation.environment
-        self.remoteProfile = options.remoteTestRoot + "/profile"
+        self.remoteProfile = os.path.join(options.remoteTestRoot, "profile/")
+        self.remoteModulesDir = os.path.join(options.remoteTestRoot, "modules/")
         self._automation.setRemoteProfile(self.remoteProfile)
         self.remoteLog = options.remoteLogFile
         self.localLog = options.logFile
         self._automation.deleteANRs()
         self._automation.deleteTombstones()
         self.certdbNew = True
-        self.remoteNSPR = os.path.join(options.remoteTestRoot, "nspr")
-        self._dm.removeDir(self.remoteNSPR)
-        self._dm.mkDir(self.remoteNSPR)
+        self.remoteMozLog = os.path.join(options.remoteTestRoot, "mozlog")
+        self._dm.removeDir(self.remoteMozLog)
+        self._dm.mkDir(self.remoteMozLog)
         self.remoteChromeTestDir = os.path.join(
             options.remoteTestRoot,
             "chrome")
@@ -68,8 +64,8 @@ class MochiRemote(Mochitest):
         self._dm.removeDir(self.remoteChromeTestDir)
         blobberUploadDir = os.environ.get('MOZ_UPLOAD_DIR', None)
         if blobberUploadDir:
-            self._dm.getDirectory(self.remoteNSPR, blobberUploadDir)
-        Mochitest.cleanup(self, options)
+            self._dm.getDirectory(self.remoteMozLog, blobberUploadDir)
+        MochitestDesktop.cleanup(self, options)
 
     def findPath(self, paths, filename=None):
         for path in paths:
@@ -161,7 +157,7 @@ class MochiRemote(Mochitest):
         """ Create the servers on the host and start them up """
         restoreRemotePaths = self.switchToLocalPaths(options)
         # ignoreSSLTunnelExts is a workaround for bug 1109310
-        Mochitest.startServers(
+        MochitestDesktop.startServers(
             self,
             options,
             debuggerInfo,
@@ -170,13 +166,28 @@ class MochiRemote(Mochitest):
 
     def buildProfile(self, options):
         restoreRemotePaths = self.switchToLocalPaths(options)
-        manifest = Mochitest.buildProfile(self, options)
+        if options.testingModulesDir:
+            try:
+                self._dm.pushDir(options.testingModulesDir, self.remoteModulesDir)
+                self._dm.chmodDir(self.remoteModulesDir)
+            except mozdevice.DMError:
+                self.log.error(
+                    "Automation Error: Unable to copy test modules to device.")
+                raise
+            savedTestingModulesDir = options.testingModulesDir
+            options.testingModulesDir = self.remoteModulesDir
+        else:
+            savedTestingModulesDir = None
+        manifest = MochitestDesktop.buildProfile(self, options)
+        if savedTestingModulesDir:
+            options.testingModulesDir = savedTestingModulesDir
         self.localProfile = options.profilePath
         self._dm.removeDir(self.remoteProfile)
 
         try:
             self._dm.pushDir(options.profilePath, self.remoteProfile)
-        except devicemanager.DMError:
+            self._dm.chmodDir(self.remoteProfile)
+        except mozdevice.DMError:
             self.log.error(
                 "Automation Error: Unable to copy profile to device.")
             raise
@@ -185,18 +196,33 @@ class MochiRemote(Mochitest):
         options.profilePath = self.remoteProfile
         return manifest
 
+    def addChromeToProfile(self, options):
+        manifest = MochitestDesktop.addChromeToProfile(self, options)
+
+        # Support Firefox (browser), B2G (shell), SeaMonkey (navigator), and Webapp
+        # Runtime (webapp).
+        if options.chrome:
+            # append overlay to chrome.manifest
+            chrome = "overlay chrome://browser/content/browser.xul chrome://mochikit/content/browser-test-overlay.xul"
+            path = os.path.join(options.profilePath, 'extensions', 'staged',
+                                'mochikit@mozilla.org', 'chrome.manifest')
+            with open(path, "a") as f:
+                f.write(chrome)
+        return manifest
+
     def buildURLOptions(self, options, env):
         self.localLog = options.logFile
         options.logFile = self.remoteLog
         options.fileLevel = 'INFO'
         options.profilePath = self.localProfile
         env["MOZ_HIDE_RESULTS_TABLE"] = "1"
-        retVal = Mochitest.buildURLOptions(self, options, env)
+        retVal = MochitestDesktop.buildURLOptions(self, options, env)
 
         # we really need testConfig.js (for browser chrome)
         try:
             self._dm.pushDir(options.profilePath, self.remoteProfile)
-        except devicemanager.DMError:
+            self._dm.chmodDir(self.remoteProfile)
+        except mozdevice.DMError:
             self.log.error(
                 "Automation Error: Unable to copy profile to device.")
             raise
@@ -237,7 +263,7 @@ class MochiRemote(Mochitest):
                 else:
                     self.log.info("  %s: %s" % (category, devinfo[category]))
             self.log.info("Test root: %s" % self._dm.deviceRoot)
-        except devicemanager.DMError:
+        except mozdevice.DMError:
             self.log.warning("Error getting device information")
 
     def getGMPPluginPath(self, options):
@@ -245,7 +271,7 @@ class MochiRemote(Mochitest):
         return None
 
     def buildBrowserEnv(self, options, debugger=False):
-        browserEnv = Mochitest.buildBrowserEnv(
+        browserEnv = MochitestDesktop.buildBrowserEnv(
             self,
             options,
             debugger=debugger)
@@ -254,11 +280,11 @@ class MochiRemote(Mochitest):
             del browserEnv["MOZ_WIN_INHERIT_STD_HANDLES_PRE_VISTA"]
         if "XPCOM_MEM_BLOAT_LOG" in browserEnv:
             del browserEnv["XPCOM_MEM_BLOAT_LOG"]
-        # override nsprLogs to avoid processing in Mochitest base class
-        self.nsprLogs = None
-        browserEnv["NSPR_LOG_FILE"] = os.path.join(
-            self.remoteNSPR,
-            self.nsprLogName)
+        # override mozLogs to avoid processing in MochitestDesktop base class
+        self.mozLogs = None
+        browserEnv["MOZ_LOG_FILE"] = os.path.join(
+            self.remoteMozLog,
+            self.mozLogName)
         return browserEnv
 
     def runApp(self, *args, **kwargs):
@@ -269,8 +295,9 @@ class MochiRemote(Mochitest):
         if 'profileDir' not in kwargs and 'profile' in kwargs:
             kwargs['profileDir'] = kwargs.pop('profile').profile
 
-        if 'quiet' in kwargs:
-            kwargs.pop('quiet')
+        # remove args not supported by automation.py
+        kwargs.pop('marionette_args', None)
+        kwargs.pop('quiet', None)
 
         return self._automation.runApp(*args, **kwargs)
 
@@ -283,6 +310,12 @@ def run_test_harness(options):
     if options is None:
         raise ValueError("Invalid options specified, use --help for a list of valid options")
 
+    options.runByDir = False
+    # roboextender is used by mochitest-chrome tests like test_java_addons.html,
+    # but not by any plain mochitests
+    if not options.chrome:
+        options.extensionsToExclude.append('roboextender@mozilla.org')
+
     dm = options.dm
     auto.setDeviceManager(dm)
     mochitest = MochiRemote(auto, dm, options)
@@ -290,6 +323,13 @@ def run_test_harness(options):
     log = mochitest.log
     message_logger.logger = log
     mochitest.message_logger = message_logger
+
+    # Check that Firefox is installed
+    expected = options.app.split('/')[-1]
+    installed = dm.shellCheckOutput(['pm', 'list', 'packages', expected])
+    if expected not in installed:
+        log.error("%s is not installed on this device" % expected)
+        return 1
 
     productPieces = options.remoteProductName.split('.')
     if (productPieces is not None):
@@ -303,7 +343,8 @@ def run_test_harness(options):
     auto.setRemoteLog(options.remoteLogFile)
     auto.setServerInfo(options.webServer, options.httpPort, options.sslPort)
 
-    mochitest.printDeviceInfo()
+    if options.log_mach is None:
+        mochitest.printDeviceInfo()
 
     # Add Android version (SDK level) to mozinfo so that manifest entries
     # can be conditional on android_version.
@@ -326,7 +367,7 @@ def run_test_harness(options):
     procName = options.app.split('/')[-1]
     dm.killProcess(procName)
 
-    mochitest.nsprLogName = "nspr.log"
+    mochitest.mozLogName = "moz.log"
     try:
         dm.recordLogcat()
         retVal = mochitest.runTests(options)
@@ -336,12 +377,13 @@ def run_test_harness(options):
         mochitest.stopServers()
         try:
             mochitest.cleanup(options)
-        except devicemanager.DMError:
+        except mozdevice.DMError:
             # device error cleaning up... oh well!
             pass
         retVal = 1
 
-    mochitest.printDeviceInfo(printLogcat=True)
+    if options.log_mach is None:
+        mochitest.printDeviceInfo(printLogcat=True)
 
     message_logger.finish()
 

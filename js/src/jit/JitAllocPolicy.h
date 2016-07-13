@@ -7,6 +7,7 @@
 #ifndef jit_JitAllocPolicy_h
 #define jit_JitAllocPolicy_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/TypeTraits.h"
 
@@ -33,38 +34,47 @@ class TempAllocator
 
     explicit TempAllocator(LifoAlloc* lifoAlloc)
       : lifoScope_(lifoAlloc)
-    { }
+    {
+        lifoAlloc->setAsInfallibleByDefault();
+    }
 
     void* allocateInfallible(size_t bytes)
     {
         return lifoScope_.alloc().allocInfallible(bytes);
     }
 
-    void* allocate(size_t bytes)
+    MOZ_MUST_USE void* allocate(size_t bytes)
     {
+        LifoAlloc::AutoFallibleScope fallibleAllocator(lifoAlloc());
         void* p = lifoScope_.alloc().alloc(bytes);
         if (!ensureBallast())
             return nullptr;
         return p;
     }
 
-    template <size_t ElemSize>
-    void* allocateArray(size_t n)
+    template <typename T>
+    MOZ_MUST_USE T* allocateArray(size_t n)
     {
-        if (MOZ_UNLIKELY(n & mozilla::tl::MulOverflowMask<ElemSize>::value))
+        LifoAlloc::AutoFallibleScope fallibleAllocator(lifoAlloc());
+        size_t bytes;
+        if (MOZ_UNLIKELY(!CalculateAllocSize<T>(n, &bytes)))
             return nullptr;
-        void* p = lifoScope_.alloc().alloc(n * ElemSize);
+        T* p = static_cast<T*>(lifoScope_.alloc().alloc(bytes));
         if (MOZ_UNLIKELY(!ensureBallast()))
             return nullptr;
         return p;
     }
 
-    LifoAlloc* lifoAlloc()
-    {
+    // View this allocator as a fallible allocator.
+    struct Fallible { TempAllocator& alloc; };
+    Fallible fallible() { return { *this }; }
+
+    LifoAlloc* lifoAlloc() {
         return &lifoScope_.alloc();
     }
 
-    bool ensureBallast() {
+    MOZ_MUST_USE bool ensureBallast() {
+        JS_OOM_POSSIBLY_FAIL_BOOL();
         return lifoScope_.alloc().ensureUnusedApproximate(BallastSize);
     }
 };
@@ -78,20 +88,21 @@ class JitAllocPolicy
       : alloc_(alloc)
     {}
     template <typename T>
-    T* pod_malloc(size_t numElems) {
-        if (MOZ_UNLIKELY(numElems & mozilla::tl::MulOverflowMask<sizeof(T)>::value))
+    T* maybe_pod_malloc(size_t numElems) {
+        size_t bytes;
+        if (MOZ_UNLIKELY(!CalculateAllocSize<T>(numElems, &bytes)))
             return nullptr;
-        return static_cast<T*>(alloc_.allocate(numElems * sizeof(T)));
+        return static_cast<T*>(alloc_.allocate(bytes));
     }
     template <typename T>
-    T* pod_calloc(size_t numElems) {
-        T* p = pod_malloc<T>(numElems);
+    T* maybe_pod_calloc(size_t numElems) {
+        T* p = maybe_pod_malloc<T>(numElems);
         if (MOZ_LIKELY(p))
             memset(p, 0, numElems * sizeof(T));
         return p;
     }
     template <typename T>
-    T* pod_realloc(T* p, size_t oldSize, size_t newSize) {
+    T* maybe_pod_realloc(T* p, size_t oldSize, size_t newSize) {
         T* n = pod_malloc<T>(newSize);
         if (MOZ_UNLIKELY(!n))
             return n;
@@ -99,26 +110,24 @@ class JitAllocPolicy
         memcpy(n, p, Min(oldSize * sizeof(T), newSize * sizeof(T)));
         return n;
     }
-    void free_(void* p) {
-    }
-    void reportAllocOverflow() const {
-    }
-};
-
-class OldJitAllocPolicy
-{
-  public:
-    OldJitAllocPolicy()
-    {}
     template <typename T>
     T* pod_malloc(size_t numElems) {
-        if (MOZ_UNLIKELY(numElems & mozilla::tl::MulOverflowMask<sizeof(T)>::value))
-            return nullptr;
-        return static_cast<T*>(GetJitContext()->temp->allocate(numElems * sizeof(T)));
+        return maybe_pod_malloc<T>(numElems);
+    }
+    template <typename T>
+    T* pod_calloc(size_t numElems) {
+        return maybe_pod_calloc<T>(numElems);
+    }
+    template <typename T>
+    T* pod_realloc(T* ptr, size_t oldSize, size_t newSize) {
+        return maybe_pod_realloc<T>(ptr, oldSize, newSize);
     }
     void free_(void* p) {
     }
     void reportAllocOverflow() const {
+    }
+    MOZ_MUST_USE bool checkSimulatedOOM() const {
+        return !js::oom::ShouldFailWithOOM();
     }
 };
 
@@ -145,6 +154,9 @@ class AutoJitContextAlloc
 
 struct TempObject
 {
+    inline void* operator new(size_t nbytes, TempAllocator::Fallible view) throw() {
+        return view.alloc.allocate(nbytes);
+    }
     inline void* operator new(size_t nbytes, TempAllocator& alloc) {
         return alloc.allocateInfallible(nbytes);
     }
@@ -173,7 +185,7 @@ class TempObjectPool
     T* allocate() {
         MOZ_ASSERT(alloc_);
         if (freed_.empty())
-            return new(*alloc_) T();
+            return new(alloc_->fallible()) T();
         return freed_.popFront();
     }
     void free(T* obj) {

@@ -10,6 +10,7 @@
 #include "mozilla/Attributes.h"
 #include "npapi.h"
 #include "nsCOMPtr.h"
+#include "nsIKeyEventInPluginCallback.h"
 #include "nsIPluginInstanceOwner.h"
 #include "nsIPrivacyTransitionObserver.h"
 #include "nsIDOMEventListener.h"
@@ -28,7 +29,12 @@ class nsPluginDOMContextMenuListener;
 class nsPluginFrame;
 class nsDisplayListBuilder;
 
+#if defined(MOZ_X11) || defined(ANDROID)
+class gfxContext;
+#endif
+
 namespace mozilla {
+class TextComposition;
 namespace dom {
 struct MozPluginParameter;
 } // namespace dom
@@ -47,12 +53,15 @@ using mozilla::widget::PuppetWidget;
 #endif
 #endif
 
-class nsPluginInstanceOwner final : public nsIPluginInstanceOwner,
-                                    public nsIDOMEventListener,
-                                    public nsIPrivacyTransitionObserver,
-                                    public nsSupportsWeakReference
+class nsPluginInstanceOwner final : public nsIPluginInstanceOwner
+                                  , public nsIDOMEventListener
+                                  , public nsIPrivacyTransitionObserver
+                                  , public nsIKeyEventInPluginCallback
+                                  , public nsSupportsWeakReference
 {
 public:
+  typedef mozilla::gfx::DrawTarget DrawTarget;
+
   nsPluginInstanceOwner();
   
   NS_DECL_ISUPPORTS
@@ -61,11 +70,17 @@ public:
   
   NS_IMETHOD GetURL(const char *aURL, const char *aTarget,
                     nsIInputStream *aPostStream, 
-                    void *aHeadersData, uint32_t aHeadersDataLen) override;
+                    void *aHeadersData, uint32_t aHeadersDataLen,
+                    bool aDoCheckLoadURIChecks) override;
   
   NPBool     ConvertPoint(double sourceX, double sourceY, NPCoordinateSpace sourceSpace,
                           double *destX, double *destY, NPCoordinateSpace destSpace) override;
-  
+
+  NPError InitAsyncSurface(NPSize *size, NPImageFormat format,
+                           void *initData, NPAsyncSurface *surface) override;
+  NPError FinalizeAsyncSurface(NPAsyncSurface *surface) override;
+  void SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect *changed) override;
+
   /**
    * Get the type of the HTML tag that was used ot instantiate this
    * plugin.  Currently supported tags are EMBED, OBJECT and APPLET.
@@ -111,12 +126,20 @@ public:
   void ReleasePluginPort(void* pluginPort);
 
   nsEventStatus ProcessEvent(const mozilla::WidgetGUIEvent& anEvent);
+
+  static void GeneratePluginEvent(
+                const mozilla::WidgetCompositionEvent* aSrcCompositionEvent,
+                mozilla::WidgetCompositionEvent* aDistCompositionEvent);
+
+#if defined(XP_WIN)
+  void SetWidgetWindowAsParent(HWND aWindowToAdopt);
+  nsresult SetNetscapeWindowAsParent(HWND aWindowToAdopt);
+#endif
   
 #ifdef XP_MACOSX
   enum { ePluginPaintEnable, ePluginPaintDisable };
 
   void WindowFocusMayHaveChanged();
-  void ResolutionMayHaveChanged();
 
   bool WindowIsActive();
   void SendWindowFocusChanged(bool aIsActive);
@@ -130,24 +153,15 @@ public:
   // This calls into the plugin (NPP_SetWindow) and can run script.
   void FixUpPluginWindow(int32_t inPaintState);
   void HidePluginWindow();
-  // Return a pointer to the internal nsPluginPort structure that's used to
-  // store a copy of plugin port info and to detect when it's been changed.
-  void* GetPluginPortCopy();
   // Set plugin port info in the plugin (in the 'window' member of the
   // NPWindow structure passed to the plugin by SetWindow()).
   void SetPluginPort();
-  // Flag when we've set up a Thebes (and CoreGraphics) context in
-  // nsPluginFrame::PaintPlugin().  We need to know this in
-  // FixUpPluginWindow() (i.e. we need to know when FixUpPluginWindow() has
-  // been called from nsPluginFrame::PaintPlugin() when we're using the
-  // CoreGraphics drawing model).
-  void BeginCGPaint();
-  void EndCGPaint();
 #else // XP_MACOSX
   void UpdateWindowPositionAndClipRect(bool aSetWindow);
   void UpdateWindowVisibility(bool aVisible);
 #endif // XP_MACOSX
 
+  void ResolutionMayHaveChanged();
   void UpdateDocumentActiveState(bool aIsActive);
 
   void SetFrame(nsPluginFrame *aFrame);
@@ -216,6 +230,13 @@ public:
 
   // Returns the image container that has our currently displayed image.
   already_AddRefed<mozilla::layers::ImageContainer> GetImageContainer();
+  // Returns true if this is windowed plugin that can return static captures
+  // for scroll operations.
+  bool NeedsScrollImageLayer();
+  // Notification we receive from nsPluginFrame about scroll state.
+  bool UpdateScrollState(bool aIsScrolling);
+
+  void DidComposite();
 
   /**
    * Returns the bounds of the current async-rendered surface. This can only
@@ -228,9 +249,9 @@ public:
   // The eventual target of these operations is PluginInstanceParent,
   // but it takes several hops to get there.
   void SetBackgroundUnknown();
-  already_AddRefed<gfxContext> BeginUpdateBackground(const nsIntRect& aRect);
-  void EndUpdateBackground(gfxContext* aContext, const nsIntRect& aRect);
-  
+  already_AddRefed<DrawTarget> BeginUpdateBackground(const nsIntRect& aRect);
+  void EndUpdateBackground(const nsIntRect& aRect);
+
   bool UseAsyncRendering();
 
   already_AddRefed<nsIURI> GetBaseURI() const;
@@ -253,6 +274,28 @@ public:
   void NotifyHostCreateWidget();
   void NotifyDestroyPending();
 
+  bool GetCompositionString(uint32_t aIndex, nsTArray<uint8_t>* aString,
+                            int32_t* aLength);
+  bool SetCandidateWindow(
+           const mozilla::widget::CandidateWindowPosition& aPosition);
+  bool RequestCommitOrCancel(bool aCommitted);
+
+  // See nsIKeyEventInPluginCallback
+  virtual void HandledWindowedPluginKeyEvent(
+                 const mozilla::NativeEventData& aKeyEventData,
+                 bool aIsConsumed) override;
+
+  /**
+   * OnWindowedPluginKeyEvent() is called when the plugin process receives
+   * native key event directly.
+   *
+   * @param aNativeKeyData      The key event which was received by the
+   *                            plugin process directly.
+   */
+  void OnWindowedPluginKeyEvent(
+         const mozilla::NativeEventData& aNativeKeyData);
+
+  void GetCSSZoomFactor(float *result);
 private:
   virtual ~nsPluginInstanceOwner();
 
@@ -272,22 +315,28 @@ private:
   bool mFullScreen;
   void* mJavaView;
 #endif 
+
+#if defined(XP_WIN)
+  nsIWidget* GetContainingWidgetIfOffset();
+  already_AddRefed<mozilla::TextComposition> GetTextComposition();
+  void HandleNoConsumedCompositionMessage(
+    mozilla::WidgetCompositionEvent* aCompositionEvent,
+    const NPEvent* aPluginEvent);
+  bool mGotCompositionData;
+  bool mSentStartComposition;
+  bool mPluginDidNotHandleIMEComposition;
+#endif
  
   nsPluginNativeWindow       *mPluginWindow;
-  nsRefPtr<nsNPAPIPluginInstance> mInstance;
+  RefPtr<nsNPAPIPluginInstance> mInstance;
   nsPluginFrame              *mPluginFrame;
   nsWeakPtr                   mContent; // WEAK, content owns us
   nsCString                   mDocumentBase;
   bool                        mWidgetCreationComplete;
   nsCOMPtr<nsIWidget>         mWidget;
-  nsRefPtr<nsPluginHost>      mPluginHost;
+  RefPtr<nsPluginHost>      mPluginHost;
   
 #ifdef XP_MACOSX
-  NP_CGContext                              mCGPluginPortCopy;
-  int32_t                                   mInCGPaintLevel;
-  mozilla::RefPtr<MacIOSurface>             mIOSurface;
-  mozilla::RefPtr<nsCARenderer>             mCARenderer;
-  CGColorSpaceRef                           mColorProfile;
   static nsCOMPtr<nsITimer>                *sCATimer;
   static nsTArray<nsPluginInstanceOwner*>  *sCARefreshListeners;
   bool                                      mSentInitialTopLevelWindowEvent;
@@ -297,7 +346,7 @@ private:
   // True if, the next time the window is activated, we should blur ourselves.
   bool                                      mShouldBlurOnActivate;
 #endif
-
+  double                                    mLastCSSZoomFactor;
   // Initially, the event loop nesting level we were created on, it's updated
   // if we detect the appshell is on a lower level as long as we're not stopped.
   // We delay DoStopPlugin() until the appshell reaches this level or lower.
@@ -321,12 +370,17 @@ private:
 #endif
   
   // pointer to wrapper for nsIDOMContextMenuListener
-  nsRefPtr<nsPluginDOMContextMenuListener> mCXMenuListener;
+  RefPtr<nsPluginDOMContextMenuListener> mCXMenuListener;
   
   nsresult DispatchKeyToPlugin(nsIDOMEvent* aKeyEvent);
   nsresult DispatchMouseToPlugin(nsIDOMEvent* aMouseEvent,
                                  bool aAllowPropagate = false);
   nsresult DispatchFocusToPlugin(nsIDOMEvent* aFocusEvent);
+  nsresult DispatchCompositionToPlugin(nsIDOMEvent* aEvent);
+
+#ifdef XP_WIN
+  void CallDefaultProc(const mozilla::WidgetGUIEvent* aEvent);
+#endif
 
 #ifdef XP_MACOSX
   static NPBool ConvertPointPuppet(PuppetWidget *widget, nsPluginFrame* pluginFrame,
@@ -366,6 +420,9 @@ private:
 #endif
 
   bool mWaitingForPaint;
+#if defined(XP_WIN)
+  bool mScrollState;
+#endif
 };
 
 #endif // nsPluginInstanceOwner_h_

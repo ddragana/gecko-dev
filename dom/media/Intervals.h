@@ -188,6 +188,9 @@ public:
 
   SelfType Span(const SelfType& aOther) const
   {
+    if (IsEmpty()) {
+      return aOther;
+    }
     SelfType result(*this);
     if (aOther.mStart < mStart) {
       result.mStart = aOther.mStart;
@@ -252,7 +255,7 @@ class IntervalSet
 public:
   typedef IntervalSet<T> SelfType;
   typedef Interval<T> ElemType;
-  typedef nsAutoTArray<ElemType,4> ContainerType;
+  typedef AutoTArray<ElemType,4> ContainerType;
   typedef typename ContainerType::index_type IndexType;
 
   IntervalSet()
@@ -269,7 +272,7 @@ public:
 
   IntervalSet(SelfType&& aOther)
   {
-    mIntervals.MoveElementsFrom(Move(aOther.mIntervals));
+    mIntervals.AppendElements(Move(aOther.mIntervals));
   }
 
   explicit IntervalSet(const ElemType& aOther)
@@ -358,28 +361,23 @@ public:
 
     ContainerType normalized;
     ElemType current(aInterval);
-    bool inserted = false;
     IndexType i = 0;
     for (; i < mIntervals.Length(); i++) {
       ElemType& interval = mIntervals[i];
       if (current.Touches(interval)) {
         current = current.Span(interval);
       } else if (current.LeftOf(interval)) {
-        normalized.AppendElement(Move(current));
-        inserted = true;
         break;
       } else {
         normalized.AppendElement(Move(interval));
       }
     }
-    if (!inserted) {
-      normalized.AppendElement(Move(current));
-    }
+    normalized.AppendElement(Move(current));
     for (; i < mIntervals.Length(); i++) {
       normalized.AppendElement(Move(mIntervals[i]));
     }
     mIntervals.Clear();
-    mIntervals.MoveElementsFrom(Move(normalized));
+    mIntervals.AppendElements(Move(normalized));
 
     return *this;
   }
@@ -403,7 +401,7 @@ public:
     return intervals;
   }
 
-  SelfType operator+ (const ElemType& aInterval)
+  SelfType operator+ (const ElemType& aInterval) const
   {
     SelfType intervals(*this);
     intervals.Add(aInterval);
@@ -429,8 +427,8 @@ public:
     }
     T firstEnd = std::max(mIntervals[0].mStart, aInterval.mStart);
     T secondStart = std::min(mIntervals.LastElement().mEnd, aInterval.mEnd);
-    ElemType startInterval(mIntervals[0].mStart, firstEnd, aInterval.mFuzz);
-    ElemType endInterval(secondStart, mIntervals.LastElement().mEnd, aInterval.mFuzz);
+    ElemType startInterval(mIntervals[0].mStart, firstEnd);
+    ElemType endInterval(secondStart, mIntervals.LastElement().mEnd);
     SelfType intervals(Move(startInterval));
     intervals += Move(endInterval);
     return Intersection(intervals);
@@ -444,7 +442,14 @@ public:
     return *this;
   }
 
-  SelfType operator- (const ElemType& aInterval)
+  SelfType operator- (const SelfType& aInterval) const
+  {
+    SelfType intervals(*this);
+    intervals -= aInterval;
+    return intervals;
+  }
+
+  SelfType operator- (const ElemType& aInterval) const
   {
     SelfType intervals(*this);
     intervals -= aInterval;
@@ -482,7 +487,7 @@ public:
       }
     }
     mIntervals.Clear();
-    mIntervals.MoveElementsFrom(Move(intersection));
+    mIntervals.AppendElements(Move(intersection));
     return *this;
   }
 
@@ -657,6 +662,23 @@ public:
     return mIntervals.end();
   }
 
+  ElemType& LastInterval()
+  {
+    MOZ_ASSERT(!mIntervals.IsEmpty());
+    return mIntervals.LastElement();
+  }
+
+  const ElemType& LastInterval() const
+  {
+    MOZ_ASSERT(!mIntervals.IsEmpty());
+    return mIntervals.LastElement();
+  }
+
+  void Clear()
+  {
+    mIntervals.Clear();
+  }
+
 protected:
   ContainerType mIntervals;
 
@@ -682,7 +704,7 @@ private:
       normalized.AppendElement(Move(current));
 
       mIntervals.Clear();
-      mIntervals.MoveElementsFrom(Move(normalized));
+      mIntervals.AppendElements(Move(normalized));
     }
   }
 

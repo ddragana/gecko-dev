@@ -20,6 +20,7 @@
 #include "js/HeapAPI.h"
 #include "js/Value.h"
 #include "js/Vector.h"
+#include "vm/SharedMem.h"
 
 namespace JS {
 struct Zone;
@@ -66,6 +67,7 @@ class TenuringTracer : public JSTracer
     const Nursery& nursery() const { return nursery_; }
 
     // Returns true if the pointer was updated.
+    template <typename T> void traverse(T** thingp);
     template <typename T> void traverse(T* thingp);
 
     void insertIntoFixupList(gc::RelocationOverlay* entry);
@@ -108,7 +110,7 @@ class Nursery
     {}
     ~Nursery();
 
-    bool init(uint32_t maxNurseryBytes);
+    MOZ_MUST_USE bool init(uint32_t maxNurseryBytes);
 
     bool exists() const { return numNurseryChunks_ != 0; }
     size_t numChunks() const { return numNurseryChunks_; }
@@ -128,6 +130,10 @@ class Nursery
     MOZ_ALWAYS_INLINE bool isInside(gc::Cell* cellp) const = delete;
     MOZ_ALWAYS_INLINE bool isInside(const void* p) const {
         return uintptr_t(p) >= heapStart_ && uintptr_t(p) < heapEnd_;
+    }
+    template<typename T>
+    bool isInside(const SharedMem<T>& p) const {
+        return isInside(p.unwrap(/*safe - used for value in comparison above*/));
     }
 
     /*
@@ -165,7 +171,7 @@ class Nursery
      * sets |*ref| to the new location of the object and returns true. Otherwise
      * returns false and leaves |*ref| unset.
      */
-    MOZ_ALWAYS_INLINE bool getForwardedPointer(JSObject** ref) const;
+    MOZ_ALWAYS_INLINE MOZ_MUST_USE bool getForwardedPointer(JSObject** ref) const;
 
     /* Forward a slots/elements pointer stored in an Ion frame. */
     void forwardBufferPointer(HeapSlot** pSlotsElems);
@@ -181,6 +187,14 @@ class Nursery
     }
 
     void waitBackgroundFreeEnd();
+
+    MOZ_MUST_USE bool addedUniqueIdToCell(gc::Cell* cell) {
+        if (!IsInsideNursery(cell) || !isEnabled())
+            return true;
+        MOZ_ASSERT(cellsWithUid_.initialized());
+        MOZ_ASSERT(!cellsWithUid_.has(cell));
+        return cellsWithUid_.put(cell);
+    }
 
     size_t sizeOfHeapCommitted() const {
         return numActiveChunks_ * gc::ChunkSize;
@@ -202,6 +216,11 @@ class Nursery
 
     MOZ_ALWAYS_INLINE uintptr_t heapEnd() const {
         return heapEnd_;
+    }
+
+    // Free space remaining, not counting chunk trailers.
+    MOZ_ALWAYS_INLINE size_t approxFreeSpace() const {
+        return heapEnd_ - position_;
     }
 
 #ifdef JS_GC_ZEAL
@@ -265,6 +284,21 @@ class Nursery
     typedef HashMap<void*, void*, PointerHasher<void*, 1>, SystemAllocPolicy> ForwardedBufferMap;
     ForwardedBufferMap forwardedBuffers;
 
+    /*
+     * When we assign a unique id to cell in the nursery, that almost always
+     * means that the cell will be in a hash table, and thus, held live,
+     * automatically moving the uid from the nursery to its new home in
+     * tenured. It is possible, if rare, for an object that acquired a uid to
+     * be dead before the next collection, in which case we need to know to
+     * remove it when we sweep.
+     *
+     * Note: we store the pointers as Cell* here, resulting in an ugly cast in
+     *       sweep. This is because this structure is used to help implement
+     *       stable object hashing and we have to break the cycle somehow.
+     */
+    using CellsWithUniqueIdSet = HashSet<gc::Cell*, PointerHasher<gc::Cell*, 3>, SystemAllocPolicy>;
+    CellsWithUniqueIdSet cellsWithUid_;
+
     /* The maximum number of bytes allowed to reside in nursery buffers. */
     static const size_t MaxNurseryBufferSize = 1024;
 
@@ -274,8 +308,8 @@ class Nursery
     struct NurseryChunkLayout {
         char data[NurseryChunkUsableSize];
         gc::ChunkTrailer trailer;
-        uintptr_t start() { return uintptr_t(&data); }
-        uintptr_t end() { return uintptr_t(&trailer); }
+        uintptr_t start() const { return uintptr_t(&data); }
+        uintptr_t end() const { return uintptr_t(&trailer); }
     };
     static_assert(sizeof(NurseryChunkLayout) == gc::ChunkSize,
                   "Nursery chunk size must match gc::Chunk size.");
@@ -286,10 +320,8 @@ class Nursery
     }
 
     MOZ_ALWAYS_INLINE void initChunk(int chunkno) {
-        NurseryChunkLayout& c = chunk(chunkno);
-        c.trailer.storeBuffer = JS::shadow::Runtime::asShadowRuntime(runtime())->gcStoreBufferPtr();
-        c.trailer.location = gc::ChunkLocationBitNursery;
-        c.trailer.runtime = runtime();
+        gc::StoreBuffer* sb = JS::shadow::Runtime::asShadowRuntime(runtime())->gcStoreBufferPtr();
+        new (&chunk(chunkno).trailer) gc::ChunkTrailer(runtime(), sb);
     }
 
     MOZ_ALWAYS_INLINE void setCurrentChunk(int chunkno) {
@@ -301,7 +333,7 @@ class Nursery
         initChunk(chunkno);
     }
 
-    void updateDecommittedRegion();
+    void updateNumActiveChunks(int newCount);
 
     MOZ_ALWAYS_INLINE uintptr_t allocationEnd() const {
         MOZ_ASSERT(numActiveChunks_ > 0);

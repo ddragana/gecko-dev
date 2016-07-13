@@ -11,6 +11,7 @@
 #include <glib.h>
 #include <glib-object.h>
 
+#include "AccessibleOrProxy.h"
 #include "AccessibleWrap.h"
 
 namespace mozilla {
@@ -34,9 +35,41 @@ class ProxyAccessible;
                                          MaiAtkObjectClass))
 GType mai_atk_object_get_type(void);
 GType mai_util_get_type();
+extern "C" GType mai_atk_socket_get_type(void);
+
+/* MaiAtkSocket */
+
+#define MAI_TYPE_ATK_SOCKET              (mai_atk_socket_get_type ())
+#define MAI_ATK_SOCKET(obj)              (G_TYPE_CHECK_INSTANCE_CAST ((obj),\
+                                          MAI_TYPE_ATK_SOCKET, MaiAtkSocket))
+#define MAI_IS_ATK_SOCKET(obj)           (G_TYPE_CHECK_INSTANCE_TYPE ((obj),\
+                                          MAI_TYPE_ATK_SOCKET))
+#define MAI_ATK_SOCKET_CLASS(klass)      (G_TYPE_CHECK_CLASS_CAST ((klass),\
+                                          MAI_TYPE_ATK_SOCKET,\
+                                          MaiAtkSocketClass))
+#define MAI_IS_ATK_SOCKET_CLASS(klass)   (G_TYPE_CHECK_CLASS_TYPE ((klass),\
+                                          MAI_TYPE_ATK_SOCKET))
+#define MAI_ATK_SOCKET_GET_CLASS(obj)    (G_TYPE_INSTANCE_GET_CLASS ((obj),\
+                                          MAI_TYPE_ATK_SOCKET,\
+                                          MaiAtkSocketClass))
+
+typedef struct _MaiAtkSocket
+{
+  AtkSocket parent;
+
+  mozilla::a11y::AccessibleWrap* accWrap;
+} MaiAtkSocket;
+
+typedef struct _MaiAtkSocketClass
+{
+  AtkSocketClass parent_class;
+} MaiAtkSocketClass;
+
 mozilla::a11y::AccessibleWrap* GetAccessibleWrap(AtkObject* aAtkObj);
 mozilla::a11y::ProxyAccessible* GetProxy(AtkObject* aAtkObj);
+mozilla::a11y::AccessibleOrProxy GetInternalObj(AtkObject* aObj);
 AtkObject* GetWrapperFor(mozilla::a11y::ProxyAccessible* aProxy);
+AtkObject* GetWrapperFor(mozilla::a11y::AccessibleOrProxy aObj);
 
 extern int atkMajorVersion, atkMinorVersion;
 
@@ -65,7 +98,7 @@ struct MaiAtkObject
    * The AccessibleWrap whose properties and features are exported
    * via this object instance.
    */
-  uintptr_t accWrap;
+  mozilla::a11y::AccessibleOrProxy accWrap;
 
   /*
    * Get the AtkHyperlink for this atk object.
@@ -87,6 +120,12 @@ struct MaiAtkObject
    */
   void FireTextChangeEvent(const nsString& aStr, int32_t aStart, uint32_t aLen,
                            bool aIsInsert, bool aIsFromUser);
+
+  /**
+   * Notify ATK of a shown or hidden subtree rooted at aObject whose parent is
+   * aParent
+   */
+  void FireAtkShowHideEvent(AtkObject* aParent, bool aIsAdded, bool aFromUser);
 
 private:
   /*

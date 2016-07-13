@@ -51,12 +51,8 @@ namespace JS { class Value; }
 # define JSVAL_TAG_SHIFT 47
 #endif
 
-/*
- * We try to use enums so that printing a jsval_layout in the debugger shows
- * nice symbolic type tags, however we can only do this when we can force the
- * underlying type of the enum to be the desired size.
- */
-#if !defined(__SUNPRO_CC) && !defined(__xlC__)
+// Use enums so that printing a jsval_layout in the debugger shows nice
+// symbolic type tags.
 
 #if defined(_MSC_VER)
 # define JS_ENUM_HEADER(id, type)              enum id : type
@@ -76,8 +72,9 @@ JS_ENUM_HEADER(JSValueType, uint8_t)
     JSVAL_TYPE_MAGIC               = 0x04,
     JSVAL_TYPE_STRING              = 0x05,
     JSVAL_TYPE_SYMBOL              = 0x06,
-    JSVAL_TYPE_NULL                = 0x07,
-    JSVAL_TYPE_OBJECT              = 0x08,
+    JSVAL_TYPE_PRIVATE_GCTHING     = 0x07,
+    JSVAL_TYPE_NULL                = 0x08,
+    JSVAL_TYPE_OBJECT              = 0x0c,
 
     /* These never appear in a jsval; they are only provided as an out-of-band value. */
     JSVAL_TYPE_UNKNOWN             = 0x20,
@@ -100,7 +97,8 @@ JS_ENUM_HEADER(JSValueTag, uint32_t)
     JSVAL_TAG_BOOLEAN              = JSVAL_TAG_CLEAR | JSVAL_TYPE_BOOLEAN,
     JSVAL_TAG_MAGIC                = JSVAL_TAG_CLEAR | JSVAL_TYPE_MAGIC,
     JSVAL_TAG_NULL                 = JSVAL_TAG_CLEAR | JSVAL_TYPE_NULL,
-    JSVAL_TAG_OBJECT               = JSVAL_TAG_CLEAR | JSVAL_TYPE_OBJECT
+    JSVAL_TAG_OBJECT               = JSVAL_TAG_CLEAR | JSVAL_TYPE_OBJECT,
+    JSVAL_TAG_PRIVATE_GCTHING      = JSVAL_TAG_CLEAR | JSVAL_TYPE_PRIVATE_GCTHING
 } JS_ENUM_FOOTER(JSValueTag);
 
 static_assert(sizeof(JSValueTag) == sizeof(uint32_t),
@@ -119,7 +117,8 @@ JS_ENUM_HEADER(JSValueTag, uint32_t)
     JSVAL_TAG_BOOLEAN              = JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_BOOLEAN,
     JSVAL_TAG_MAGIC                = JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_MAGIC,
     JSVAL_TAG_NULL                 = JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_NULL,
-    JSVAL_TAG_OBJECT               = JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_OBJECT
+    JSVAL_TAG_OBJECT               = JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_OBJECT,
+    JSVAL_TAG_PRIVATE_GCTHING      = JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_PRIVATE_GCTHING
 } JS_ENUM_FOOTER(JSValueTag);
 
 static_assert(sizeof(JSValueTag) == sizeof(uint32_t),
@@ -127,15 +126,16 @@ static_assert(sizeof(JSValueTag) == sizeof(uint32_t),
 
 JS_ENUM_HEADER(JSValueShiftedTag, uint64_t)
 {
-    JSVAL_SHIFTED_TAG_MAX_DOUBLE   = ((((uint64_t)JSVAL_TAG_MAX_DOUBLE) << JSVAL_TAG_SHIFT) | 0xFFFFFFFF),
-    JSVAL_SHIFTED_TAG_INT32        = (((uint64_t)JSVAL_TAG_INT32)      << JSVAL_TAG_SHIFT),
-    JSVAL_SHIFTED_TAG_UNDEFINED    = (((uint64_t)JSVAL_TAG_UNDEFINED)  << JSVAL_TAG_SHIFT),
-    JSVAL_SHIFTED_TAG_STRING       = (((uint64_t)JSVAL_TAG_STRING)     << JSVAL_TAG_SHIFT),
-    JSVAL_SHIFTED_TAG_SYMBOL       = (((uint64_t)JSVAL_TAG_SYMBOL)     << JSVAL_TAG_SHIFT),
-    JSVAL_SHIFTED_TAG_BOOLEAN      = (((uint64_t)JSVAL_TAG_BOOLEAN)    << JSVAL_TAG_SHIFT),
-    JSVAL_SHIFTED_TAG_MAGIC        = (((uint64_t)JSVAL_TAG_MAGIC)      << JSVAL_TAG_SHIFT),
-    JSVAL_SHIFTED_TAG_NULL         = (((uint64_t)JSVAL_TAG_NULL)       << JSVAL_TAG_SHIFT),
-    JSVAL_SHIFTED_TAG_OBJECT       = (((uint64_t)JSVAL_TAG_OBJECT)     << JSVAL_TAG_SHIFT)
+    JSVAL_SHIFTED_TAG_MAX_DOUBLE      = ((((uint64_t)JSVAL_TAG_MAX_DOUBLE)     << JSVAL_TAG_SHIFT) | 0xFFFFFFFF),
+    JSVAL_SHIFTED_TAG_INT32           = (((uint64_t)JSVAL_TAG_INT32)           << JSVAL_TAG_SHIFT),
+    JSVAL_SHIFTED_TAG_UNDEFINED       = (((uint64_t)JSVAL_TAG_UNDEFINED)       << JSVAL_TAG_SHIFT),
+    JSVAL_SHIFTED_TAG_STRING          = (((uint64_t)JSVAL_TAG_STRING)          << JSVAL_TAG_SHIFT),
+    JSVAL_SHIFTED_TAG_SYMBOL          = (((uint64_t)JSVAL_TAG_SYMBOL)          << JSVAL_TAG_SHIFT),
+    JSVAL_SHIFTED_TAG_BOOLEAN         = (((uint64_t)JSVAL_TAG_BOOLEAN)         << JSVAL_TAG_SHIFT),
+    JSVAL_SHIFTED_TAG_MAGIC           = (((uint64_t)JSVAL_TAG_MAGIC)           << JSVAL_TAG_SHIFT),
+    JSVAL_SHIFTED_TAG_NULL            = (((uint64_t)JSVAL_TAG_NULL)            << JSVAL_TAG_SHIFT),
+    JSVAL_SHIFTED_TAG_OBJECT          = (((uint64_t)JSVAL_TAG_OBJECT)          << JSVAL_TAG_SHIFT),
+    JSVAL_SHIFTED_TAG_PRIVATE_GCTHING = (((uint64_t)JSVAL_TAG_PRIVATE_GCTHING) << JSVAL_TAG_SHIFT)
 } JS_ENUM_FOOTER(JSValueShiftedTag);
 
 static_assert(sizeof(JSValueShiftedTag) == sizeof(uint64_t),
@@ -152,60 +152,6 @@ static_assert(sizeof(JSValueShiftedTag) == sizeof(uint64_t),
  */
 #undef JS_ENUM_HEADER
 #undef JS_ENUM_FOOTER
-
-#else  /* !defined(__SUNPRO_CC) && !defined(__xlC__) */
-
-typedef uint8_t JSValueType;
-#define JSVAL_TYPE_DOUBLE            ((uint8_t)0x00)
-#define JSVAL_TYPE_INT32             ((uint8_t)0x01)
-#define JSVAL_TYPE_UNDEFINED         ((uint8_t)0x02)
-#define JSVAL_TYPE_BOOLEAN           ((uint8_t)0x03)
-#define JSVAL_TYPE_MAGIC             ((uint8_t)0x04)
-#define JSVAL_TYPE_STRING            ((uint8_t)0x05)
-#define JSVAL_TYPE_SYMBOL            ((uint8_t)0x06)
-#define JSVAL_TYPE_NULL              ((uint8_t)0x07)
-#define JSVAL_TYPE_OBJECT            ((uint8_t)0x08)
-#define JSVAL_TYPE_UNKNOWN           ((uint8_t)0x20)
-
-#if defined(JS_NUNBOX32)
-
-typedef uint32_t JSValueTag;
-#define JSVAL_TAG_CLEAR              ((uint32_t)(0xFFFFFF80))
-#define JSVAL_TAG_INT32              ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_INT32))
-#define JSVAL_TAG_UNDEFINED          ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_UNDEFINED))
-#define JSVAL_TAG_STRING             ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_STRING))
-#define JSVAL_TAG_SYMBOL             ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_SYMBOL))
-#define JSVAL_TAG_BOOLEAN            ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_BOOLEAN))
-#define JSVAL_TAG_MAGIC              ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_MAGIC))
-#define JSVAL_TAG_NULL               ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_NULL))
-#define JSVAL_TAG_OBJECT             ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_OBJECT))
-
-#elif defined(JS_PUNBOX64)
-
-typedef uint32_t JSValueTag;
-#define JSVAL_TAG_MAX_DOUBLE         ((uint32_t)(0x1FFF0))
-#define JSVAL_TAG_INT32              (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_INT32)
-#define JSVAL_TAG_UNDEFINED          (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_UNDEFINED)
-#define JSVAL_TAG_STRING             (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_STRING)
-#define JSVAL_TAG_SYMBOL             (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_SYMBOL)
-#define JSVAL_TAG_BOOLEAN            (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_BOOLEAN)
-#define JSVAL_TAG_MAGIC              (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_MAGIC)
-#define JSVAL_TAG_NULL               (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_NULL)
-#define JSVAL_TAG_OBJECT             (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_OBJECT)
-
-typedef uint64_t JSValueShiftedTag;
-#define JSVAL_SHIFTED_TAG_MAX_DOUBLE ((((uint64_t)JSVAL_TAG_MAX_DOUBLE) << JSVAL_TAG_SHIFT) | 0xFFFFFFFF)
-#define JSVAL_SHIFTED_TAG_INT32      (((uint64_t)JSVAL_TAG_INT32)      << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_UNDEFINED  (((uint64_t)JSVAL_TAG_UNDEFINED)  << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_STRING     (((uint64_t)JSVAL_TAG_STRING)     << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_SYMBOL     (((uint64_t)JSVAL_TAG_SYMBOL)     << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_BOOLEAN    (((uint64_t)JSVAL_TAG_BOOLEAN)    << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_MAGIC      (((uint64_t)JSVAL_TAG_MAGIC)      << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_NULL       (((uint64_t)JSVAL_TAG_NULL)       << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_OBJECT     (((uint64_t)JSVAL_TAG_OBJECT)     << JSVAL_TAG_SHIFT)
-
-#endif  /* JS_PUNBOX64 */
-#endif  /* !defined(__SUNPRO_CC) && !defined(__xlC__) */
 
 #if defined(JS_NUNBOX32)
 
@@ -237,25 +183,57 @@ typedef uint64_t JSValueShiftedTag;
 
 typedef enum JSWhyMagic
 {
-    JS_ELEMENTS_HOLE,            /* a hole in a native object's elements */
-    JS_NO_ITER_VALUE,            /* there is not a pending iterator value */
-    JS_GENERATOR_CLOSING,        /* exception value thrown when closing a generator */
-    JS_NO_CONSTANT,              /* compiler sentinel value */
-    JS_THIS_POISON,              /* used in debug builds to catch tracing errors */
-    JS_ARG_POISON,               /* used in debug builds to catch tracing errors */
-    JS_SERIALIZE_NO_NODE,        /* an empty subnode in the AST serializer */
-    JS_LAZY_ARGUMENTS,           /* lazy arguments value on the stack */
-    JS_OPTIMIZED_ARGUMENTS,      /* optimized-away 'arguments' value */
-    JS_IS_CONSTRUCTING,          /* magic value passed to natives to indicate construction */
-    JS_OVERWRITTEN_CALLEE,       /* arguments.callee has been overwritten */
-    JS_BLOCK_NEEDS_CLONE,        /* value of static block object slot */
-    JS_HASH_KEY_EMPTY,           /* see class js::HashableValue */
-    JS_ION_ERROR,                /* error while running Ion code */
-    JS_ION_BAILOUT,              /* missing recover instruction result */
-    JS_OPTIMIZED_OUT,            /* optimized out slot */
-    JS_UNINITIALIZED_LEXICAL,    /* uninitialized lexical bindings that produce ReferenceError
-                                  * on touch. */
-    JS_GENERIC_MAGIC,            /* for local use */
+    /** a hole in a native object's elements */
+    JS_ELEMENTS_HOLE,
+
+    /** there is not a pending iterator value */
+    JS_NO_ITER_VALUE,
+
+    /** exception value thrown when closing a generator */
+    JS_GENERATOR_CLOSING,
+
+    /** compiler sentinel value */
+    JS_NO_CONSTANT,
+
+    /** used in debug builds to catch tracing errors */
+    JS_THIS_POISON,
+
+    /** used in debug builds to catch tracing errors */
+    JS_ARG_POISON,
+
+    /** an empty subnode in the AST serializer */
+    JS_SERIALIZE_NO_NODE,
+
+    /** lazy arguments value on the stack */
+    JS_LAZY_ARGUMENTS,
+
+    /** optimized-away 'arguments' value */
+    JS_OPTIMIZED_ARGUMENTS,
+
+    /** magic value passed to natives to indicate construction */
+    JS_IS_CONSTRUCTING,
+
+    /** value of static block object slot */
+    JS_BLOCK_NEEDS_CLONE,
+
+    /** see class js::HashableValue */
+    JS_HASH_KEY_EMPTY,
+
+    /** error while running Ion code */
+    JS_ION_ERROR,
+
+    /** missing recover instruction result */
+    JS_ION_BAILOUT,
+
+    /** optimized out slot */
+    JS_OPTIMIZED_OUT,
+
+    /** uninitialized lexical bindings that produce ReferenceError on touch. */
+    JS_UNINITIALIZED_LEXICAL,
+
+    /** for local use */
+    JS_GENERIC_MAGIC,
+
     JS_WHY_MAGIC_COUNT
 } JSWhyMagic;
 
@@ -521,7 +499,7 @@ JSVAL_IS_BOOLEAN_IMPL(jsval_layout l)
 static inline bool
 JSVAL_TO_BOOLEAN_IMPL(jsval_layout l)
 {
-    return l.s.payload.boo;
+    return bool(l.s.payload.boo);
 }
 
 static inline jsval_layout
@@ -529,7 +507,7 @@ BOOLEAN_TO_JSVAL_IMPL(bool b)
 {
     jsval_layout l;
     l.s.tag = JSVAL_TAG_BOOLEAN;
-    l.s.payload.boo = b;
+    l.s.payload.boo = uint32_t(b);
     return l;
 }
 
@@ -584,7 +562,7 @@ static inline jsval_layout
 PRIVATE_PTR_TO_JSVAL_IMPL(void* ptr)
 {
     jsval_layout l;
-    MOZ_ASSERT(((uint32_t)ptr & 1) == 0);
+    MOZ_ASSERT((uintptr_t(ptr) & 1) == 0);
     l.s.tag = (JSValueTag)0;
     l.s.payload.ptr = ptr;
     MOZ_ASSERT(JSVAL_IS_DOUBLE_IMPL(l));
@@ -595,6 +573,29 @@ static inline void*
 JSVAL_TO_PRIVATE_PTR_IMPL(jsval_layout l)
 {
     return l.s.payload.ptr;
+}
+
+static inline jsval_layout
+PRIVATE_GCTHING_TO_JSVAL_IMPL(js::gc::Cell* cell)
+{
+    MOZ_ASSERT(JS::GCThingTraceKind(cell) != JS::TraceKind::String,
+               "Private GC thing Values must not be strings. Make a StringValue instead.");
+    MOZ_ASSERT(JS::GCThingTraceKind(cell) != JS::TraceKind::Symbol,
+               "Private GC thing Values must not be symbols. Make a SymbolValue instead.");
+    MOZ_ASSERT(JS::GCThingTraceKind(cell) != JS::TraceKind::Object,
+               "Private GC thing Values must not be objects. Make an ObjectValue instead.");
+
+    jsval_layout l;
+    MOZ_ASSERT(uintptr_t(cell) > 0x1000);
+    l.s.tag = JSVAL_TAG_PRIVATE_GCTHING;
+    l.s.payload.cell = cell;
+    return l;
+}
+
+static inline bool
+JSVAL_IS_PRIVATE_GCTHING_IMPL(jsval_layout l)
+{
+    return l.s.tag == JSVAL_TAG_PRIVATE_GCTHING;
 }
 
 static inline bool
@@ -619,6 +620,8 @@ JSVAL_TRACE_KIND_IMPL(jsval_layout l)
                   "Value type tags must correspond with JS::TraceKinds.");
     static_assert((JSVAL_TAG_OBJECT & 0x03) == size_t(JS::TraceKind::Object),
                   "Value type tags must correspond with JS::TraceKinds.");
+    if (MOZ_UNLIKELY(JSVAL_IS_PRIVATE_GCTHING_IMPL(l)))
+        return (uint32_t)JS::GCThingTraceKind(JSVAL_TO_GCTHING_IMPL(l));
     return l.s.tag & 0x03;
 }
 
@@ -838,6 +841,12 @@ JSVAL_IS_NULL_IMPL(jsval_layout l)
 }
 
 static inline bool
+JSVAL_IS_PRIVATE_GCTHING_IMPL(jsval_layout l)
+{
+    return (l.asBits >> JSVAL_TAG_SHIFT) == JSVAL_TAG_PRIVATE_GCTHING;
+}
+
+static inline bool
 JSVAL_IS_GCTHING_IMPL(jsval_layout l)
 {
     return l.asBits >= JSVAL_LOWER_INCL_SHIFTED_TAG_OF_GCTHING_SET;
@@ -860,6 +869,8 @@ JSVAL_TRACE_KIND_IMPL(jsval_layout l)
                   "Value type tags must correspond with JS::TraceKinds.");
     static_assert((JSVAL_TAG_OBJECT & 0x03) == size_t(JS::TraceKind::Object),
                   "Value type tags must correspond with JS::TraceKinds.");
+    if (MOZ_UNLIKELY(JSVAL_IS_PRIVATE_GCTHING_IMPL(l)))
+        return (uint32_t)JS::GCThingTraceKind(JSVAL_TO_GCTHING_IMPL(l));
     return (uint32_t)(l.asBits >> JSVAL_TAG_SHIFT) & 0x03;
 }
 
@@ -867,7 +878,7 @@ static inline jsval_layout
 PRIVATE_PTR_TO_JSVAL_IMPL(void* ptr)
 {
     jsval_layout l;
-    uint64_t ptrBits = (uint64_t)ptr;
+    uintptr_t ptrBits = uintptr_t(ptr);
     MOZ_ASSERT((ptrBits & 1) == 0);
     l.asBits = ptrBits >> 1;
     MOZ_ASSERT(JSVAL_IS_DOUBLE_IMPL(l));
@@ -879,6 +890,24 @@ JSVAL_TO_PRIVATE_PTR_IMPL(jsval_layout l)
 {
     MOZ_ASSERT((l.asBits & 0x8000000000000000LL) == 0);
     return (void*)(l.asBits << 1);
+}
+
+static inline jsval_layout
+PRIVATE_GCTHING_TO_JSVAL_IMPL(js::gc::Cell* cell)
+{
+    MOZ_ASSERT(JS::GCThingTraceKind(cell) != JS::TraceKind::String,
+               "Private GC thing Values must not be strings. Make a StringValue instead.");
+    MOZ_ASSERT(JS::GCThingTraceKind(cell) != JS::TraceKind::Symbol,
+               "Private GC thing Values must not be symbols. Make a SymbolValue instead.");
+    MOZ_ASSERT(JS::GCThingTraceKind(cell) != JS::TraceKind::Object,
+               "Private GC thing Values must not be objects. Make an ObjectValue instead.");
+
+    jsval_layout l;
+    uint64_t cellBits = (uint64_t)cell;
+    MOZ_ASSERT(uintptr_t(cellBits) > 0x1000);
+    MOZ_ASSERT((cellBits >> JSVAL_TAG_SHIFT) == 0);
+    l.asBits = cellBits | JSVAL_SHIFTED_TAG_PRIVATE_GCTHING;
+    return l;
 }
 
 static inline bool
@@ -967,7 +996,7 @@ CanonicalizeNaN(double d)
 # pragma optimize("", on)
 #endif
 
-/*
+/**
  * JS::Value is the interface for a single JavaScript Engine value.  A few
  * general notes on JS::Value:
  *
@@ -1009,6 +1038,15 @@ class Value
     Value() = default;
     Value(const Value& v) = default;
 #endif
+
+    /**
+     * Returns false if creating a NumberValue containing the given type would
+     * be lossy, true otherwise.
+     */
+    template <typename T>
+    static bool isNumberRepresentable(const T t) {
+        return T(double(t)) == t;
+    }
 
     /*** Mutators ***/
 
@@ -1298,6 +1336,23 @@ class Value
     }
 
     /*
+     * Private GC Thing API
+     *
+     * Non-JSObject, JSString, and JS::Symbol cells may be put into the 64-bit
+     * payload as private GC things. Such Values are considered isMarkable()
+     * and isGCThing(), and as such, automatically marked. Their traceKind()
+     * is gotten via their cells.
+     */
+
+    void setPrivateGCThing(js::gc::Cell* cell) {
+        data = PRIVATE_GCTHING_TO_JSVAL_IMPL(cell);
+    }
+
+    bool isPrivateGCThing() const {
+        return JSVAL_IS_PRIVATE_GCTHING_IMPL(data);
+    }
+
+    /*
      * An unmarked value is just a void* cast as a Value. Thus, the Value is
      * not safe for GC and must not be marked. This API avoids raw casts
      * and the ensuing strict-aliasing warnings.
@@ -1351,7 +1406,7 @@ class Value
     friend jsval_layout (::JSVAL_TO_IMPL)(Value);
     friend Value JS_VALUE_CONSTEXPR (::IMPL_TO_JSVAL)(jsval_layout l);
     friend Value JS_VALUE_CONSTEXPR (JS::UndefinedValue)();
-};
+} JS_HAZ_GC_POINTER;
 
 inline bool
 IsOptimizedPlaceholderMagicValue(const Value& v)
@@ -1611,7 +1666,7 @@ template <typename T>
 static inline Value
 NumberValue(const T t)
 {
-    MOZ_ASSERT(T(double(t)) == t, "value creation would be lossy");
+    MOZ_ASSERT(Value::isNumberRepresentable(t), "value creation would be lossy");
     return detail::MakeNumberValue<std::numeric_limits<T>::is_signed>::create(t);
 }
 
@@ -1639,6 +1694,14 @@ PrivateUint32Value(uint32_t ui)
     return v;
 }
 
+static inline Value
+PrivateGCThingValue(js::gc::Cell* cell)
+{
+    Value v;
+    v.setPrivateGCThing(cell);
+    return v;
+}
+
 inline bool
 SameType(const Value& lhs, const Value& rhs)
 {
@@ -1651,18 +1714,23 @@ SameType(const Value& lhs, const Value& rhs)
 
 namespace JS {
 JS_PUBLIC_API(void) HeapValuePostBarrier(Value* valuep, const Value& prev, const Value& next);
+
+template <>
+struct GCPolicy<JS::Value>
+{
+    static Value initial() { return UndefinedValue(); }
+    static void trace(JSTracer* trc, Value* v, const char* name) {
+        js::UnsafeTraceManuallyBarrieredEdge(trc, v, name);
+    }
+};
+
 } // namespace JS
 
 namespace js {
 
-template <> struct GCMethods<const JS::Value>
+template <>
+struct BarrierMethods<JS::Value>
 {
-    static JS::Value initial() { return JS::UndefinedValue(); }
-};
-
-template <> struct GCMethods<JS::Value>
-{
-    static JS::Value initial() { return JS::UndefinedValue(); }
     static gc::Cell* asGCThingOrNull(const JS::Value& v) {
         return v.isMarkable() ? v.toGCThing() : nullptr;
     }
@@ -1673,85 +1741,89 @@ template <> struct GCMethods<JS::Value>
 
 template <class Outer> class MutableValueOperations;
 
-/*
+/**
  * A class designed for CRTP use in implementing the non-mutating parts of the
  * Value interface in Value-like classes.  Outer must be a class inheriting
- * ValueOperations<Outer> with a visible extract() method returning the
- * const Value* abstracted by Outer.
+ * ValueOperations<Outer> with a visible get() method returning a const
+ * reference to the Value abstracted by Outer.
  */
 template <class Outer>
 class ValueOperations
 {
     friend class MutableValueOperations<Outer>;
 
-    const JS::Value * value() const { return static_cast<const Outer*>(this)->extract(); }
+    const JS::Value& value() const { return static_cast<const Outer*>(this)->get(); }
 
   public:
-    bool isUndefined() const { return value()->isUndefined(); }
-    bool isNull() const { return value()->isNull(); }
-    bool isBoolean() const { return value()->isBoolean(); }
-    bool isTrue() const { return value()->isTrue(); }
-    bool isFalse() const { return value()->isFalse(); }
-    bool isNumber() const { return value()->isNumber(); }
-    bool isInt32() const { return value()->isInt32(); }
-    bool isInt32(int32_t i32) const { return value()->isInt32(i32); }
-    bool isDouble() const { return value()->isDouble(); }
-    bool isString() const { return value()->isString(); }
-    bool isSymbol() const { return value()->isSymbol(); }
-    bool isObject() const { return value()->isObject(); }
-    bool isMagic() const { return value()->isMagic(); }
-    bool isMagic(JSWhyMagic why) const { return value()->isMagic(why); }
-    bool isMarkable() const { return value()->isMarkable(); }
-    bool isPrimitive() const { return value()->isPrimitive(); }
-    bool isGCThing() const { return value()->isGCThing(); }
+    bool isUndefined() const { return value().isUndefined(); }
+    bool isNull() const { return value().isNull(); }
+    bool isBoolean() const { return value().isBoolean(); }
+    bool isTrue() const { return value().isTrue(); }
+    bool isFalse() const { return value().isFalse(); }
+    bool isNumber() const { return value().isNumber(); }
+    bool isInt32() const { return value().isInt32(); }
+    bool isInt32(int32_t i32) const { return value().isInt32(i32); }
+    bool isDouble() const { return value().isDouble(); }
+    bool isString() const { return value().isString(); }
+    bool isSymbol() const { return value().isSymbol(); }
+    bool isObject() const { return value().isObject(); }
+    bool isMagic() const { return value().isMagic(); }
+    bool isMagic(JSWhyMagic why) const { return value().isMagic(why); }
+    bool isMarkable() const { return value().isMarkable(); }
+    bool isPrimitive() const { return value().isPrimitive(); }
+    bool isGCThing() const { return value().isGCThing(); }
 
-    bool isNullOrUndefined() const { return value()->isNullOrUndefined(); }
-    bool isObjectOrNull() const { return value()->isObjectOrNull(); }
+    bool isNullOrUndefined() const { return value().isNullOrUndefined(); }
+    bool isObjectOrNull() const { return value().isObjectOrNull(); }
 
-    bool toBoolean() const { return value()->toBoolean(); }
-    double toNumber() const { return value()->toNumber(); }
-    int32_t toInt32() const { return value()->toInt32(); }
-    double toDouble() const { return value()->toDouble(); }
-    JSString* toString() const { return value()->toString(); }
-    JS::Symbol* toSymbol() const { return value()->toSymbol(); }
-    JSObject& toObject() const { return value()->toObject(); }
-    JSObject* toObjectOrNull() const { return value()->toObjectOrNull(); }
-    gc::Cell* toGCThing() const { return value()->toGCThing(); }
-    JS::TraceKind traceKind() const { return value()->traceKind(); }
-    uint64_t asRawBits() const { return value()->asRawBits(); }
+    bool toBoolean() const { return value().toBoolean(); }
+    double toNumber() const { return value().toNumber(); }
+    int32_t toInt32() const { return value().toInt32(); }
+    double toDouble() const { return value().toDouble(); }
+    JSString* toString() const { return value().toString(); }
+    JS::Symbol* toSymbol() const { return value().toSymbol(); }
+    JSObject& toObject() const { return value().toObject(); }
+    JSObject* toObjectOrNull() const { return value().toObjectOrNull(); }
+    gc::Cell* toGCThing() const { return value().toGCThing(); }
+    JS::TraceKind traceKind() const { return value().traceKind(); }
+    void* toPrivate() const { return value().toPrivate(); }
+    uint32_t toPrivateUint32() const { return value().toPrivateUint32(); }
 
-    JSValueType extractNonDoubleType() const { return value()->extractNonDoubleType(); }
-    uint32_t toPrivateUint32() const { return value()->toPrivateUint32(); }
+    uint64_t asRawBits() const { return value().asRawBits(); }
+    JSValueType extractNonDoubleType() const { return value().extractNonDoubleType(); }
 
-    JSWhyMagic whyMagic() const { return value()->whyMagic(); }
-    uint32_t magicUint32() const { return value()->magicUint32(); }
+    JSWhyMagic whyMagic() const { return value().whyMagic(); }
+    uint32_t magicUint32() const { return value().magicUint32(); }
 };
 
-/*
+/**
  * A class designed for CRTP use in implementing all the mutating parts of the
  * Value interface in Value-like classes.  Outer must be a class inheriting
- * MutableValueOperations<Outer> with visible extractMutable() and extract()
- * methods returning the const Value* and Value* abstracted by Outer.
+ * MutableValueOperations<Outer> with visible get() methods returning const and
+ * non-const references to the Value abstracted by Outer.
  */
 template <class Outer>
 class MutableValueOperations : public ValueOperations<Outer>
 {
-    JS::Value * value() { return static_cast<Outer*>(this)->extractMutable(); }
+    JS::Value& value() { return static_cast<Outer*>(this)->get(); }
 
   public:
-    void setNull() { value()->setNull(); }
-    void setUndefined() { value()->setUndefined(); }
-    void setInt32(int32_t i) { value()->setInt32(i); }
-    void setDouble(double d) { value()->setDouble(d); }
+    void setNull() { value().setNull(); }
+    void setUndefined() { value().setUndefined(); }
+    void setInt32(int32_t i) { value().setInt32(i); }
+    void setDouble(double d) { value().setDouble(d); }
     void setNaN() { setDouble(JS::GenericNaN()); }
-    void setBoolean(bool b) { value()->setBoolean(b); }
-    void setMagic(JSWhyMagic why) { value()->setMagic(why); }
-    bool setNumber(uint32_t ui) { return value()->setNumber(ui); }
-    bool setNumber(double d) { return value()->setNumber(d); }
-    void setString(JSString* str) { this->value()->setString(str); }
-    void setSymbol(JS::Symbol* sym) { this->value()->setSymbol(sym); }
-    void setObject(JSObject& obj) { this->value()->setObject(obj); }
-    void setObjectOrNull(JSObject* arg) { this->value()->setObjectOrNull(arg); }
+    void setBoolean(bool b) { value().setBoolean(b); }
+    void setMagic(JSWhyMagic why) { value().setMagic(why); }
+    bool setNumber(uint32_t ui) { return value().setNumber(ui); }
+    bool setNumber(double d) { return value().setNumber(d); }
+    void setString(JSString* str) { this->value().setString(str); }
+    void setSymbol(JS::Symbol* sym) { this->value().setSymbol(sym); }
+    void setObject(JSObject& obj) { this->value().setObject(obj); }
+    void setObjectOrNull(JSObject* arg) { this->value().setObjectOrNull(arg); }
+    void setPrivate(void* ptr) { this->value().setPrivate(ptr); }
+    void setPrivateUint32(uint32_t ui) { this->value().setPrivateUint32(ui); }
+    void setPrivateGCThing(js::gc::Cell* cell) { this->value().setPrivateGCThing(cell); }
 };
 
 /*
@@ -1764,8 +1836,6 @@ class HeapBase<JS::Value> : public ValueOperations<JS::Heap<JS::Value> >
     typedef JS::Heap<JS::Value> Outer;
 
     friend class ValueOperations<Outer>;
-
-    const JS::Value * extract() const { return static_cast<const Outer*>(this)->address(); }
 
     void setBarriered(const JS::Value& v) {
         *static_cast<JS::Heap<JS::Value>*>(this) = v;
@@ -1782,6 +1852,7 @@ class HeapBase<JS::Value> : public ValueOperations<JS::Heap<JS::Value> >
     void setString(JSString* str) { setBarriered(JS::StringValue(str)); }
     void setSymbol(JS::Symbol* sym) { setBarriered(JS::SymbolValue(sym)); }
     void setObject(JSObject& obj) { setBarriered(JS::ObjectValue(obj)); }
+    void setPrivateGCThing(js::gc::Cell* cell) { setBarriered(JS::PrivateGCThingValue(cell)); }
 
     bool setNumber(uint32_t ui) {
         if (ui > JSVAL_INT_MAX) {
@@ -1812,72 +1883,21 @@ class HeapBase<JS::Value> : public ValueOperations<JS::Heap<JS::Value> >
     }
 };
 
-/*
- * Augment the generic Handle<T> interface when T = Value with type-querying
- * and value-extracting operations.
- */
 template <>
 class HandleBase<JS::Value> : public ValueOperations<JS::Handle<JS::Value> >
-{
-    friend class ValueOperations<JS::Handle<JS::Value> >;
-    const JS::Value * extract() const {
-        return static_cast<const JS::Handle<JS::Value>*>(this)->address();
-    }
-};
+{};
 
-/*
- * Augment the generic MutableHandle<T> interface when T = Value with
- * type-querying, value-extracting, and mutating operations.
- */
 template <>
 class MutableHandleBase<JS::Value> : public MutableValueOperations<JS::MutableHandle<JS::Value> >
-{
-    friend class ValueOperations<JS::MutableHandle<JS::Value> >;
-    const JS::Value * extract() const {
-        return static_cast<const JS::MutableHandle<JS::Value>*>(this)->address();
-    }
+{};
 
-    friend class MutableValueOperations<JS::MutableHandle<JS::Value> >;
-    JS::Value * extractMutable() {
-        return static_cast<JS::MutableHandle<JS::Value>*>(this)->address();
-    }
-};
-
-/*
- * Augment the generic Rooted<T> interface when T = Value with type-querying,
- * value-extracting, and mutating operations.
- */
 template <>
 class RootedBase<JS::Value> : public MutableValueOperations<JS::Rooted<JS::Value> >
-{
-    friend class ValueOperations<JS::Rooted<JS::Value> >;
-    const JS::Value * extract() const {
-        return static_cast<const JS::Rooted<JS::Value>*>(this)->address();
-    }
+{};
 
-    friend class MutableValueOperations<JS::Rooted<JS::Value> >;
-    JS::Value * extractMutable() {
-        return static_cast<JS::Rooted<JS::Value>*>(this)->address();
-    }
-};
-
-/*
- * Augment the generic PersistentRooted<T> interface when T = Value with type-querying,
- * value-extracting, and mutating operations.
- */
 template <>
 class PersistentRootedBase<JS::Value> : public MutableValueOperations<JS::PersistentRooted<JS::Value>>
-{
-    friend class ValueOperations<JS::PersistentRooted<JS::Value>>;
-    const JS::Value * extract() const {
-        return static_cast<const JS::PersistentRooted<JS::Value>*>(this)->address();
-    }
-
-    friend class MutableValueOperations<JS::PersistentRooted<JS::Value>>;
-    JS::Value * extractMutable() {
-        return static_cast<JS::PersistentRooted<JS::Value>*>(this)->address();
-    }
-};
+{};
 
 /*
  * If the Value is a GC pointer type, convert to that type and call |f| with
@@ -1885,7 +1905,7 @@ class PersistentRootedBase<JS::Value> : public MutableValueOperations<JS::Persis
  */
 template <typename F, typename... Args>
 auto
-DispatchValueTyped(F f, const JS::Value& val, Args&&... args)
+DispatchTyped(F f, const JS::Value& val, Args&&... args)
   -> decltype(f(static_cast<JSObject*>(nullptr), mozilla::Forward<Args>(args)...))
 {
     if (val.isString())
@@ -1894,6 +1914,8 @@ DispatchValueTyped(F f, const JS::Value& val, Args&&... args)
         return f(&val.toObject(), mozilla::Forward<Args>(args)...);
     if (val.isSymbol())
         return f(val.toSymbol(), mozilla::Forward<Args>(args)...);
+    if (MOZ_UNLIKELY(val.isPrivateGCThing()))
+        return DispatchTyped(f, val.toGCCellPtr(), mozilla::Forward<Args>(args)...);
     MOZ_ASSERT(!val.isMarkable());
     return F::defaultValue(val);
 }

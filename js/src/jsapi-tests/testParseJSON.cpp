@@ -102,17 +102,21 @@ BEGIN_TEST(testParseJSON_success)
     JS::RootedValue v(cx), v2(cx);
     JS::RootedObject obj(cx);
 
+    bool isArray;
+
     CHECK(Parse(cx, "[]", &v));
     CHECK(v.isObject());
     obj = &v.toObject();
-    CHECK(JS_IsArrayObject(cx, obj));
+    CHECK(JS_IsArrayObject(cx, obj, &isArray));
+    CHECK(isArray);
     CHECK(JS_GetProperty(cx, obj, "length", &v2));
     CHECK(v2.isInt32(0));
 
     CHECK(Parse(cx, "[1]", &v));
     CHECK(v.isObject());
     obj = &v.toObject();
-    CHECK(JS_IsArrayObject(cx, obj));
+    CHECK(JS_IsArrayObject(cx, obj, &isArray));
+    CHECK(isArray);
     CHECK(JS_GetProperty(cx, obj, "0", &v2));
     CHECK(v2.isInt32(1));
     CHECK(JS_GetProperty(cx, obj, "length", &v2));
@@ -123,12 +127,14 @@ BEGIN_TEST(testParseJSON_success)
     CHECK(Parse(cx, "{}", &v));
     CHECK(v.isObject());
     obj = &v.toObject();
-    CHECK(!JS_IsArrayObject(cx, obj));
+    CHECK(JS_IsArrayObject(cx, obj, &isArray));
+    CHECK(!isArray);
 
     CHECK(Parse(cx, "{ \"f\": 17 }", &v));
     CHECK(v.isObject());
     obj = &v.toObject();
-    CHECK(!JS_IsArrayObject(cx, obj));
+    CHECK(JS_IsArrayObject(cx, obj, &isArray));
+    CHECK(!isArray);
     CHECK(JS_GetProperty(cx, obj, "f", &v2));
     CHECK(v2.isInt32(17));
 
@@ -280,50 +286,27 @@ Error(JSContext* cx, const char (&input)[N], const char (&expectedLine)[M],
     RootedValue dummy(cx);
     str = input;
 
-    ContextPrivate p = {0, 0};
-    CHECK(!JS_GetContextPrivate(cx));
-    JS_SetContextPrivate(cx, &p);
-    JSErrorReporter old = JS_SetErrorReporter(rt, ReportJSONError);
     bool ok = JS_ParseJSON(cx, str.chars(), str.length(), &dummy);
-    JS_SetErrorReporter(rt, old);
-    JS_SetContextPrivate(cx, nullptr);
-
     CHECK(!ok);
-    CHECK(!p.unexpectedErrorCount);
-    CHECK(p.expectedErrorCount == 1);
+
+    RootedValue exn(cx);
+    CHECK(JS_GetPendingException(cx, &exn));
+    JS_ClearPendingException(cx);
+
+    js::ErrorReport report(cx);
+    CHECK(report.init(cx, exn, js::ErrorReport::WithSideEffects));
+    CHECK(report.report()->errorNumber == JSMSG_JSON_BAD_PARSE);
+
     column = expectedColumn;
-    CHECK(js_strcmp(column.chars(), p.column) == 0);
+    CHECK(js_strcmp(column.chars(), report.report()->messageArgs[2]) == 0);
     line = expectedLine;
-    CHECK(js_strcmp(line.chars(), p.line) == 0);
+    CHECK(js_strcmp(line.chars(), report.report()->messageArgs[1]) == 0);
 
     /* We do not execute JS, so there should be no exception thrown. */
     CHECK(!JS_IsExceptionPending(cx));
 
     return true;
 }
-
-struct ContextPrivate {
-    static const size_t MaxSize = sizeof("4294967295");
-    unsigned unexpectedErrorCount;
-    unsigned expectedErrorCount;
-    char16_t column[MaxSize];
-    char16_t line[MaxSize];
-};
-
-static void
-ReportJSONError(JSContext* cx, const char* message, JSErrorReport* report)
-{
-    ContextPrivate* p = static_cast<ContextPrivate*>(JS_GetContextPrivate(cx));
-    // Although messageArgs[1] and messageArgs[2] are char16_t*, we cast them to char*
-    // here because JSONParser::error() stores char* strings in them.
-    js_strncpy(p->line, report->messageArgs[1], js_strlen(report->messageArgs[1]));
-    js_strncpy(p->column, report->messageArgs[2], js_strlen(report->messageArgs[2]));
-    if (report->errorNumber == JSMSG_JSON_BAD_PARSE)
-        p->expectedErrorCount++;
-    else
-        p->unexpectedErrorCount++;
-}
-
 END_TEST(testParseJSON_error)
 
 static bool

@@ -189,15 +189,31 @@ void nsViewManager::DoSetWindowDimensions(nscoord aWidth, nscoord aHeight)
     // Don't resize the widget. It is already being set elsewhere.
     mRootView->SetDimensions(newDim, true, false);
     if (mPresShell)
-      mPresShell->ResizeReflow(aWidth, aHeight);
+      mPresShell->ResizeReflow(aWidth, aHeight, oldDim.width, oldDim.height);
   }
 }
 
+bool
+nsViewManager::ShouldDelayResize() const
+{
+  MOZ_ASSERT(mRootView);
+  if (!mRootView->IsEffectivelyVisible() ||
+      !mPresShell || !mPresShell->IsVisible()) {
+    return true;
+  }
+  if (nsRefreshDriver* rd = mPresShell->GetRefreshDriver()) {
+    if (rd->IsResizeSuppressed()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void
-nsViewManager::SetWindowDimensions(nscoord aWidth, nscoord aHeight)
+nsViewManager::SetWindowDimensions(nscoord aWidth, nscoord aHeight, bool aDelayResize)
 {
   if (mRootView) {
-    if (mRootView->IsEffectivelyVisible() && mPresShell && mPresShell->IsVisible()) {
+    if (!ShouldDelayResize() && !aDelayResize) {
       if (mDelayedResize != nsSize(NSCOORD_NONE, NSCOORD_NONE) &&
           mDelayedResize != nsSize(aWidth, aHeight)) {
         // We have a delayed resize; that now obsolete size may already have
@@ -280,7 +296,7 @@ nsView* nsViewManager::GetDisplayRootFor(nsView* aView)
    aContext may be null, in which case layers should be used for
    rendering.
 */
-void nsViewManager::Refresh(nsView *aView, const nsIntRegion& aRegion)
+void nsViewManager::Refresh(nsView* aView, const LayoutDeviceIntRegion& aRegion)
 {
   NS_ASSERTION(aView->GetViewManager() == this, "wrong view manager");
 
@@ -290,6 +306,7 @@ void nsViewManager::Refresh(nsView *aView, const nsIntRegion& aRegion)
 
   // damageRegion is the damaged area, in twips, relative to the view origin
   nsRegion damageRegion = aRegion.ToAppUnits(AppUnitsPerDevPixel());
+
   // move region from widget coordinates into view coordinates
   damageRegion.MoveBy(-aView->ViewToWidgetOffset());
 
@@ -383,7 +400,7 @@ nsViewManager::ProcessPendingUpdatesForView(nsView* aView,
     }
   }
   if (rootShell->GetViewManager() != this) {
-    return; // 'this' might have been destroyed
+    return; // presentation might have been torn down
   }
   if (aFlushDirtyRegion) {
     profiler_tracing("Paint", "DisplayList", TRACING_INTERVAL_START);
@@ -429,7 +446,7 @@ nsViewManager::ProcessPendingUpdatesPaint(nsIWidget* aWidget)
   if (aWidget->NeedsPaint()) {
     // If an ancestor widget was hidden and then shown, we could
     // have a delayed resize to handle.
-    for (nsViewManager *vm = this; vm;
+    for (RefPtr<nsViewManager> vm = this; vm;
          vm = vm->mRootView->GetParent()
            ? vm->mRootView->GetParent()->GetViewManager()
            : nullptr) {
@@ -584,13 +601,14 @@ nsViewManager::InvalidateWidgetArea(nsView *aWidgetView,
         // plugin widgets are basically invisible
 #ifndef XP_MACOSX
         // GetBounds should compensate for chrome on a toplevel widget
-        nsIntRect bounds;
+        LayoutDeviceIntRect bounds;
         childWidget->GetBounds(bounds);
 
-        nsTArray<nsIntRect> clipRects;
+        nsTArray<LayoutDeviceIntRect> clipRects;
         childWidget->GetWindowClipRegion(&clipRects);
         for (uint32_t i = 0; i < clipRects.Length(); ++i) {
-          nsRect rr = ToAppUnits(clipRects[i] + bounds.TopLeft(), AppUnitsPerDevPixel());
+          nsRect rr = LayoutDeviceIntRect::ToAppUnits(
+            clipRects[i] + bounds.TopLeft(), AppUnitsPerDevPixel());
           children.Or(children, rr - aWidgetView->ViewToWidgetOffset());
           children.SimplifyInward(20);
         }
@@ -603,9 +621,8 @@ nsViewManager::InvalidateWidgetArea(nsView *aWidgetView,
   leftOver.Sub(aDamagedRegion, children);
 
   if (!leftOver.IsEmpty()) {
-    const nsRect* r;
-    for (nsRegionRectIterator iter(leftOver); (r = iter.Next());) {
-      nsIntRect bounds = ViewToWidget(aWidgetView, *r);
+    for (auto iter = leftOver.RectIter(); !iter.Done(); iter.Next()) {
+      LayoutDeviceIntRect bounds = ViewToWidget(aWidgetView, iter.Get());
       widget->Invalidate(bounds);
     }
   }
@@ -691,15 +708,16 @@ void nsViewManager::InvalidateViews(nsView *aView)
 
 void nsViewManager::WillPaintWindow(nsIWidget* aWidget)
 {
-  if (aWidget) {
-    nsView* view = nsView::GetViewFor(aWidget);
-    LayerManager *manager = aWidget->GetLayerManager();
+  RefPtr<nsIWidget> widget(aWidget);
+  if (widget) {
+    nsView* view = nsView::GetViewFor(widget);
+    LayerManager* manager = widget->GetLayerManager();
     if (view &&
         (view->ForcedRepaint() || !manager->NeedsWidgetInvalidation())) {
       ProcessPendingUpdates();
       // Re-get the view pointer here since the ProcessPendingUpdates might have
       // destroyed it during CallWillPaintOnObservers.
-      view = nsView::GetViewFor(aWidget);
+      view = nsView::GetViewFor(widget);
       if (view) {
         view->SetForcedRepaint(false);
       }
@@ -712,7 +730,8 @@ void nsViewManager::WillPaintWindow(nsIWidget* aWidget)
   }
 }
 
-bool nsViewManager::PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion)
+bool nsViewManager::PaintWindow(nsIWidget* aWidget,
+                                LayoutDeviceIntRegion aRegion)
 {
   if (!aWidget || !mContext)
     return false;
@@ -749,15 +768,15 @@ nsViewManager::DispatchEvent(WidgetGUIEvent *aEvent,
   WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
   if ((mouseEvent &&
        // Ignore mouse events that we synthesize.
-       mouseEvent->reason == WidgetMouseEvent::eReal &&
+       mouseEvent->mReason == WidgetMouseEvent::eReal &&
        // Ignore mouse exit and enter (we'll get moves if the user
        // is really moving the mouse) since we get them when we
        // create and destroy widgets.
-       mouseEvent->message != NS_MOUSE_EXIT_WIDGET &&
-       mouseEvent->message != NS_MOUSE_ENTER_WIDGET) ||
+       mouseEvent->mMessage != eMouseExitFromWidget &&
+       mouseEvent->mMessage != eMouseEnterIntoWidget) ||
       aEvent->HasKeyEventMessage() ||
       aEvent->HasIMEEventMessage() ||
-      aEvent->message == NS_PLUGIN_INPUT_EVENT) {
+      aEvent->mMessage == ePluginInputEvent) {
     gLastUserEventTime = PR_IntervalToMicroseconds(PR_IntervalNow());
   }
 
@@ -1061,7 +1080,8 @@ nsViewManager::GetRootWidget(nsIWidget **aWidget)
   *aWidget = nullptr;
 }
 
-nsIntRect nsViewManager::ViewToWidget(nsView *aView, const nsRect &aRect) const
+LayoutDeviceIntRect
+nsViewManager::ViewToWidget(nsView* aView, const nsRect& aRect) const
 {
   NS_ASSERTION(aView->GetViewManager() == this, "wrong view manager");
 
@@ -1069,7 +1089,8 @@ nsIntRect nsViewManager::ViewToWidget(nsView *aView, const nsRect &aRect) const
   nsRect rect = aRect + aView->ViewToWidgetOffset();
 
   // finally, convert to device coordinates.
-  return rect.ToOutsidePixels(AppUnitsPerDevPixel());
+  return LayoutDeviceIntRect::FromUnknownRect(
+    rect.ToOutsidePixels(AppUnitsPerDevPixel()));
 }
 
 void
@@ -1090,6 +1111,7 @@ nsViewManager::ProcessPendingUpdates()
   if (mPresShell) {
     mPresShell->GetPresContext()->RefreshDriver()->RevokeViewManagerFlush();
 
+    RefPtr<nsViewManager> strongThis(this);
     CallWillPaintOnObservers();
 
     ProcessPendingUpdatesForView(mRootView, true);
@@ -1106,6 +1128,7 @@ nsViewManager::UpdateWidgetGeometry()
 
   if (mHasPendingWidgetGeometryChanges) {
     mHasPendingWidgetGeometryChanges = false;
+    RefPtr<nsViewManager> strongThis(this);
     ProcessPendingUpdatesForView(mRootView, false);
   }
 }

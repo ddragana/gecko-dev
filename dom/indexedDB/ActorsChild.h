@@ -10,14 +10,17 @@
 #include "IDBTransaction.h"
 #include "js/RootingAPI.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/filehandle/ActorsChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBCursorChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseChild.h"
+#include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseRequestChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryRequestChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBRequestChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBSharedTypes.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBTransactionChild.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBVersionChangeTransactionChild.h"
+#include "mozilla/dom/indexedDB/PBackgroundIndexedDBUtilsChild.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
@@ -34,15 +37,17 @@ class BackgroundChildImpl;
 } // namespace ipc
 
 namespace dom {
-namespace indexedDB {
 
-class FileInfo;
 class IDBCursor;
 class IDBDatabase;
 class IDBFactory;
 class IDBMutableFile;
 class IDBOpenDBRequest;
 class IDBRequest;
+class IndexedDatabaseManager;
+
+namespace indexedDB {
+
 class Key;
 class PermissionRequestChild;
 class PermissionRequestParent;
@@ -51,7 +56,7 @@ class SerializedStructuredCloneReadInfo;
 class ThreadLocal
 {
   friend class nsAutoPtr<ThreadLocal>;
-  friend class IDBFactory;
+  friend IDBFactory;
 
   LoggingInfo mLoggingInfo;
   IDBTransaction* mCurrentTransaction;
@@ -146,7 +151,7 @@ class BackgroundFactoryChild final
   : public PBackgroundIDBFactoryChild
 {
   friend class mozilla::ipc::BackgroundChildImpl;
-  friend class IDBFactory;
+  friend IDBFactory;
 
   IDBFactory* mFactory;
 
@@ -155,11 +160,15 @@ class BackgroundFactoryChild final
 #endif
 
 public:
+#ifdef DEBUG
+  void
+  AssertIsOnOwningThread() const;
+
+  nsIEventTarget*
+  OwningThread() const;
+#else
   void
   AssertIsOnOwningThread() const
-#ifdef DEBUG
-  ;
-#else
   { }
 #endif
 
@@ -211,10 +220,7 @@ class BackgroundDatabaseChild;
 class BackgroundRequestChildBase
 {
 protected:
-  nsRefPtr<IDBRequest> mRequest;
-
-private:
-  bool mActorDestroyed;
+  RefPtr<IDBRequest> mRequest;
 
 public:
   void
@@ -225,28 +231,11 @@ public:
   { }
 #endif
 
-  IDBRequest*
-  GetDOMObject() const
-  {
-    AssertIsOnOwningThread();
-    return mRequest;
-  }
-
-  bool
-  IsActorDestroyed() const
-  {
-    AssertIsOnOwningThread();
-    return mActorDestroyed;
-  }
-
 protected:
   explicit BackgroundRequestChildBase(IDBRequest* aRequest);
 
   virtual
   ~BackgroundRequestChildBase();
-
-  void
-  NoteActorDestroyed();
 };
 
 class BackgroundFactoryRequestChild final
@@ -255,13 +244,13 @@ class BackgroundFactoryRequestChild final
 {
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
 
-  friend class IDBFactory;
+  friend IDBFactory;
   friend class BackgroundFactoryChild;
   friend class BackgroundDatabaseChild;
   friend class PermissionRequestChild;
   friend class PermissionRequestParent;
 
-  nsRefPtr<IDBFactory> mFactory;
+  RefPtr<IDBFactory> mFactory;
   const uint64_t mRequestedVersion;
   const bool mIsDeleteOp;
 
@@ -307,10 +296,10 @@ class BackgroundDatabaseChild final
 {
   friend class BackgroundFactoryChild;
   friend class BackgroundFactoryRequestChild;
-  friend class IDBDatabase;
+  friend IDBDatabase;
 
   nsAutoPtr<DatabaseSpec> mSpec;
-  nsRefPtr<IDBDatabase> mTemporaryStrongDatabase;
+  RefPtr<IDBDatabase> mTemporaryStrongDatabase;
   BackgroundFactoryRequestChild* mOpenRequestActor;
   IDBDatabase* mDatabase;
 
@@ -320,6 +309,14 @@ public:
   {
     static_cast<BackgroundFactoryChild*>(Manager())->AssertIsOnOwningThread();
   }
+
+#ifdef DEBUG
+  nsIEventTarget*
+  OwningThread() const
+  {
+    return static_cast<BackgroundFactoryChild*>(Manager())->OwningThread();
+  }
+#endif
 
   const DatabaseSpec*
   Spec() const
@@ -365,6 +362,15 @@ private:
                                         PBackgroundIDBDatabaseFileChild* aActor)
                                         override;
 
+  virtual PBackgroundIDBDatabaseRequestChild*
+  AllocPBackgroundIDBDatabaseRequestChild(const DatabaseRequestParams& aParams)
+                                          override;
+
+  virtual bool
+  DeallocPBackgroundIDBDatabaseRequestChild(
+                                     PBackgroundIDBDatabaseRequestChild* aActor)
+                                     override;
+
   virtual PBackgroundIDBTransactionChild*
   AllocPBackgroundIDBTransactionChild(
                                     const nsTArray<nsString>& aObjectStoreNames,
@@ -397,6 +403,14 @@ private:
                             PBackgroundIDBVersionChangeTransactionChild* aActor)
                             override;
 
+  virtual PBackgroundMutableFileChild*
+  AllocPBackgroundMutableFileChild(const nsString& aName,
+                                   const nsString& aType) override;
+
+  virtual bool
+  DeallocPBackgroundMutableFileChild(PBackgroundMutableFileChild* aActor)
+                                     override;
+
   virtual bool
   RecvVersionChange(const uint64_t& aOldVersion,
                     const NullableVersion& aNewVersion)
@@ -409,6 +423,34 @@ private:
   SendDeleteMe() = delete;
 };
 
+class BackgroundDatabaseRequestChild final
+  : public BackgroundRequestChildBase
+  , public PBackgroundIDBDatabaseRequestChild
+{
+  friend class BackgroundDatabaseChild;
+  friend IDBDatabase;
+
+  RefPtr<IDBDatabase> mDatabase;
+
+private:
+  // Only created by IDBDatabase.
+  BackgroundDatabaseRequestChild(IDBDatabase* aDatabase,
+                                 IDBRequest* aRequest);
+
+  // Only destroyed by BackgroundDatabaseChild.
+  ~BackgroundDatabaseRequestChild();
+
+  bool
+  HandleResponse(nsresult aResponse);
+
+  bool
+  HandleResponse(const CreateFileRequestResponse& aResponse);
+
+  // IPDL methods are only called by IPDL.
+  virtual bool
+  Recv__delete__(const DatabaseRequestResponse& aResponse) override;
+};
+
 class BackgroundVersionChangeTransactionChild;
 
 class BackgroundTransactionBase
@@ -418,7 +460,7 @@ class BackgroundTransactionBase
   // mTemporaryStrongTransaction is strong and is only valid until the end of
   // NoteComplete() member function or until the NoteActorDestroyed() member
   // function is called.
-  nsRefPtr<IDBTransaction> mTemporaryStrongTransaction;
+  RefPtr<IDBTransaction> mTemporaryStrongTransaction;
 
 protected:
   // mTransaction is weak and is valid until the NoteActorDestroyed() member
@@ -466,7 +508,7 @@ class BackgroundTransactionChild final
   , public PBackgroundIDBTransactionChild
 {
   friend class BackgroundDatabaseChild;
-  friend class IDBDatabase;
+  friend IDBDatabase;
 
 public:
 #ifdef DEBUG
@@ -565,20 +607,37 @@ private:
   SendDeleteMe() = delete;
 };
 
+class BackgroundMutableFileChild final
+  : public mozilla::dom::BackgroundMutableFileChildBase
+{
+  friend class BackgroundDatabaseChild;
+
+  nsString mName;
+  nsString mType;
+
+private:
+  // Only constructed by BackgroundDatabaseChild.
+  BackgroundMutableFileChild(DEBUGONLY(PRThread* aOwningThread,)
+                             const nsAString& aName,
+                             const nsAString& aType);
+
+  // Only destroyed by BackgroundDatabaseChild.
+  ~BackgroundMutableFileChild();
+
+  // BackgroundMutableFileChildBase
+  virtual already_AddRefed<MutableFileBase>
+  CreateMutableFile() override;
+};
+
 class BackgroundRequestChild final
   : public BackgroundRequestChildBase
   , public PBackgroundIDBRequestChild
 {
   friend class BackgroundTransactionChild;
   friend class BackgroundVersionChangeTransactionChild;
-  friend class IDBTransaction;
+  friend IDBTransaction;
 
-  nsRefPtr<IDBTransaction> mTransaction;
-  nsTArray<nsRefPtr<FileInfo>> mFileInfos;
-
-public:
-  void
-  HoldFileInfosUntilComplete(nsTArray<nsRefPtr<FileInfo>>& aFileInfos);
+  RefPtr<IDBTransaction> mTransaction;
 
 private:
   // Only created by IDBTransaction.
@@ -626,6 +685,17 @@ class BackgroundCursorChild final
 
   class DelayedActionRunnable;
 
+  struct CachedResponse
+  {
+    CachedResponse();
+
+    CachedResponse(CachedResponse&& aOther);
+
+    Key mKey;
+    Key mObjectKey;
+    StructuredCloneReadInfo mCloneInfo;
+  };
+
   IDBRequest* mRequest;
   IDBTransaction* mTransaction;
   IDBObjectStore* mObjectStore;
@@ -633,14 +703,16 @@ class BackgroundCursorChild final
   IDBCursor* mCursor;
 
   // These are only set while a request is in progress.
-  nsRefPtr<IDBRequest> mStrongRequest;
-  nsRefPtr<IDBCursor> mStrongCursor;
+  RefPtr<IDBRequest> mStrongRequest;
+  RefPtr<IDBCursor> mStrongCursor;
 
   Direction mDirection;
 
 #ifdef DEBUG
   PRThread* mOwningThread;
 #endif
+
+  nsTArray<CachedResponse> mCachedResponses;
 
 public:
   BackgroundCursorChild(IDBRequest* aRequest,
@@ -660,10 +732,13 @@ public:
 #endif
 
   void
-  SendContinueInternal(const CursorRequestParams& aParams);
+  SendContinueInternal(const CursorRequestParams& aParams, const Key& aKey);
 
   void
   SendDeleteMeInternal();
+
+  void
+  InvalidateCachedResponses();
 
   IDBRequest*
   GetRequest() const
@@ -703,13 +778,16 @@ private:
   ~BackgroundCursorChild();
 
   void
+  SendDelayedContinueInternal();
+
+  void
   HandleResponse(nsresult aResponse);
 
   void
   HandleResponse(const void_t& aResponse);
 
   void
-  HandleResponse(const ObjectStoreCursorResponse& aResponse);
+  HandleResponse(const nsTArray<ObjectStoreCursorResponse>& aResponse);
 
   void
   HandleResponse(const ObjectStoreKeyCursorResponse& aResponse);
@@ -729,18 +807,50 @@ private:
 
   // Force callers to use SendContinueInternal.
   bool
-  SendContinue(const CursorRequestParams& aParams) = delete;
+  SendContinue(const CursorRequestParams& aParams, const Key& aKey) = delete;
 
   bool
   SendDeleteMe() = delete;
 };
 
-// XXX This doesn't belong here. However, we're not yet porting MutableFile
-//     stuff to PBackground so this is necessary for the time being.
-void
-DispatchMutableFileResult(IDBRequest* aRequest,
-                          nsresult aResultCode,
-                          IDBMutableFile* aMutableFile);
+class BackgroundUtilsChild final
+  : public PBackgroundIndexedDBUtilsChild
+{
+  friend class mozilla::ipc::BackgroundChildImpl;
+  friend IndexedDatabaseManager;
+
+  IndexedDatabaseManager* mManager;
+
+#ifdef DEBUG
+  nsCOMPtr<nsIEventTarget> mOwningThread;
+#endif
+
+public:
+  void
+  AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
+  { }
+#endif
+
+private:
+  // Only created by IndexedDatabaseManager.
+  explicit BackgroundUtilsChild(IndexedDatabaseManager* aManager);
+
+  // Only destroyed by mozilla::ipc::BackgroundChildImpl.
+  ~BackgroundUtilsChild();
+
+  void
+  SendDeleteMeInternal();
+
+  // IPDL methods are only called by IPDL.
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) override;
+
+  bool
+  SendDeleteMe() = delete;
+};
 
 } // namespace indexedDB
 } // namespace dom

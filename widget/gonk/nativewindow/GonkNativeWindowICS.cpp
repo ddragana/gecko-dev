@@ -26,7 +26,7 @@
 
 /**
  * DOM_CAMERA_LOGI() is enabled in debug builds, and turned on by setting
- * NSPR_LOG_MODULES=Camera:N environment variable, where N >= 3.
+ * MOZ_LOG=Camera:N environment variable, where N >= 3.
  *
  * CNW_LOGE() is always enabled.
  */
@@ -72,9 +72,10 @@ void GonkNativeWindow::freeAllBuffersLocked()
             if (mSlots[i].mTextureClient) {
               mSlots[i].mTextureClient->ClearRecycleCallback();
               // release TextureClient in ImageBridge thread
-              TextureClientReleaseTask* task = new TextureClientReleaseTask(mSlots[i].mTextureClient);
+              RefPtr<TextureClientReleaseTask> task =
+                MakeAndAddRef<TextureClientReleaseTask>(mSlots[i].mTextureClient);
               mSlots[i].mTextureClient = NULL;
-              ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(FROM_HERE, task);
+              ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(task.forget());
             }
             mSlots[i].mGraphicBuffer = NULL;
             mSlots[i].mBufferState = BufferSlot::FREE;
@@ -94,9 +95,10 @@ void GonkNativeWindow::clearRenderingStateBuffersLocked()
                 if (mSlots[i].mTextureClient) {
                   mSlots[i].mTextureClient->ClearRecycleCallback();
                   // release TextureClient in ImageBridge thread
-                  TextureClientReleaseTask* task = new TextureClientReleaseTask(mSlots[i].mTextureClient);
+                  RefPtr<TextureClientReleaseTask> task =
+                    MakeAndAddRef<TextureClientReleaseTask>(mSlots[i].mTextureClient);
                   mSlots[i].mTextureClient = NULL;
-                  ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(FROM_HERE, task);
+                  ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(task.forget());
                 }
                 mSlots[i].mGraphicBuffer = NULL;
                 mSlots[i].mBufferState = BufferSlot::FREE;
@@ -310,29 +312,26 @@ status_t GonkNativeWindow::dequeueBuffer(int *outBuf, uint32_t w, uint32_t h,
             if (mSlots[buf].mTextureClient) {
                 mSlots[buf].mTextureClient->ClearRecycleCallback();
                 // release TextureClient in ImageBridge thread
-                TextureClientReleaseTask* task = new TextureClientReleaseTask(mSlots[buf].mTextureClient);
+                RefPtr<TextureClientReleaseTask> task =
+                  MakeAndAddRef<TextureClientReleaseTask>(mSlots[buf].mTextureClient);
                 mSlots[buf].mTextureClient = NULL;
-                ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(FROM_HERE, task);
+                ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(task.forget());
             }
             alloc = true;
         }
     }  // end lock scope
 
-    sp<GraphicBuffer> graphicBuffer;
     if (alloc) {
-        RefPtr<GrallocTextureClientOGL> textureClient =
-            new GrallocTextureClientOGL(ImageBridgeChild::GetSingleton(),
-                                        gfx::SurfaceFormat::UNKNOWN,
-                                        gfx::BackendType::NONE,
-                                        TextureFlags::DEALLOCATE_CLIENT);
-        textureClient->SetIsOpaque(true);
+        ClientIPCAllocator* allocator = ImageBridgeChild::GetSingleton();
         usage |= GraphicBuffer::USAGE_HW_TEXTURE;
-        bool result = textureClient->AllocateGralloc(IntSize(w, h), format, usage);
-        sp<GraphicBuffer> graphicBuffer = textureClient->GetGraphicBuffer();
-        if (!result || !graphicBuffer.get()) {
-            CNW_LOGE("dequeueBuffer: failed to alloc gralloc buffer");
+        GrallocTextureData* texData = GrallocTextureData::Create(IntSize(w, h), format,
+                                                                 gfx::BackendType::NONE, usage,
+                                                                 allocator);
+        if (!texData) {
             return -ENOMEM;
         }
+
+        RefPtr<TextureClient> textureClient = new TextureClient(texData, TextureFlags::RECYCLE | TextureFlags::DEALLOCATE_CLIENT, allocator);
 
         { // Scope for the lock
             Mutex::Autolock lock(mMutex);
@@ -345,7 +344,7 @@ status_t GonkNativeWindow::dequeueBuffer(int *outBuf, uint32_t w, uint32_t h,
             if (updateFormat) {
                 mPixelFormat = format;
             }
-            mSlots[buf].mGraphicBuffer = graphicBuffer;
+            mSlots[buf].mGraphicBuffer = texData->GetGraphicBuffer();
             mSlots[buf].mTextureClient = textureClient;
 
             returnFlags |= ISurfaceTexture::BUFFER_NEEDS_REALLOCATION;

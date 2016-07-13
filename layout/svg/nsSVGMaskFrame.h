@@ -16,8 +16,6 @@
 
 class gfxContext;
 
-typedef nsSVGContainerFrame nsSVGMaskFrameBase;
-
 /**
  * Byte offsets of channels in a native packed gfxColor or cairo image surface.
  */
@@ -33,7 +31,7 @@ typedef nsSVGContainerFrame nsSVGMaskFrameBase;
 #define GFX_ARGB32_OFFSET_B 0
 #endif
 
-class nsSVGMaskFrame final : public nsSVGMaskFrameBase
+class nsSVGMaskFrame final : public nsSVGContainerFrame
 {
   friend nsIFrame*
   NS_NewSVGMaskFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
@@ -43,7 +41,7 @@ class nsSVGMaskFrame final : public nsSVGMaskFrameBase
 
 protected:
   explicit nsSVGMaskFrame(nsStyleContext* aContext)
-    : nsSVGMaskFrameBase(aContext)
+    : nsSVGContainerFrame(aContext)
     , mInUse(false)
   {
     AddStateBits(NS_FRAME_IS_NONDISPLAY);
@@ -58,7 +56,11 @@ public:
                         nsIFrame* aMaskedFrame,
                         const gfxMatrix &aMatrix,
                         float aOpacity,
-                        Matrix* aMaskTransform);
+                        Matrix* aMaskTransform,
+                        uint8_t aMaskOp = NS_STYLE_MASK_MODE_MATCH_SOURCE);
+
+  gfxRect
+  GetMaskArea(nsIFrame* aMaskedFrame);
 
   virtual nsresult AttributeChanged(int32_t         aNameSpaceID,
                                     nsIAtom*        aAttribute,
@@ -100,7 +102,7 @@ private:
   // automatically sets and clears the mInUse flag on the mask frame
   // (to prevent nasty reference loops). It's easy to mess this up
   // and break things, so this helper makes the code far more robust.
-  class MOZ_STACK_CLASS AutoMaskReferencer
+  class MOZ_RAII AutoMaskReferencer
   {
   public:
     explicit AutoMaskReferencer(nsSVGMaskFrame *aFrame

@@ -4,13 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-SharedLibrary('sandboxbroker')
-
-USE_LIBS += [
-    'nspr',
-    'sandbox_s',
-]
-
 SOURCES += [
     'sandboxBroker.cpp',
 ]
@@ -19,8 +12,7 @@ EXPORTS += [
     'sandboxBroker.h',
 ]
 
-for var in ('UNICODE', '_UNICODE', 'NS_NO_XPCOM', 'NOMINMAX',
-            'SANDBOX_EXPORTS'):
+for var in ('UNICODE', '_UNICODE', 'SANDBOX_EXPORTS'):
     DEFINES[var] = True
 
 LOCAL_INCLUDES += [
@@ -38,4 +30,4 @@ if CONFIG['_MSC_VER']:
         '-wd4275', # non dll-interface class exception used as base for dll-interface class
     ]
 
-FAIL_ON_WARNINGS = True
+FINAL_LIBRARY = 'xul'

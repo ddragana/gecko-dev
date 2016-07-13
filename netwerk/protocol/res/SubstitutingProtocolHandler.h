@@ -13,10 +13,12 @@
 #include "nsIOService.h"
 #include "nsStandardURL.h"
 #include "mozilla/chrome/RegistryMessageUtils.h"
+#include "mozilla/Maybe.h"
 
 class nsIIOService;
 
 namespace mozilla {
+namespace net {
 
 //
 // Base class for resource://-like substitution protocols.
@@ -27,15 +29,19 @@ class SubstitutingProtocolHandler
 {
 public:
   SubstitutingProtocolHandler(const char* aScheme, uint32_t aFlags, bool aEnforceFileOrJar = true);
+  explicit SubstitutingProtocolHandler(const char* aScheme);
 
   NS_INLINE_DECL_REFCOUNTING(SubstitutingProtocolHandler);
   NS_DECL_NON_VIRTUAL_NSIPROTOCOLHANDLER;
   NS_DECL_NON_VIRTUAL_NSISUBSTITUTINGPROTOCOLHANDLER;
 
+  bool HasSubstitution(const nsACString& aRoot) const { return mSubstitutions.Get(aRoot, nullptr); }
+
   void CollectSubstitutions(InfallibleTArray<SubstitutionMapping>& aResources);
 
 protected:
   virtual ~SubstitutingProtocolHandler() {}
+  void ConstructInternal();
 
   void SendSubstitution(const nsACString& aRoot, nsIURI* aBaseURI);
 
@@ -47,11 +53,25 @@ protected:
     return NS_ERROR_NOT_AVAILABLE;
   }
 
+  // Override this in the subclass to check for special case when resolving URIs
+  // _before_ checking substitutions.
+  virtual bool ResolveSpecialCases(const nsACString& aHost, const nsACString& aPath, nsACString& aResult)
+  {
+    return false;
+  }
+
+  // Override this in the subclass to check for special case when opening
+  // channels.
+  virtual nsresult SubstituteChannel(nsIURI* uri, nsILoadInfo* aLoadInfo, nsIChannel** result)
+  {
+    return NS_OK;
+  }
+
   nsIIOService* IOService() { return mIOService; }
 
 private:
   nsCString mScheme;
-  uint32_t mFlags;
+  Maybe<uint32_t> mFlags;
   nsInterfaceHashtable<nsCStringHashKey,nsIURI> mSubstitutions;
   nsCOMPtr<nsIIOService> mIOService;
 
@@ -78,6 +98,7 @@ public:
   NS_IMETHOD GetClassIDNoAlloc(nsCID *aCID);
 };
 
+} // namespace net
 } // namespace mozilla
 
 #endif /* SubstitutingProtocolHandler_h___ */

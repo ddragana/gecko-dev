@@ -7,6 +7,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id={1097468}
   <title>Test for Bug {1097468}</title>
   <script type="text/javascript" src="/MochiKit/MochiKit.js"></script>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script type="text/javascript" src="common.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
@@ -90,7 +91,6 @@ function runApp(aApp, aCallback) {
       is(typeof mgmt.onenabledstatechange, "object", "get onenabledstatechange");
 
       [
-        "getNotInstalled",
         "applyDownload",
         "import",
         "extractManifest",
@@ -145,8 +145,6 @@ SimpleTest.waitForExplicitFinish();
  * Test third-party homescreen (permission |homescreen-webapps-manage|)
  */
 function runTest() {
-  SpecialPowers.setAllAppsLaunchable(true);
-
   SpecialPowers.autoConfirmAppInstall(continueTest);
   yield undefined;
 
@@ -163,11 +161,11 @@ function runTest() {
   ok(app, "App is non-null");
   is(app.manifestURL, gManifestURL, "App manifest url is correct.");
 
-  var context = {"manifestURL": app.manifestURL, "isInBrowserElement": false};
+  var context = {manifestURL: app.manifestURL};
 
-  SpecialPowers.pushPermissions([{"type": "homescreen-webapps-manage",
-                                  "allow": 1,
-                                  "context": context}], continueTest);
+  SpecialPowers.pushPermissions([{type: "homescreen-webapps-manage",
+                                  allow: 1,
+                                  context: context}], continueTest);
   yield undefined;
 
   // Launch the app.
@@ -192,7 +190,7 @@ function runTest() {
   navigator.mozApps.mgmt.onuninstall = null;
 }
 
-addLoadEvent(go);
+addLoadEvent(() => prepareEnv(go));
 
 </script>
 </pre>

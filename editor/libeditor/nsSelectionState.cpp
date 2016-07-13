@@ -8,7 +8,6 @@
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/dom/Selection.h"      // for Selection
 #include "nsAString.h"                  // for nsAString_internal::Length
-#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"                    // for NS_ENSURE_TRUE, etc
 #include "nsEditor.h"                   // for nsEditor
@@ -33,21 +32,6 @@ nsSelectionState::nsSelectionState() : mArray(){}
 nsSelectionState::~nsSelectionState()
 {
   MakeEmpty();
-}
-
-void
-nsSelectionState::DoTraverse(nsCycleCollectionTraversalCallback &cb)
-{
-  for (uint32_t i = 0, iEnd = mArray.Length(); i < iEnd; ++i)
-  {
-    nsRangeStore* item = mArray[i];
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb,
-                                       "selection state mArray[i].startNode");
-    cb.NoteXPCOMChild(item->startNode);
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb,
-                                       "selection state mArray[i].endNode");
-    cb.NoteXPCOMChild(item->endNode);
-  }
 }
 
 void
@@ -89,7 +73,7 @@ nsSelectionState::RestoreSelection(Selection* aSel)
   // set the selection ranges anew
   for (i=0; i<arrayCount; i++)
   {
-    nsRefPtr<nsRange> range = mArray[i]->GetRange();
+    RefPtr<nsRange> range = mArray[i]->GetRange();
     NS_ENSURE_TRUE(range, NS_ERROR_UNEXPECTED);
 
     res = aSel->AddRange(range);
@@ -103,7 +87,7 @@ bool
 nsSelectionState::IsCollapsed()
 {
   if (1 != mArray.Length()) return false;
-  nsRefPtr<nsRange> range = mArray[0]->GetRange();
+  RefPtr<nsRange> range = mArray[0]->GetRange();
   NS_ENSURE_TRUE(range, false);
   bool bIsCollapsed = false;
   range->GetCollapsed(&bIsCollapsed);
@@ -120,8 +104,8 @@ nsSelectionState::IsEqual(nsSelectionState *aSelState)
 
   for (i=0; i<myCount; i++)
   {
-    nsRefPtr<nsRange> myRange = mArray[i]->GetRange();
-    nsRefPtr<nsRange> itsRange = aSelState->mArray[i]->GetRange();
+    RefPtr<nsRange> myRange = mArray[i]->GetRange();
+    RefPtr<nsRange> itsRange = aSelState->mArray[i]->GetRange();
     NS_ENSURE_TRUE(myRange && itsRange, false);
 
     int16_t compResult;
@@ -652,6 +636,10 @@ nsRangeStore::~nsRangeStore()
 {
 }
 
+NS_IMPL_CYCLE_COLLECTION(nsRangeStore, startNode, endNode)
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsRangeStore, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(nsRangeStore, Release)
+
 void
 nsRangeStore::StoreRange(nsRange* aRange)
 {
@@ -665,7 +653,7 @@ nsRangeStore::StoreRange(nsRange* aRange)
 already_AddRefed<nsRange>
 nsRangeStore::GetRange()
 {
-  nsRefPtr<nsRange> range = new nsRange(startNode);
+  RefPtr<nsRange> range = new nsRange(startNode);
   nsresult res = range->Set(startNode, startOffset, endNode, endOffset);
   NS_ENSURE_SUCCESS(res, nullptr);
   return range.forget();

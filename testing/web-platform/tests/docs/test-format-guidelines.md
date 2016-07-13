@@ -42,7 +42,7 @@ running in automation. In general the following order of preference holds:
 * WebDriver tests - for testing the webdriver protocol itself or (in
   the future) for certain tests that require access to privileged APIs.
 
-* Manual tests - as a last resort for anything that can't be tested
+* [Manual tests][manual-tests] - as a last resort for anything that can't be tested
   using one of the above techniques.
 
 Some scenarios demand certain test types. For example:
@@ -111,7 +111,7 @@ between attributes will be collapsed to a single space, duplicate
 attributes will be removed, optional closing tags will be inserted,
 and invalid markup will be normalized.  If these changes should make
 the test inoperable, for example if the test is testing markup error
-recovery, add the [flag][requirement-flags] 'asis' to prevent
+recovery, add the [flag][requirement-flags] `asis` to prevent
 re-serialization. This flag will also prevent format conversions so it
 may be necessary to provide alternate versions of the test in other
 formats (XHTML, HTML, etc.)
@@ -224,33 +224,25 @@ information in one of two ways:
 In order for the latter to work, a file must either have a name of the
 form `{name}.sub.{ext}` e.g. `example-test.sub.html` or be referenced
 through a URL containing `pipe=sub` in the query string
-e.g. `example-test.html?pipe=sub`. The substitution syntax uses {% raw %} `{{
-}}` {% endraw %} to delimit items for substitution. For example to substitute in
+e.g. `example-test.html?pipe=sub`. The substitution syntax uses `{{ }}`
+to delimit items for substitution. For example to substitute in
 the host name on which the tests are running, one would write:
 
-{% raw %}
     {{host}}
-{% endraw %}
 
 As well as the host, one can get full domains, including subdomains
 using the `domains` dictionary. For example:
 
-{% raw %}
     {{domains[www]}}
-{% endraw %}
 
 would be replaced by the fully qualified domain name of the `www`
 subdomain. Ports are also available on a per-protocol basis e.g.
 
-{% raw %}
     {{ports[ws][0]}}
-{% endraw %}
 
 is replaced with the first (and only) websockets port, whilst
 
-{% raw %}
     {{ports[http][1]}}
-{% endraw %}
 
 is replaced with the second HTTP port.
 
@@ -258,11 +250,9 @@ The request URL itself can be used as part of the substitution using
 the `location` dictionary, which has entries matching the
 `window.location` API. For example
 
-{% raw %}
     {{location[host]}}
-{% endraw %}
 
-is replaced by hostname:port for the current request.
+is replaced by `hostname:port` for the current request.
 
 ### Tests Requiring Special Headers
 
@@ -328,6 +318,7 @@ see the [lint-tool documentation][lint-tool].
 
 [lint-tool]: ./lint-tool.html
 [reftests]: ./reftests.html
+[manual-tests]: ./manual-test.html
 [test-templates]: ./test-templates.html
 [requirement-flags]: ./test-templates.html#requirement-flags
 [testharness-documentation]: ./testharness-documentation.html

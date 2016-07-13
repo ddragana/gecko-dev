@@ -6,7 +6,6 @@
 #ifndef nsTransactionList_h__
 #define nsTransactionList_h__
 
-#include "nsAutoPtr.h"
 #include "nsISupportsImpl.h"
 #include "nsITransactionList.h"
 #include "nsIWeakReferenceUtils.h"
@@ -25,7 +24,7 @@ private:
 
   nsWeakPtr                   mTxnMgr;
   nsTransactionStack         *mTxnStack;
-  nsRefPtr<nsTransactionItem> mTxnItem;
+  RefPtr<nsTransactionItem> mTxnItem;
 
 protected:
   virtual ~nsTransactionList();

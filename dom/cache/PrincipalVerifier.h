@@ -22,7 +22,7 @@ namespace cache {
 
 class ManagerId;
 
-class PrincipalVerifier final : public nsRunnable
+class PrincipalVerifier final : public Runnable
 {
 public:
   // An interface to be implemented by code wishing to use the
@@ -61,12 +61,12 @@ private:
 
   // set in originating thread at construction, but must be accessed and
   // released on main thread
-  nsRefPtr<ContentParent> mActor;
+  RefPtr<ContentParent> mActor;
 
   const mozilla::ipc::PrincipalInfo mPrincipalInfo;
   nsCOMPtr<nsIThread> mInitiatingThread;
   nsresult mResult;
-  nsRefPtr<ManagerId> mManagerId;
+  RefPtr<ManagerId> mManagerId;
 
 public:
   NS_DECL_NSIRUNNABLE

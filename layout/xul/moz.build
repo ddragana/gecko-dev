@@ -95,8 +95,6 @@ if CONFIG['MOZ_XUL']:
 if CONFIG['MOZ_XUL']:
     DIRS += ['tree', 'grid']
 
-FAIL_ON_WARNINGS = True
-
 FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
     '../base',
@@ -104,3 +102,6 @@ LOCAL_INCLUDES += [
     '../style',
     '/dom/base',
 ]
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']

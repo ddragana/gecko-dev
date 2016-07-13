@@ -50,11 +50,17 @@ public:
   }
 
   void
-  GetUrl(DOMString& aUrl) const
+  GetUrl(nsAString& aUrl) const
   {
     nsCString url;
-    mInternalResponse->GetUrl(url);
-    aUrl.AsAString() = NS_ConvertUTF8toUTF16(url);
+    mInternalResponse->GetURL(url);
+    CopyUTF8toUTF16(url, aUrl);
+  }
+
+  bool
+  Redirected() const
+  {
+    return mInternalResponse->IsRedirected();
   }
 
   uint16_t
@@ -124,8 +130,11 @@ public:
   already_AddRefed<Response>
   Clone(ErrorResult& aRv) const;
 
+  already_AddRefed<Response>
+  CloneUnfiltered(ErrorResult& aRv) const;
+
   void
-  SetBody(nsIInputStream* aBody);
+  SetBody(nsIInputStream* aBody, int64_t aBodySize);
 
   already_AddRefed<InternalResponse>
   GetInternalResponse() const;
@@ -134,9 +143,9 @@ private:
   ~Response();
 
   nsCOMPtr<nsIGlobalObject> mOwner;
-  nsRefPtr<InternalResponse> mInternalResponse;
+  RefPtr<InternalResponse> mInternalResponse;
   // Lazily created
-  nsRefPtr<Headers> mHeaders;
+  RefPtr<Headers> mHeaders;
 };
 
 } // namespace dom

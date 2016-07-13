@@ -9,18 +9,12 @@
   #main-window[sizemode="normal"] > #tab-view-deck > #browser-panel > #navigator-toolbox > #toolbar-menubar {
     margin-top: 1px;
   }
-
-  .panel-promo-message {
-    font-style: italic;
-  }
 }
 
 @media (-moz-windows-default-theme) {
   .sidebar-header,
   #sidebar-header {
     -moz-appearance: none;
-    color: black;
-    background-color: #EEF3FA;
     border-bottom: none;
     text-shadow: none;
   }
@@ -32,19 +26,19 @@
 
   .sidebar-splitter {
     border: 0;
-    -moz-border-end: 1px solid #A9B7C9;
+    border-inline-end: 1px solid ThreeDLightShadow;
     min-width: 0;
     width: 3px;
     background-color: transparent;
-    -moz-margin-start: -3px;
+    margin-inline-start: -3px;
     position: relative;
   }
 
   #appcontent ~ .sidebar-splitter {
-    -moz-border-start: 1px solid #A9B7C9;
-    -moz-border-end: none;
-    -moz-margin-start: 0;
-    -moz-margin-end: -3px;
+    border-inline-start: 1px solid ThreeDLightShadow;
+    border-inline-end: none;
+    margin-inline-start: 0;
+    margin-inline-end: -3px;
   }
 
   .menu-accel,
@@ -52,13 +46,20 @@
     color: graytext;
   }
 
-  .chatbar-button,
-  chatbar > chatbox {
-    border-color: #A9B7C9;
-  }
-
   @media (-moz-os-version: windows-vista),
          (-moz-os-version: windows-win7) {
+    .sidebar-header:not(:-moz-lwtheme),
+    #sidebar-header:not(:-moz-lwtheme) {
+      background-color: #EEF3FA;
+    }
+
+    .sidebar-splitter,
+    #appcontent ~ .sidebar-splitter,
+    .chatbar-button,
+    chatbar > chatbox {
+      border-color: #A9B7C9;
+    }
+
     #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(:-moz-lwtheme),
     #browser-bottombox:not(:-moz-lwtheme),
     .browserContainer > findbar {
@@ -67,20 +68,6 @@
 
     .tab-background-middle[visuallyselected=true]:not(:-moz-lwtheme) {
       background-color: @customToolbarColor@;
-    }
-
-    #navigator-toolbox:not(:-moz-lwtheme)::after {
-      background-color: #aabccf;
-    }
-
-    #urlbar:not(:-moz-lwtheme):not([focused]):hover,
-    .searchbar-textbox:not(:-moz-lwtheme):not([focused]):hover {
-      border-color: hsla(210,54%,20%,.35) hsla(210,54%,20%,.37) hsla(210,54%,20%,.4);
-    }
-
-    #urlbar:not(:-moz-lwtheme)[focused],
-    .searchbar-textbox:not(:-moz-lwtheme)[focused] {
-      border-color: hsla(206,100%,60%,.65) hsla(206,100%,55%,.65) hsla(206,100%,50%,.65);
     }
   }
 }
@@ -107,6 +94,12 @@
           }
         }
 
+        @media not all and (-moz-windows-default-theme) {
+          #main-window {
+            background-color: transparent;
+          }
+        }
+
         #titlebar-buttonbox,
         .titlebar-button {
           -moz-appearance: none !important;
@@ -115,7 +108,7 @@
         .titlebar-button {
           border: none;
           margin: 0 !important;
-          padding: 12px 17px;
+          padding: 10px 17px;
         }
 
         #main-window[sizemode=maximized] .titlebar-button {
@@ -146,6 +139,20 @@
         #titlebar-close:hover {
           list-style-image: url(chrome://browser/skin/caption-buttons.svg#close-white);
         }
+
+        #titlebar-min:-moz-lwtheme {
+          list-style-image: url(chrome://browser/skin/caption-buttons.svg#minimize-themes);
+        }
+        #titlebar-max:-moz-lwtheme {
+          list-style-image: url(chrome://browser/skin/caption-buttons.svg#maximize-themes);
+        }
+        #main-window[sizemode="maximized"] #titlebar-max:-moz-lwtheme {
+          list-style-image: url(chrome://browser/skin/caption-buttons.svg#restore-themes);
+        }
+        #titlebar-close:-moz-lwtheme {
+          list-style-image: url(chrome://browser/skin/caption-buttons.svg#close-themes);
+        }
+
 
         /* the 12px image renders a 10px icon, and the 10px upscaled gets rounded to 12.5, which
          * rounds up to 13px, which makes the icon one pixel too big on 1.25dppx. Fix: */
@@ -222,20 +229,32 @@
             background-color: Highlight;
           }
 
+          #titlebar-min {
+            list-style-image: url(chrome://browser/skin/caption-buttons.svg#minimize-highcontrast);
+          }
           #titlebar-min:hover {
-            list-style-image: url(chrome://browser/skin/caption-buttons.svg#minimize-highlight);
+            list-style-image: url(chrome://browser/skin/caption-buttons.svg#minimize-highcontrast-hover);
           }
 
+          #titlebar-max {
+            list-style-image: url(chrome://browser/skin/caption-buttons.svg#maximize-highcontrast);
+          }
           #titlebar-max:hover {
-            list-style-image: url(chrome://browser/skin/caption-buttons.svg#maximize-highlight);
+            list-style-image: url(chrome://browser/skin/caption-buttons.svg#maximize-highcontrast-hover);
           }
 
+          #main-window[sizemode="maximized"] #titlebar-max {
+            list-style-image: url(chrome://browser/skin/caption-buttons.svg#restore-highcontrast);
+          }
           #main-window[sizemode="maximized"] #titlebar-max:hover {
-            list-style-image: url(chrome://browser/skin/caption-buttons.svg#restore-highlight);
+            list-style-image: url(chrome://browser/skin/caption-buttons.svg#restore-highcontrast-hover);
           }
 
+          #titlebar-close {
+            list-style-image: url(chrome://browser/skin/caption-buttons.svg#close-highcontrast);
+          }
           #titlebar-close:hover {
-            list-style-image: url(chrome://browser/skin/caption-buttons.svg#close-highlight);
+            list-style-image: url(chrome://browser/skin/caption-buttons.svg#close-highcontrast-hover);
           }
         }
       }
@@ -246,7 +265,7 @@
          (-moz-os-version: windows-win7),
          (-moz-os-version: windows-win8) {
     #main-window[sizemode="maximized"] #titlebar-buttonbox {
-      -moz-margin-end: 3px;
+      margin-inline-end: 3px;
     }
 
     #main-window {
@@ -269,16 +288,13 @@
     #appcontent {
       -moz-appearance: -moz-win-exclude-glass;
     }
+  }
 
+  @media (-moz-os-version: windows-win8) {
     /* Artificially draw window borders that are covered by lwtheme, see bug 591930.
-     * Not necessary on windows 10+ */
+     * Borders for vista/win7 are below, win10 doesn't need them. */
     #main-window[sizemode="normal"] > #tab-view-deck > #browser-panel:-moz-lwtheme {
-      border-top: 2px solid;
-      -moz-border-top-colors: @glassActiveBorderColor@ rgba(255,255,255,.6);
-    }
-
-    #main-window[sizemode="normal"] > #tab-view-deck > #browser-panel:-moz-lwtheme:-moz-window-inactive {
-      -moz-border-top-colors: @glassInactiveBorderColor@ rgba(255,255,255,.6);
+      border-top: 1px solid @toolbarShadowColor@;
     }
   }
 
@@ -310,8 +326,11 @@
     color: white;
   }
 
-  #toolbar-menubar:not(:-moz-lwtheme) {
-    text-shadow: 0 0 .5em white, 0 0 .5em white, 0 1px 0 rgba(255,255,255,.4);
+  @media (-moz-os-version: windows-vista),
+         (-moz-os-version: windows-win7),{
+    #toolbar-menubar:not(:-moz-lwtheme) {
+      text-shadow: 0 0 .5em white, 0 0 .5em white, 0 1px 0 rgba(255,255,255,.4);
+    }
   }
 
   /* Show borders on vista through win8, but not on win10 and later: */
@@ -348,13 +367,6 @@
     padding-right: 1px;
   }
 
-  /* Make the window draggable by glassed toolbars (bug 555081) */
-  #toolbar-menubar:not([autohide="true"]),
-  #TabsToolbar,
-  #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#addon-bar):-moz-lwtheme {
-    -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar-drag");
-  }
-
   #appcontent:not(:-moz-lwtheme) {
     background-color: -moz-dialog;
   }
@@ -369,6 +381,17 @@
     #main-menubar:not(:-moz-lwtheme):not(:-moz-window-inactive) {
       border-radius: 4px;
     }
+
+    /* Artificially draw window borders that are covered by lwtheme, see bug 591930.
+     * We use a different border for win8, and this is not necessary on win10+ */
+    #main-window[sizemode="normal"] > #tab-view-deck > #browser-panel:-moz-lwtheme {
+      border-top: 2px solid;
+      -moz-border-top-colors: @glassActiveBorderColor@ rgba(255,255,255,.6);
+    }
+
+    #main-window[sizemode="normal"] > #tab-view-deck > #browser-panel:-moz-lwtheme:-moz-window-inactive {
+      -moz-border-top-colors: @glassInactiveBorderColor@ rgba(255,255,255,.6);
+    }
   }
 
   #ctrlTab-panel {
@@ -379,12 +402,6 @@
     font: normal 1.2em "Segoe UI";
     color: black;
     text-shadow: white -1px -1px .35em, white -1px 1px .35em, white 1px 1px .35em, white 1px -1px .35em;
-  }
-
-  #tab-view:-moz-lwtheme {
-    background-image: url("chrome://browser/skin/tabview/grain.png"),
-                      linear-gradient(rgba(255,255,255,0), #CCD9EA 200px, #C7D5E7);
-    background-attachment: fixed;
   }
 }
 
@@ -444,11 +461,6 @@
     }
     #main-window:-moz-window-inactive {
       background-color: rgb(215,228,242);
-    }
-
-    #toolbar-menubar:not([autohide=true]):not(:-moz-lwtheme),
-    #TabsToolbar:not(:-moz-lwtheme) {
-      -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar-drag");
     }
 
     /* Render a window top border for lwthemes: */

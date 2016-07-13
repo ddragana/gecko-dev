@@ -44,6 +44,9 @@ function isClosed(tab) {
   return viewsFor.get(tab).closing;
 }
 
+// private tab attribute where the remote cached value is stored
+const remoteReadyStateCached = Symbol("remoteReadyStateCached");
+
 const Tab = Class({
   implements: [EventTarget],
   initialize: function(tabElement, options = null) {
@@ -125,8 +128,7 @@ const Tab = Class({
   },
 
   get readyState() {
-    // TODO: This will use CPOWs in e10s: bug 1146606
-    return isDestroyed(this) ? undefined : browser(this).contentDocument.readyState;
+    return isDestroyed(this) ? undefined : this[remoteReadyStateCached] || "uninitialized";
   },
 
   pin: function() {
@@ -191,10 +193,37 @@ const Tab = Class({
     if (isDestroyed(this))
       return;
 
-    // BUG 792946 https://bugzilla.mozilla.org/show_bug.cgi?id=792946
-    // TODO: fix this circular dependency
-    let { Worker } = require('./worker');
-    return Worker(options, browser(this).contentWindow);
+    let { Worker } = require('../content/worker');
+    let { connect, makeChildOptions } = require('../content/utils');
+
+    let worker = Worker(options);
+    worker.once("detach", () => {
+      worker.destroy();
+    });
+
+    let attach = frame => {
+      let childOptions = makeChildOptions(options);
+      frame.port.emit("sdk/tab/attach", childOptions);
+      connect(worker, frame, { id: childOptions.id, url: this.url });
+    };
+
+    // Do this synchronously if possible
+    let frame = frames.getFrameForBrowser(browser(this));
+    if (frame) {
+      attach(frame);
+    }
+    else {
+      let listener = (frame) => {
+        if (frame.frameElement != browser(this))
+          return;
+
+        frames.off("attach", listener);
+        attach(frame);
+      };
+      frames.on("attach", listener);
+    }
+
+    return worker;
   },
 
   destroy: function() {
@@ -279,11 +308,21 @@ function tabEventListener(event, tabElement, ...args) {
       removeListItem(window.tabs, tab);
     // The tabs module will take care of removing from its internal list
   }
-  else if (event == "ready" || event == "load") {
+  else if (event == "init" || event == "create" || event == "ready" || event == "load") {
     // Ignore load events from before browser windows have fully loaded, these
     // are for about:blank in the initial tab
     if (isBrowser(domWindow) && !domWindow.gBrowserInit.delayedStartupFinished)
       return;
+
+    // update the cached remote readyState value
+    let { readyState } = args[0] || {};
+    tab[remoteReadyStateCached] = readyState;
+  }
+
+  if (event == "init") {
+    // Do not emit events for the detected existent tabs, we only need to cache
+    // their current document.readyState value.
+    return;
   }
 
   tabEmit(tab, event, ...args);

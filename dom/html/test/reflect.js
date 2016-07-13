@@ -176,24 +176,21 @@ function reflectUnsignedInt(aParameters)
   is(element.getAttribute(attr), "1294967296",
      "@" + attr + " should be equals to 1294967296");
 
-  // When setting the content atribute, it's a string so it will be unvalid.
+  // When setting the content attribute, it's a string so it will be invalid.
   element.setAttribute(attr, -3000000000);
   is(element.getAttribute(attr), "-3000000000",
      "@" + attr + " should be equals to " + -3000000000);
   is(element[attr], defaultValue,
      "." + attr + " should be equals to " + defaultValue);
 
-  var nonValidValues = [
-    /* invalid value, value in the unsigned int range */
-    [ -2147483648, 2147483648 ],
-    [ -1,          4294967295 ],
-    [ 3147483647,  3147483647 ],
-  ];
+  // When interpreted as unsigned 32-bit integers, all of these fall between
+  // 2^31 and 2^32 - 1, so per spec they return the default value.
+  var nonValidValues = [ -2147483648, -1, 3147483647];
 
-  for (var values of nonValidValues) {
-    element[attr] = values[0];
-    is(element.getAttribute(attr), String(values[1]),
-       "@" + attr + " should be equals to " + values[1]);
+  for (var value of nonValidValues) {
+    element[attr] = value;
+    is(element.getAttribute(attr), String(defaultValue),
+       "@" + attr + " should be equals to " + defaultValue);
     is(element[attr], defaultValue,
        "." + attr + " should be equals to " + defaultValue);
   }
@@ -569,14 +566,8 @@ function reflectInt(aParameters)
     is(element.getAttribute(attr), expectedGetAttributeResult(v), element.localName + ".setAttribute(" +
       attr + ", " + v + "), " + element.localName + ".getAttribute(" + attr + ") ");
 
-    if (intValue == -2147483648 && element[attr] == defaultValue) {
-      //TBD: Bug 586761: .setAttribute(attr, -2147483648) --> element[attr] == defaultValue instead of -2147483648
-      todo_is(element[attr], intValue, "Bug 586761: " + element.localName +
-        ".setAttribute(value, " + v + "), " + element.localName + "[" + attr + "] ");
-    } else {
-      is(element[attr], intValue, element.localName +
-        ".setAttribute(" + attr + ", " + v + "), " + element.localName + "[" + attr + "] ");
-    }
+    is(element[attr], intValue, element.localName +
+       ".setAttribute(" + attr + ", " + v + "), " + element.localName + "[" + attr + "] ");
     element.removeAttribute(attr);
 
     if (nonNegative && expectedIdlAttributeResult(v) < 0) {
@@ -591,17 +582,11 @@ function reflectInt(aParameters)
       }
     } else {
       element[attr] = v;
-      if (expectedIdlAttributeResult(v) == -2147483648 && element[attr] == defaultValue) {
-        //TBD: Bug 586761: .setAttribute(attr, -2147483648) --> element[attr] == defaultValue instead of -2147483648
-        todo_is(element[attr], expectedIdlAttributeResult(v), "Bug 586761: " + element.localName + "[" +
-          attr + "] = " + v + ", " + element.localName + "[" + attr + "] ");
-      } else {
-        is(element[attr], expectedIdlAttributeResult(v), element.localName + "[" + attr + "] = " + v +
-          ", " + element.localName + "[" + attr + "] ");
-        is(element.getAttribute(attr), String(expectedIdlAttributeResult(v)),
-           element.localName + "[" + attr + "] = " + v + ", " +
-           element.localName + ".getAttribute(" + attr + ") ");
-      }
+      is(element[attr], expectedIdlAttributeResult(v), element.localName + "[" + attr + "] = " + v +
+         ", " + element.localName + "[" + attr + "] ");
+      is(element.getAttribute(attr), String(expectedIdlAttributeResult(v)),
+         element.localName + "[" + attr + "] = " + v + ", " +
+         element.localName + ".getAttribute(" + attr + ") ");
     }
     element.removeAttribute(attr);
   });

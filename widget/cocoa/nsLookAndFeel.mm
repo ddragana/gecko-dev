@@ -11,6 +11,7 @@
 #include "nsCocoaFeatures.h"
 #include "gfxFont.h"
 #include "gfxFontConstants.h"
+#include "gfxPlatformMac.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/widget/WidgetMessageUtils.h"
 
@@ -48,6 +49,15 @@ static nscolor GetColorFromNSColor(NSColor* aColor)
   return NS_RGB((unsigned int)([deviceColor redComponent] * 255.0),
                 (unsigned int)([deviceColor greenComponent] * 255.0),
                 (unsigned int)([deviceColor blueComponent] * 255.0));
+}
+
+static nscolor GetColorFromNSColorWithAlpha(NSColor* aColor, float alpha)
+{
+  NSColor* deviceColor = [aColor colorUsingColorSpaceName:NSDeviceRGBColorSpace];
+  return NS_RGBA((unsigned int)([deviceColor redComponent] * 255.0),
+                 (unsigned int)([deviceColor greenComponent] * 255.0),
+                 (unsigned int)([deviceColor blueComponent] * 255.0),
+                 (unsigned int)(alpha * 255.0));
 }
 
 nsresult
@@ -168,7 +178,7 @@ nsLookAndFeel::NativeGetColor(ColorID aID, nscolor &aColor)
       aColor = GetColorFromNSColor([NSColor gridColor]);
       break;
     case eColorID_activeborder:
-      aColor = NS_RGB(0x00,0x00,0x00);
+      aColor = GetColorFromNSColor([NSColor keyboardFocusIndicatorColor]);
       break;
      case eColorID_appworkspace:
       aColor = NS_RGB(0xFF,0xFF,0xFF);
@@ -252,7 +262,7 @@ nsLookAndFeel::NativeGetColor(ColorID aID, nscolor &aColor)
     }
       break;
     case eColorID__moz_mac_focusring:
-      aColor = GetColorFromNSColor([NSColor keyboardFocusIndicatorColor]);
+      aColor = GetColorFromNSColorWithAlpha([NSColor keyboardFocusIndicatorColor], 0.48);
       break;
     case eColorID__moz_mac_menushadow:
       aColor = NS_RGB(0xA3,0xA3,0xA3);
@@ -345,21 +355,7 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
       aResult = 4;
       break;
     case eIntID_ScrollArrowStyle:
-      if (nsCocoaFeatures::OnLionOrLater()) {
-        // OS X Lion's scrollbars have no arrows
-        aResult = eScrollArrow_None;
-      } else {
-        NSString *buttonPlacement = [[NSUserDefaults standardUserDefaults] objectForKey:@"AppleScrollBarVariant"];
-        if ([buttonPlacement isEqualToString:@"Single"]) {
-          aResult = eScrollArrowStyle_Single;
-        } else if ([buttonPlacement isEqualToString:@"DoubleMin"]) {
-          aResult = eScrollArrowStyle_BothAtTop;
-        } else if ([buttonPlacement isEqualToString:@"DoubleBoth"]) {
-          aResult = eScrollArrowStyle_BothAtEachEnd;
-        } else {
-          aResult = eScrollArrowStyle_BothAtBottom; // The default is BothAtBottom.
-        }
-      }
+      aResult = eScrollArrow_None;
       break;
     case eIntID_ScrollSliderStyle:
       aResult = eScrollThumbStyle_Proportional;
@@ -473,6 +469,12 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
     case eIntID_ColorPickerAvailable:
       aResult = 1;
       break;
+    case eIntID_ContextMenuOffsetVertical:
+      aResult = -6;
+      break;
+    case eIntID_ContextMenuOffsetHorizontal:
+      aResult = 1;
+      break;
     default:
       aResult = 0;
       res = NS_ERROR_FAILURE;
@@ -518,15 +520,7 @@ bool nsLookAndFeel::SystemWantsOverlayScrollbars()
 
 bool nsLookAndFeel::AllowOverlayScrollbarsOverlap()
 {
-  return (UseOverlayScrollbars() && nsCocoaFeatures::OnMountainLionOrLater());
-}
-
-// copied from gfxQuartzFontCache.mm, maybe should go in a Cocoa utils
-// file somewhere
-static void GetStringForNSString(const NSString *aSrc, nsAString& aDest)
-{
-    aDest.SetLength([aSrc length]);
-    [aSrc getCharacters:reinterpret_cast<unichar*>(aDest.BeginWriting())];
+  return (UseOverlayScrollbars());
 }
 
 bool
@@ -548,101 +542,9 @@ nsLookAndFeel::GetFontImpl(FontID aID, nsString &aFontName,
         return true;
     }
 
-/* possibilities, see NSFont Class Reference:
-    [NSFont boldSystemFontOfSize:     0.0]
-    [NSFont controlContentFontOfSize: 0.0]
-    [NSFont labelFontOfSize:          0.0]
-    [NSFont menuBarFontOfSize:        0.0]
-    [NSFont menuFontOfSize:           0.0]
-    [NSFont messageFontOfSize:        0.0]
-    [NSFont paletteFontOfSize:        0.0]
-    [NSFont systemFontOfSize:         0.0]
-    [NSFont titleBarFontOfSize:       0.0]
-    [NSFont toolTipsFontOfSize:       0.0]
-    [NSFont userFixedPitchFontOfSize: 0.0]
-    [NSFont userFontOfSize:           0.0]
-    [NSFont systemFontOfSize:         [NSFont smallSystemFontSize]]
-    [NSFont boldSystemFontOfSize:     [NSFont smallSystemFontSize]]
-*/
+    gfxPlatformMac::LookupSystemFont(aID, aFontName, aFontStyle,
+                                     aDevPixPerCSSPixel);
 
-    NSFont *font = nullptr;
-    switch (aID) {
-        // css2
-        case eFont_Caption:
-            font = [NSFont systemFontOfSize:0.0];
-            break;
-        case eFont_Icon: // used in urlbar; tried labelFont, but too small
-            font = [NSFont controlContentFontOfSize:0.0];
-            break;
-        case eFont_Menu:
-            font = [NSFont systemFontOfSize:0.0];
-            break;
-        case eFont_MessageBox:
-            font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
-            break;
-        case eFont_SmallCaption:
-            font = [NSFont boldSystemFontOfSize:[NSFont smallSystemFontSize]];
-            break;
-        case eFont_StatusBar:
-            font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
-            break;
-        // css3
-        //case eFont_Window:     = 'sans-serif'
-        //case eFont_Document:   = 'sans-serif'
-        case eFont_Workspace:
-            font = [NSFont controlContentFontOfSize:0.0];
-            break;
-        case eFont_Desktop:
-            font = [NSFont controlContentFontOfSize:0.0];
-            break;
-        case eFont_Info:
-            font = [NSFont controlContentFontOfSize:0.0];
-            break;
-        case eFont_Dialog:
-            font = [NSFont systemFontOfSize:0.0];
-            break;
-        case eFont_Button:
-            font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
-            break;
-        case eFont_PullDownMenu:
-            font = [NSFont menuBarFontOfSize:0.0];
-            break;
-        case eFont_List:
-            font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
-            break;
-        case eFont_Field:
-            font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
-            break;
-        // moz
-        case eFont_Tooltips:
-            font = [NSFont toolTipsFontOfSize:0.0];
-            break;
-        case eFont_Widget:
-            font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
-            break;
-        default:
-            break;
-    }
-
-    if (!font) {
-        NS_WARNING("failed to find a system font!");
-        return false;
-    }
-
-    NSFontSymbolicTraits traits = [[font fontDescriptor] symbolicTraits];
-    aFontStyle.style =
-        (traits & NSFontItalicTrait) ?  NS_FONT_STYLE_ITALIC : NS_FONT_STYLE_NORMAL;
-    aFontStyle.weight =
-        (traits & NSFontBoldTrait) ? NS_FONT_WEIGHT_BOLD : NS_FONT_WEIGHT_NORMAL;
-    aFontStyle.stretch =
-        (traits & NSFontExpandedTrait) ?
-            NS_FONT_STRETCH_EXPANDED : (traits & NSFontCondensedTrait) ?
-                NS_FONT_STRETCH_CONDENSED : NS_FONT_STRETCH_NORMAL;
-    // convert size from css pixels to device pixels
-    aFontStyle.size = [font pointSize] * aDevPixPerCSSPixel;
-    aFontStyle.systemFont = true;
-
-    GetStringForNSString([font familyName], aFontName);
     return true;
 
     NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(false);

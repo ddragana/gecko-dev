@@ -10,7 +10,9 @@ EXPORTS += [
     'nsXPCOMCIDInternal.h',
     'nsXREAppData.h',
     'nsXULAppAPI.h',
+    'XREChildData.h',
     'xrecore.h',
+    'XREShellData.h',
 ]
 
 EXPORTS.mozilla += [
@@ -34,10 +36,11 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     UNIFIED_SOURCES += [
-        'mach_override.c',
         'PoisonIOInterposerBase.cpp',
         'PoisonIOInterposerMac.cpp',
     ]
+    SOURCES += ['mach_override.c']
+    SOURCES['mach_override.c'].flags += ['-Wno-unused-function']
 else:
     SOURCES += ['PoisonIOInterposerStub.cpp']
 
@@ -68,17 +71,17 @@ SOURCES += [
     'Omnijar.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 
 DEFINES['_IMPL_NS_STRINGAPI'] = True
 DEFINES['OMNIJAR_NAME'] = CONFIG['OMNIJAR_NAME']
+if CONFIG['MOZ_ICU_DATA_ARCHIVE']:
+    DEFINES['MOZ_ICU_DATA_ARCHIVE'] = True
 
-GENERATED_INCLUDES += ['..']
 LOCAL_INCLUDES += [
+    '!..',
     '../base',
     '../components',
     '../ds',
@@ -97,3 +100,6 @@ if CONFIG['MOZ_VPX']:
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     CXXFLAGS += CONFIG['TK_CFLAGS']
+
+CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']
+LOCAL_INCLUDES += CONFIG['MOZ_ICU_INCLUDES']

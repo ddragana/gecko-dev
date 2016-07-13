@@ -50,8 +50,6 @@ nsXBLProtoImplMethod::AppendBodyText(const nsAString& aText)
   nsXBLUncompiledMethod* uncompiledMethod = GetUncompiledMethod();
   if (!uncompiledMethod) {
     uncompiledMethod = new nsXBLUncompiledMethod();
-    if (!uncompiledMethod)
-      return;
     SetUncompiledMethod(uncompiledMethod);
   }
 
@@ -72,8 +70,6 @@ nsXBLProtoImplMethod::AddParameter(const nsAString& aText)
   nsXBLUncompiledMethod* uncompiledMethod = GetUncompiledMethod();
   if (!uncompiledMethod) {
     uncompiledMethod = new nsXBLUncompiledMethod();
-    if (!uncompiledMethod)
-      return;
     SetUncompiledMethod(uncompiledMethod);
   }
 
@@ -89,8 +85,6 @@ nsXBLProtoImplMethod::SetLineNumber(uint32_t aLineNumber)
   nsXBLUncompiledMethod* uncompiledMethod = GetUncompiledMethod();
   if (!uncompiledMethod) {
     uncompiledMethod = new nsXBLUncompiledMethod();
-    if (!uncompiledMethod)
-      return;
     SetUncompiledMethod(uncompiledMethod);
   }
 
@@ -168,8 +162,6 @@ nsXBLProtoImplMethod::CompileMember(AutoJSAPI& jsapi, const nsString& aClassStr,
   char** args = nullptr;
   if (paramCount > 0) {
     args = new char*[paramCount];
-    if (!args)
-      return NS_ERROR_OUT_OF_MEMORY;
 
     // Add our parameters to our args array.
     int32_t argPos = 0;
@@ -298,7 +290,6 @@ nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement, JSAddonId* aAd
   // We are going to run script via JS::Call, so we need a script entry point,
   // but as this is XBL related it does not appear in the HTML spec.
   dom::AutoEntryScript aes(global, "XBL <constructor>/<destructor> invocation");
-  aes.TakeOwnershipOfErrorReporting();
   JSContext* cx = aes.cx();
 
   JS::Rooted<JSObject*> globalObject(cx, global->GetGlobalJSObject());
@@ -325,8 +316,7 @@ nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement, JSAddonId* aAd
   // Now call the method
 
   // Check whether script is enabled.
-  bool scriptAllowed = nsContentUtils::GetSecurityManager()->
-                         ScriptAllowed(js::GetGlobalForObjectCrossCompartment(method));
+  bool scriptAllowed = xpc::Scriptability::Get(method).Allowed();
 
   if (scriptAllowed) {
     JS::Rooted<JS::Value> retval(cx);

@@ -12,8 +12,8 @@
 
 namespace mozilla {
 namespace layers {
-class ISurfaceAllocator;
-class GrallocTextureClientOGL;
+class ClientIPCAllocator;
+class TextureClient;
 }
 
 namespace gl {
@@ -29,7 +29,7 @@ public:
                                                    const gfx::IntSize& size,
                                                    bool hasAlpha,
                                                    layers::TextureFlags flags,
-                                                   layers::ISurfaceAllocator* allocator);
+                                                   layers::ClientIPCAllocator* allocator);
 
     static SharedSurface_Gralloc* Cast(SharedSurface* surf) {
         MOZ_ASSERT(surf->mType == SharedSurfaceType::Gralloc);
@@ -40,16 +40,16 @@ public:
 protected:
     GLLibraryEGL* const mEGL;
     EGLSync mSync;
-    RefPtr<layers::ISurfaceAllocator> mAllocator;
-    RefPtr<layers::GrallocTextureClientOGL> mTextureClient;
+    RefPtr<layers::ClientIPCAllocator> mAllocator;
+    RefPtr<layers::TextureClient> mTextureClient;
     const GLuint mProdTex;
 
     SharedSurface_Gralloc(GLContext* prodGL,
                           const gfx::IntSize& size,
                           bool hasAlpha,
                           GLLibraryEGL* egl,
-                          layers::ISurfaceAllocator* allocator,
-                          layers::GrallocTextureClientOGL* textureClient,
+                          layers::ClientIPCAllocator* allocator,
+                          layers::TextureClient* textureClient,
                           GLuint prodTex);
 
     static bool HasExtensions(GLLibraryEGL* egl, GLContext* gl);
@@ -57,9 +57,8 @@ protected:
 public:
     virtual ~SharedSurface_Gralloc();
 
-    virtual void Fence() override;
-    virtual bool WaitSync() override;
-    virtual bool PollSync() override;
+    virtual void ProducerAcquireImpl() override {}
+    virtual void ProducerReleaseImpl() override;
 
     virtual void WaitForBufferOwnership() override;
 
@@ -70,11 +69,13 @@ public:
         return mProdTex;
     }
 
-    layers::GrallocTextureClientOGL* GetTextureClient() {
+    layers::TextureClient* GetTextureClient() {
         return mTextureClient;
     }
 
     virtual bool ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor) override;
+
+    virtual bool ReadbackBySharedHandle(gfx::DataSourceSurface* out_surface) override;
 };
 
 class SurfaceFactory_Gralloc
@@ -82,7 +83,7 @@ class SurfaceFactory_Gralloc
 {
 public:
     SurfaceFactory_Gralloc(GLContext* prodGL, const SurfaceCaps& caps,
-                           const RefPtr<layers::ISurfaceAllocator>& allocator,
+                           const RefPtr<layers::ClientIPCAllocator>& allocator,
                            const layers::TextureFlags& flags);
 
     virtual UniquePtr<SharedSurface> CreateShared(const gfx::IntSize& size) override {

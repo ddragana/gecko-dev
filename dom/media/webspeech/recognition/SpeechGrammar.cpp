@@ -6,7 +6,6 @@
 
 #include "SpeechGrammar.h"
 
-#include "mozilla/Preferences.h"
 #include "mozilla/dom/SpeechGrammarBinding.h"
 
 namespace mozilla {
@@ -33,7 +32,7 @@ already_AddRefed<SpeechGrammar>
 SpeechGrammar::Constructor(const GlobalObject& aGlobal,
                            ErrorResult& aRv)
 {
-  nsRefPtr<SpeechGrammar> speechGrammar =
+  RefPtr<SpeechGrammar> speechGrammar =
     new SpeechGrammar(aGlobal.GetAsSupports());
   return speechGrammar.forget();
 }

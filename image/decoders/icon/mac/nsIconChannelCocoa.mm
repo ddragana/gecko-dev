@@ -4,8 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsContentUtils.h"
 #include "nsIconChannel.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "nsIIconURI.h"
 #include "nsIServiceManager.h"
 #include "nsIInterfaceRequestor.h"
@@ -37,12 +38,7 @@ nsIconChannel::nsIconChannel()
 nsIconChannel::~nsIconChannel()
 {
   if (mLoadInfo) {
-    nsCOMPtr<nsIThread> mainThread;
-    NS_GetMainThread(getter_AddRefs(mainThread));
-
-    nsILoadInfo* forgetableLoadInfo;
-    mLoadInfo.forget(&forgetableLoadInfo);
-    NS_ProxyRelease(mainThread, forgetableLoadInfo, false);
+    NS_ReleaseOnMainThread(mLoadInfo.forget());
   }
 }
 
@@ -225,6 +221,13 @@ NS_IMETHODIMP
 nsIconChannel::AsyncOpen(nsIStreamListener* aListener,
                                        nsISupports* ctxt)
 {
+  MOZ_ASSERT(!mLoadInfo ||
+             mLoadInfo->GetSecurityMode() == 0 ||
+             mLoadInfo->GetInitialSecurityCheckDone() ||
+             (mLoadInfo->GetSecurityMode() == nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
+              nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
+             "security flags in loadInfo but asyncOpen2() not called");
+
   nsCOMPtr<nsIInputStream> inStream;
   nsresult rv = MakeInputStream(getter_AddRefs(inStream), true);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -342,7 +345,7 @@ nsIconChannel::MakeInputStream(nsIInputStream** _retval,
 
   // create our buffer
   int32_t bufferCapacity = 2 + [bitmapRep bytesPerPlane];
-  nsAutoTArray<uint8_t, 3 + 16 * 16 * 5> iconBuffer; // initial size is for
+  AutoTArray<uint8_t, 3 + 16 * 16 * 5> iconBuffer; // initial size is for
                                                      // 16x16
   iconBuffer.SetLength(bufferCapacity);
 

@@ -46,18 +46,16 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     };
 
   private:
-    MBasicBlock(MIRGraph& graph, CompileInfo& info, BytecodeSite* site, Kind kind);
-    bool init();
+    MBasicBlock(MIRGraph& graph, const CompileInfo& info, BytecodeSite* site, Kind kind);
+    MOZ_MUST_USE bool init();
     void copySlots(MBasicBlock* from);
-    bool inherit(TempAllocator& alloc, BytecodeAnalysis* analysis, MBasicBlock* pred,
-                 uint32_t popped, unsigned stackPhiCount = 0);
-    bool inheritResumePoint(MBasicBlock* pred);
+    MOZ_MUST_USE bool inherit(TempAllocator& alloc, BytecodeAnalysis* analysis, MBasicBlock* pred,
+                                        uint32_t popped, unsigned stackPhiCount = 0);
+    MOZ_MUST_USE bool inheritResumePoint(MBasicBlock* pred);
     void assertUsesAreNotWithin(MUseIterator use, MUseIterator end);
 
     // This block cannot be reached by any means.
     bool unreachable_;
-
-    MResumePoint* callerResumePoint_;
 
     // Pushes a copy of a local variable or argument.
     void pushVariable(uint32_t slot);
@@ -108,18 +106,20 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
 
     // Creates a new basic block for a MIR generator. If |pred| is not nullptr,
     // its slots and stack depth are initialized from |pred|.
-    static MBasicBlock* New(MIRGraph& graph, BytecodeAnalysis* analysis, CompileInfo& info,
+    static MBasicBlock* New(MIRGraph& graph, BytecodeAnalysis* analysis, const CompileInfo& info,
                             MBasicBlock* pred, BytecodeSite* site, Kind kind);
-    static MBasicBlock* NewPopN(MIRGraph& graph, CompileInfo& info,
+    static MBasicBlock* NewPopN(MIRGraph& graph, const CompileInfo& info,
                                 MBasicBlock* pred, BytecodeSite* site, Kind kind, uint32_t popn);
-    static MBasicBlock* NewWithResumePoint(MIRGraph& graph, CompileInfo& info,
+    static MBasicBlock* NewWithResumePoint(MIRGraph& graph, const CompileInfo& info,
                                            MBasicBlock* pred, BytecodeSite* site,
                                            MResumePoint* resumePoint);
-    static MBasicBlock* NewPendingLoopHeader(MIRGraph& graph, CompileInfo& info,
+    static MBasicBlock* NewPendingLoopHeader(MIRGraph& graph, const CompileInfo& info,
                                              MBasicBlock* pred, BytecodeSite* site,
                                              unsigned loopStateSlots);
-    static MBasicBlock* NewSplitEdge(MIRGraph& graph, CompileInfo& info, MBasicBlock* pred);
-    static MBasicBlock* NewAsmJS(MIRGraph& graph, CompileInfo& info,
+    static MBasicBlock* NewSplitEdge(MIRGraph& graph, const CompileInfo& info,
+                                     MBasicBlock* pred, size_t predEdgeIdx,
+                                     MBasicBlock* succ);
+    static MBasicBlock* NewAsmJS(MIRGraph& graph, const CompileInfo& info,
                                  MBasicBlock* pred, Kind kind);
 
     bool dominates(const MBasicBlock* other) const {
@@ -154,8 +154,8 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     MDefinition* argumentsObject();
 
     // Increase the number of slots available
-    bool increaseSlots(size_t num);
-    bool ensureHasSlots(size_t num);
+    MOZ_MUST_USE bool increaseSlots(size_t num);
+    MOZ_MUST_USE bool ensureHasSlots(size_t num);
 
     // Initializes a slot value; must not be called for normal stack
     // operations, as it will not create new SSA names for copies.
@@ -166,7 +166,7 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
 
     // In an OSR block, set all MOsrValues to use the MResumePoint attached to
     // the MStart.
-    bool linkOsrValues(MStart* start);
+    MOZ_MUST_USE bool linkOsrValues(MStart* start);
 
     // Sets the instruction associated with various slot types. The
     // instruction must lie at the top of the stack.
@@ -220,17 +220,17 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     // Adds a predecessor. Every predecessor must have the same exit stack
     // depth as the entry state to this block. Adding a predecessor
     // automatically creates phi nodes and rewrites uses as needed.
-    bool addPredecessor(TempAllocator& alloc, MBasicBlock* pred);
-    bool addPredecessorPopN(TempAllocator& alloc, MBasicBlock* pred, uint32_t popped);
+    MOZ_MUST_USE bool addPredecessor(TempAllocator& alloc, MBasicBlock* pred);
+    MOZ_MUST_USE bool addPredecessorPopN(TempAllocator& alloc, MBasicBlock* pred, uint32_t popped);
 
     // Add a predecessor which won't introduce any new phis to this block.
     // This may be called after the contents of this block have been built.
     void addPredecessorSameInputsAs(MBasicBlock* pred, MBasicBlock* existingPred);
 
     // Stranger utilities used for inlining.
-    bool addPredecessorWithoutPhis(MBasicBlock* pred);
+    MOZ_MUST_USE bool addPredecessorWithoutPhis(MBasicBlock* pred);
     void inheritSlots(MBasicBlock* parent);
-    bool initEntrySlots(TempAllocator& alloc);
+    MOZ_MUST_USE bool initEntrySlots(TempAllocator& alloc);
 
     // Replaces an edge for a given block with a new block. This is
     // used for critical edge splitting.
@@ -255,8 +255,8 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     // Sets a back edge. This places phi nodes and rewrites instructions within
     // the current loop as necessary. If the backedge introduces new types for
     // phis at the loop header, returns a disabling abort.
-    AbortReason setBackedge(MBasicBlock* block);
-    bool setBackedgeAsmJS(MBasicBlock* block);
+    MOZ_MUST_USE AbortReason setBackedge(MBasicBlock* block);
+    MOZ_MUST_USE bool setBackedgeAsmJS(MBasicBlock* block);
 
     // Resets a LOOP_HEADER block to a NORMAL block.  This is needed when
     // optimizations remove the backedge.
@@ -271,10 +271,10 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     void inheritPhis(MBasicBlock* header);
 
     // Propagates backedge slots into phis operands of the loop header.
-    bool inheritPhisFromBackedge(MBasicBlock* backedge, bool* hadTypeChange);
+    MOZ_MUST_USE bool inheritPhisFromBackedge(MBasicBlock* backedge, bool* hadTypeChange);
 
     // Compute the types for phis in this block according to their inputs.
-    bool specializePhis();
+    MOZ_MUST_USE bool specializePhis();
 
     void insertBefore(MInstruction* at, MInstruction* ins);
     void insertAfter(MInstruction* at, MInstruction* ins);
@@ -333,7 +333,7 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     MIRGraph& graph() {
         return graph_;
     }
-    CompileInfo& info() const {
+    const CompileInfo& info() const {
         return info_;
     }
     jsbytecode* pc() const {
@@ -370,8 +370,11 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
         }
         MOZ_CRASH();
     }
+    bool hasAnyIns() const {
+        return !instructions_.empty();
+    }
     bool hasLastIns() const {
-        return !instructions_.empty() && instructions_.rbegin()->isControlInstruction();
+        return hasAnyIns() && instructions_.rbegin()->isControlInstruction();
     }
     MControlInstruction* lastIns() const {
         MOZ_ASSERT(hasLastIns());
@@ -428,7 +431,11 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     bool hasUniqueBackedge() const {
         MOZ_ASSERT(isLoopHeader());
         MOZ_ASSERT(numPredecessors() >= 2);
-        return numPredecessors() == 2;
+        if (numPredecessors() == 2)
+            return true;
+        if (numPredecessors() == 3) // fixup block added by ValueNumbering phase.
+            return getPredecessor(1)->numPredecessors() == 0;
+        return false;
     }
     MBasicBlock* backedge() const {
         MOZ_ASSERT(hasUniqueBackedge());
@@ -475,6 +482,9 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     }
     void unmark() {
         MOZ_ASSERT(mark_, "Unarking unmarked block");
+        unmarkUnchecked();
+    }
+    void unmarkUnchecked() {
         mark_ = false;
     }
 
@@ -605,6 +615,32 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     void dump(GenericPrinter& out);
     void dump();
 
+    // Hit count
+    enum class HitState {
+        // Not hit information is attached to this basic block.
+        NotDefined,
+
+        // The hit information is a raw counter. Note that due to inlining this
+        // counter is not guaranteed to be consistent over the graph.
+        Count,
+
+        // The hit information is a frequency, which is a form of normalized
+        // counter, where a hit-count can be compared against any previous block
+        // in the graph.
+        Frequency
+    };
+    HitState getHitState() const {
+        return hitState_;
+    }
+    void setHitCount(uint64_t count) {
+        hitCount_ = count;
+        hitState_ = HitState::Count;
+    }
+    uint64_t getHitCount() const {
+        MOZ_ASSERT(hitState_ == HitState::Count);
+        return hitCount_;
+    }
+
     // Track bailouts by storing the current pc in MIR instruction added at
     // this cycle. This is also used for tracking calls and optimizations when
     // profiling.
@@ -624,7 +660,7 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
 
   private:
     MIRGraph& graph_;
-    CompileInfo& info_; // Each block originates from a particular script.
+    const CompileInfo& info_; // Each block originates from a particular script.
     InlineList<MInstruction> instructions_;
     Vector<MBasicBlock*, 1, JitAllocPolicy> predecessors_;
     InlineList<MPhi> phis_;
@@ -635,6 +671,11 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     uint32_t numDominated_;
     jsbytecode* pc_;
     LBlock* lir_;
+
+    // Copy of a dominator block's outerResumePoint_ which holds the state of
+    // caller frame at the time of the call. If not null, this implies that this
+    // basic block corresponds to an inlined script.
+    MResumePoint* callerResumePoint_;
 
     // Resume point holding baseline-like frame for the PC corresponding to the
     // entry of this basic block.
@@ -662,6 +703,11 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     MBasicBlock* immediateDominator_;
 
     BytecodeSite* trackedSite_;
+
+    // Record the number of times a block got visited. Note, due to inlined
+    // scripts these numbers might not be continuous.
+    uint64_t hitCount_;
+    HitState hitState_;
 
 #if defined(JS_ION_PERF) || defined(DEBUG)
     unsigned lineno_;
@@ -693,6 +739,9 @@ class MIRGraph
     size_t numBlocks_;
     bool hasTryBlock_;
 
+    InlineList<MPhi> phiFreeList_;
+    size_t phiFreeListLength_;
+
   public:
     explicit MIRGraph(TempAllocator* alloc)
       : alloc_(alloc),
@@ -701,7 +750,8 @@ class MIRGraph
         idGen_(0),
         osrBlock_(nullptr),
         numBlocks_(0),
-        hasTryBlock_(false)
+        hasTryBlock_(false),
+        phiFreeListLength_(0)
     { }
 
     TempAllocator& alloc() const {
@@ -723,7 +773,7 @@ class MIRGraph
         return returnAccumulator_;
     }
 
-    bool addReturn(MBasicBlock* returnBlock) {
+    MOZ_MUST_USE bool addReturn(MBasicBlock* returnBlock) {
         if (!returnAccumulator_)
             return true;
 
@@ -812,6 +862,19 @@ class MIRGraph
 
     void dump(GenericPrinter& out);
     void dump();
+
+    void addPhiToFreeList(MPhi* phi) {
+        phiFreeList_.pushBack(phi);
+        phiFreeListLength_++;
+    }
+    size_t phiFreeListLength() const {
+        return phiFreeListLength_;
+    }
+    MPhi* takePhiFromFreeList() {
+        MOZ_ASSERT(phiFreeListLength_ > 0);
+        phiFreeListLength_--;
+        return phiFreeList_.popBack();
+    }
 };
 
 class MDefinitionIterator

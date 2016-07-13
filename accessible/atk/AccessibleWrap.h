@@ -69,12 +69,16 @@ public:
     return returnedString.get();
   }
 
+  static void GetKeyBinding(Accessible* aAccessible, nsAString& aResult);
+
+  static Accessible* GetColumnHeader(TableAccessible* aAccessible,
+                                     int32_t aColIdx);
+  static Accessible* GetRowHeader(TableAccessible* aAccessible,
+                                  int32_t aRowIdx);
 protected:
 
   nsresult FireAtkStateChangeEvent(AccEvent* aEvent, AtkObject *aObject);
   nsresult FireAtkTextChangedEvent(AccEvent* aEvent, AtkObject *aObject);
-  nsresult FireAtkShowHideEvent(AccEvent* aEvent, AtkObject *aObject,
-                                bool aIsAdded);
 
   AtkObject *mAtkObject;
 

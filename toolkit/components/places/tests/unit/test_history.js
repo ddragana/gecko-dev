@@ -35,7 +35,7 @@ function run_test()
   run_next_test();
 }
 
-add_task(function test_execute()
+add_task(function* test_execute()
 {
   // we have a new profile, so we should have imported bookmarks
   do_check_eq(histsvc.databaseStatus, histsvc.DATABASE_STATUS_CREATE);
@@ -124,7 +124,7 @@ add_task(function test_execute()
   result.root.containerOpen = true;
   do_check_eq(result.root.childCount, 2);
   result.root.containerOpen = false;
-  
+
   // test annotation-based queries
   var annos = Cc["@mozilla.org/browser/annotation-service;1"].
               getService(Ci.nsIAnnotationService);
@@ -172,12 +172,12 @@ add_task(function test_execute()
 
   // bug 394741 - regressed history text searches
   yield PlacesTestUtils.addVisits(uri("http://mozilla.com"));
-  var options = histsvc.getNewQueryOptions();
+  options = histsvc.getNewQueryOptions();
   //options.resultType = options.RESULTS_AS_VISIT;
-  var query = histsvc.getNewQuery();
+  query = histsvc.getNewQuery();
   query.searchTerms = "moz";
-  var result = histsvc.executeQuery(query, options);
-  var root = result.root;
+  result = histsvc.executeQuery(query, options);
+  root = result.root;
   root.containerOpen = true;
   do_check_true(root.childCount > 0);
   root.containerOpen = false;

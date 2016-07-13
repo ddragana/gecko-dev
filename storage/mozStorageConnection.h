@@ -320,7 +320,9 @@ private:
    * Tracks whether the async thread has been initialized and Shutdown() has
    * not yet been invoked on it.
    */
-  DebugOnly<bool> mAsyncExecutionThreadIsAlive;
+#ifdef DEBUG
+  bool mAsyncExecutionThreadIsAlive;
+#endif
 
   /**
    * Set to true just prior to calling sqlite3_close on the
@@ -357,7 +359,7 @@ private:
   // This is here for two reasons: 1) It's used to make sure that the
   // connections do not outlive the service.  2) Our custom collating functions
   // call its localeCompareStrings() method.
-  nsRefPtr<Service> mStorageService;
+  RefPtr<Service> mStorageService;
 
   /**
    * If |false|, this instance supports synchronous operations
@@ -371,7 +373,7 @@ private:
  * A Runnable designed to call a mozIStorageCompletionCallback on
  * the appropriate thread.
  */
-class CallbackComplete final : public nsRunnable
+class CallbackComplete final : public Runnable
 {
 public:
   /**
@@ -402,13 +404,23 @@ public:
 private:
   nsresult mStatus;
   nsCOMPtr<nsISupports> mValue;
-  // This is a nsRefPtr<T> and not a nsCOMPtr<T> because
+  // This is a RefPtr<T> and not a nsCOMPtr<T> because
   // nsCOMP<T> would cause an off-main thread QI, which
   // is not a good idea (and crashes XPConnect).
-  nsRefPtr<mozIStorageCompletionCallback> mCallback;
+  RefPtr<mozIStorageCompletionCallback> mCallback;
 };
 
 } // namespace storage
 } // namespace mozilla
+
+/**
+ * Casting Connection to nsISupports is ambiguous.
+ * This method handles that.
+ */
+inline nsISupports*
+ToSupports(mozilla::storage::Connection* p)
+{
+  return NS_ISUPPORTS_CAST(mozIStorageAsyncConnection*, p);
+}
 
 #endif // mozilla_storage_Connection_h

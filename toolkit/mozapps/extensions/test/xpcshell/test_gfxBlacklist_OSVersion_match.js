@@ -3,7 +3,7 @@
  */
 
 // This should eventually be moved to head_addons.js
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 // Test whether new OS versions are matched properly.
 // Uses test_gfxBlacklist_OS.xml
@@ -58,7 +58,7 @@ function run_test() {
       return;
     case "Darwin":
       // Mountain Lion
-      gfxInfo.spoofOSVersion(0x1080);
+      gfxInfo.spoofOSVersion(0x1090);
       break;
     case "Android":
       // On Android, the driver version is used as the OS version (because

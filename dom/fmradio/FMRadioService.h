@@ -20,7 +20,7 @@
 
 BEGIN_FMRADIO_NAMESPACE
 
-class FMRadioReplyRunnable : public nsRunnable
+class FMRadioReplyRunnable : public Runnable
 {
 public:
   FMRadioReplyRunnable() : mResponseType(SuccessResponse()) {}
@@ -196,6 +196,10 @@ public:
   /* FMRadioRDSObserver */
   void Notify(const hal::FMRadioRDSGroup& aRDSGroup) override;
 
+  void EnableFMRadio();
+  void DisableFMRadio();
+  void DispatchFMRadioEventToMainThread(enum FMRadioEventType aType);
+
   NS_DECL_NSIOBSERVER
 
 protected:
@@ -229,7 +233,7 @@ private:
   uint32_t mPreemphasis;
 
   nsCOMPtr<nsIThread> mTuneThread;
-  nsRefPtr<FMRadioReplyRunnable> mPendingRequest;
+  RefPtr<FMRadioReplyRunnable> mPendingRequest;
 
   FMRadioEventObserverList mObserverList;
 

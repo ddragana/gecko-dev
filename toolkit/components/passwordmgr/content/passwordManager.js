@@ -4,6 +4,14 @@
 
 /*** =================== SAVED SIGNONS CODE =================== ***/
 
+Cu.import("resource://gre/modules/AppConstants.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "DeferredTask",
+                                  "resource://gre/modules/DeferredTask.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
+                                  "resource://gre/modules/PlacesUtils.jsm");
+
 var kSignonBundle;
 var showingPasswords = false;
 var dateFormatter = new Intl.DateTimeFormat(undefined,
@@ -16,7 +24,7 @@ function SignonsStartup() {
   kSignonBundle = document.getElementById("signonBundle");
   document.getElementById("togglePasswords").label = kSignonBundle.getString("showPasswords");
   document.getElementById("togglePasswords").accessKey = kSignonBundle.getString("showPasswordsAccessKey");
-  document.getElementById("signonsIntro").textContent = kSignonBundle.getString("loginsSpielAll");
+  document.getElementById("signonsIntro").textContent = kSignonBundle.getString("loginsDescriptionAll");
 
   let treecols = document.getElementsByTagName("treecols")[0];
   treecols.addEventListener("click", HandleTreeColumnClick.bind(null, SignonColumnSort));
@@ -42,16 +50,46 @@ function setFilter(aFilterString) {
 }
 
 var signonsTreeView = {
-  _filterSet : [],
-  _lastSelectedRanges : [],
+  // Keep track of which favicons we've fetched or started fetching.
+  // Maps a login origin to a favicon URL.
+  _faviconMap: new Map(),
+  _filterSet: [],
+  // Coalesce invalidations to avoid repeated flickering.
+  _invalidateTask: new DeferredTask(() => {
+    signonsTree.treeBoxObject.invalidateColumn(signonsTree.columns.siteCol);
+  }, 10),
+  _lastSelectedRanges: [],
   selection: null,
 
-  rowCount : 0,
-  setTree : function(tree) {},
-  getImageSrc : function(row,column) {},
-  getProgressMode : function(row,column) {},
-  getCellValue : function(row,column) {},
-  getCellText : function(row,column) {
+  rowCount: 0,
+  setTree(tree) {},
+  getImageSrc(row, column) {
+    if (column.element.getAttribute("id") !== "siteCol") {
+      return "";
+    }
+
+    const signon = this._filterSet.length ? this._filterSet[row] : signons[row];
+
+    // We already have the favicon URL or we started to fetch (value is null).
+    if (this._faviconMap.has(signon.hostname)) {
+      return this._faviconMap.get(signon.hostname);
+    }
+
+    // Record the fact that we already starting fetching a favicon for this
+    // origin in order to avoid multiple requests for the same origin.
+    this._faviconMap.set(signon.hostname, null);
+
+    PlacesUtils.promiseFaviconLinkUrl(signon.hostname)
+      .then(faviconURI => {
+        this._faviconMap.set(signon.hostname, faviconURI.spec);
+        this._invalidateTask.arm();
+      }).catch(Cu.reportError);
+
+    return "";
+  },
+  getProgressMode(row, column) {},
+  getCellValue(row, column) {},
+  getCellText(row, column) {
     var time;
     var signon = this._filterSet.length ? this._filterSet[row] : signons[row];
     switch (column.id) {
@@ -78,18 +116,48 @@ var signonsTreeView = {
         return "";
     }
   },
-  isSeparator : function(index) { return false; },
-  isSorted : function() { return false; },
-  isContainer : function(index) { return false; },
-  cycleHeader : function(column) {},
-  getRowProperties : function(row) { return ""; },
-  getColumnProperties : function(column) { return ""; },
-  getCellProperties : function(row,column) {
+  isEditable(row, col) {
+    if (col.id == "userCol" || col.id == "passwordCol") {
+      return true;
+    }
+    return false;
+  },
+  isSeparator(index) { return false; },
+  isSorted() { return false; },
+  isContainer(index) { return false; },
+  cycleHeader(column) {},
+  getRowProperties(row) { return ""; },
+  getColumnProperties(column) { return ""; },
+  getCellProperties(row, column) {
     if (column.element.getAttribute("id") == "siteCol")
       return "ltr";
 
     return "";
-  }
+  },
+  setCellText(row, col, value) {
+    // If there is a filter, _filterSet needs to be used, otherwise signons is used.
+    let table = signonsTreeView._filterSet.length ? signonsTreeView._filterSet : signons;
+    function _editLogin(field) {
+      if (value == table[row][field]) {
+        return;
+      }
+      let existingLogin = table[row].clone();
+      table[row][field] = value;
+      table[row].timePasswordChanged = Date.now();
+      passwordmanager.modifyLogin(existingLogin, table[row]);
+      signonsTree.treeBoxObject.invalidateRow(row);
+    }
+
+    if (col.id == "userCol") {
+     _editLogin("username");
+
+    } else if (col.id == "passwordCol") {
+      if (!value) {
+        return;
+      }
+      _editLogin("password");
+    }
+  },
 };
 
 
@@ -115,8 +183,8 @@ function LoadSignons() {
   var element = document.getElementById("removeAllSignons");
   var toggle = document.getElementById("togglePasswords");
   if (signons.length == 0) {
-    element.setAttribute("disabled","true");
-    toggle.setAttribute("disabled","true");
+    element.setAttribute("disabled", "true");
+    toggle.setAttribute("disabled", "true");
   } else {
     element.removeAttribute("disabled");
     toggle.removeAttribute("disabled");
@@ -129,6 +197,8 @@ function SignonSelected() {
   var selections = GetTreeSelections(signonsTree);
   if (selections.length) {
     document.getElementById("removeSignon").removeAttribute("disabled");
+  } else {
+    document.getElementById("removeSignon").setAttribute("disabled", true);
   }
 }
 
@@ -190,7 +260,7 @@ function AskUserShowPasswords() {
 }
 
 function FinalizeSignonDeletions(syncNeeded) {
-  for (var s=0; s<deletedSignons.length; s++) {
+  for (var s = 0; s < deletedSignons.length; s++) {
     passwordmanager.removeLogin(deletedSignons[s]);
     Services.telemetry.getHistogramById("PWMGR_MANAGE_DELETED").add(1);
   }
@@ -207,11 +277,14 @@ function FinalizeSignonDeletions(syncNeeded) {
 }
 
 function HandleSignonKeyPress(e) {
-  if (e.keyCode == KeyEvent.DOM_VK_DELETE
-#ifdef XP_MACOSX
-      || e.keyCode == KeyEvent.DOM_VK_BACK_SPACE
-#endif
-     ) {
+  // If editing is currently performed, don't do anything.
+  if (signonsTree.getAttribute("editing")) {
+    return;
+  }
+  if (e.keyCode == KeyEvent.DOM_VK_DELETE ||
+      (AppConstants.platform == "macosx" &&
+       e.keyCode == KeyEvent.DOM_VK_BACK_SPACE))
+  {
     DeleteSignon();
   }
 }
@@ -233,6 +306,7 @@ function getColumnByName(column) {
     case "timesUsed":
       return document.getElementById("timesUsedCol");
   }
+  return undefined;
 }
 
 var lastSignonSortColumn = "hostname";
@@ -280,7 +354,7 @@ function SignonClearFilter() {
   }
   signonsTreeView._lastSelectedRanges = [];
 
-  document.getElementById("signonsIntro").textContent = kSignonBundle.getString("loginsSpielAll");
+  document.getElementById("signonsIntro").textContent = kSignonBundle.getString("loginsDescriptionAll");
 }
 
 function FocusFilterBox() {
@@ -307,7 +381,7 @@ function SignonMatchesFilter(aSignon, aFilterValue) {
 
 function FilterPasswords(aFilterValue, view) {
   aFilterValue = aFilterValue.toLowerCase();
-  return signons.filter(function (s) SignonMatchesFilter(s, aFilterValue));
+  return signons.filter(s => SignonMatchesFilter(s, aFilterValue));
 }
 
 function SignonSaveState() {
@@ -322,8 +396,7 @@ function SignonSaveState() {
   }
 }
 
-function _filterPasswords()
-{
+function _filterPasswords() {
   var filter = document.getElementById("filter").value;
   if (filter == "") {
     SignonClearFilter();
@@ -350,7 +423,7 @@ function _filterPasswords()
   if (signonsTreeView.rowCount > 0)
     signonsTreeView.selection.select(0);
 
-  document.getElementById("signonsIntro").textContent = kSignonBundle.getString("loginsSpielFiltered");
+  document.getElementById("signonsIntro").textContent = kSignonBundle.getString("loginsDescriptionFiltered");
 }
 
 function CopyPassword() {
@@ -377,16 +450,44 @@ function CopyUsername() {
   Services.telemetry.getHistogramById("PWMGR_MANAGE_COPIED_USERNAME").add(1);
 }
 
-function UpdateCopyPassword() {
-  var singleSelection = (signonsTreeView.selection.count == 1);
-  var passwordMenuitem = document.getElementById("context-copypassword");
-  var usernameMenuitem = document.getElementById("context-copyusername");
-  if (singleSelection) {
-    usernameMenuitem.removeAttribute("disabled");
-    passwordMenuitem.removeAttribute("disabled");
+function EditCellInSelectedRow(columnName) {
+  let row = signonsTree.currentIndex;
+  let columnElement = getColumnByName(columnName);
+  signonsTree.startEditing(row, signonsTree.columns.getColumnFor(columnElement));
+}
+
+function UpdateContextMenu() {
+  let singleSelection = (signonsTreeView.selection.count == 1);
+  let menuItems = new Map();
+  let menupopup = document.getElementById("signonsTreeContextMenu");
+  for (let menuItem of menupopup.querySelectorAll("menuitem")) {
+    menuItems.set(menuItem.id, menuItem);
+  }
+
+  if (!singleSelection) {
+    for (let menuItem of menuItems.values()) {
+      menuItem.setAttribute("disabled", "true");
+    }
+    return;
+  }
+
+  let selectedRow = signonsTree.currentIndex;
+
+  // Disable "Copy Username" if the username is empty.
+  if (signonsTreeView.getCellText(selectedRow, { id: "userCol" }) != "") {
+    menuItems.get("context-copyusername").removeAttribute("disabled");
   } else {
-    usernameMenuitem.setAttribute("disabled", "true");
-    passwordMenuitem.setAttribute("disabled", "true");
+    menuItems.get("context-copyusername").setAttribute("disabled", "true");
+  }
+
+  menuItems.get("context-editusername").removeAttribute("disabled");
+  menuItems.get("context-copypassword").removeAttribute("disabled");
+
+  // Disable "Edit Password" if the password column isn't showing.
+  if (!document.getElementById("passwordCol").hidden) {
+    menuItems.get("context-editpassword").removeAttribute("disabled");
+  } else {
+    menuItems.get("context-editpassword").setAttribute("disabled", "true");
   }
 }
 
@@ -411,4 +512,18 @@ function masterPasswordLogin(noPasswordCallback) {
   }
 
   return token.isLoggedIn();
+}
+
+function escapeKeyHandler() {
+  // If editing is currently performed, don't do anything.
+  if (signonsTree.getAttribute("editing")) {
+    return;
+  }
+  window.close();
+}
+
+function OpenMigrator() {
+  const { MigrationUtils } = Cu.import("resource:///modules/MigrationUtils.jsm", {});
+  // We pass in the type of source we're using for use in telemetry:
+  MigrationUtils.showMigrationWizard(window, [MigrationUtils.MIGRATION_ENTRYPOINT_PASSWORDS]);
 }

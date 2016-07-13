@@ -27,8 +27,6 @@ public:
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
-  typedef nsContainerFrame Super;
-
   explicit ViewportFrame(nsStyleContext* aContext)
     : nsContainerFrame(aContext)
   {}
@@ -48,8 +46,6 @@ public:
   }
 
 #ifdef DEBUG
-  virtual void SetInitialChildList(ChildListID     aListID,
-                                   nsFrameList&    aChildList) override;
   virtual void AppendFrames(ChildListID     aListID,
                             nsFrameList&    aFrameList) override;
   virtual void InsertFrames(ChildListID     aListID,
@@ -62,6 +58,9 @@ public:
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
+
+  void BuildDisplayListForTopLayer(nsDisplayListBuilder* aBuilder,
+                                   nsDisplayList* aList);
 
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
@@ -77,7 +76,7 @@ public:
    */
   virtual nsIAtom* GetType() const override;
 
-  virtual bool UpdateOverflow() override;
+  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
 
   /**
    * Adjust aReflowState to account for scrollbars and pres shell

@@ -11,12 +11,13 @@
 
 #include "proxy/Proxy.h"
 #include "vm/ProxyObject.h"
+#include "vm/SelfHosting.h"
 
 using namespace js;
 
 bool
 JS::detail::CallMethodIfWrapped(JSContext* cx, IsAcceptableThis test, NativeImpl impl,
-                                CallArgs args)
+                                const CallArgs& args)
 {
     HandleValue thisv = args.thisv();
     MOZ_ASSERT(!test(thisv));
@@ -26,6 +27,9 @@ JS::detail::CallMethodIfWrapped(JSContext* cx, IsAcceptableThis test, NativeImpl
         if (thisObj.is<ProxyObject>())
             return Proxy::nativeCall(cx, test, impl, args);
     }
+
+    if (IsCallSelfHostedNonGenericMethod(impl))
+        return ReportIncompatibleSelfHostedMethod(cx, args);
 
     ReportIncompatible(cx, args);
     return false;

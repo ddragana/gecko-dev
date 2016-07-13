@@ -41,14 +41,14 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TextTrack, DOMEventTargetHelper)
 
-  TextTrack(nsPIDOMWindow* aOwnerWindow,
+  TextTrack(nsPIDOMWindowInner* aOwnerWindow,
             TextTrackKind aKind,
             const nsAString& aLabel,
             const nsAString& aLanguage,
             TextTrackMode aMode,
             TextTrackReadyState aReadyState,
             TextTrackSource aTextTrackSource);
-  TextTrack(nsPIDOMWindow* aOwnerWindow,
+  TextTrack(nsPIDOMWindowInner* aOwnerWindow,
             TextTrackList* aTextTrackList,
             TextTrackKind aKind,
             const nsAString& aLabel,
@@ -59,20 +59,14 @@ public:
 
   void SetDefaultSettings();
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   TextTrackKind Kind() const
   {
     return mKind;
   }
-  void GetLabel(nsAString& aLabel) const
-  {
-    aLabel = mLabel;
-  }
-  void GetLanguage(nsAString& aLanguage) const
-  {
-    aLanguage = mLanguage;
-  }
+  void GetLabel(nsAString& aLabel) const;
+  void GetLanguage(nsAString& aLanguage) const;
   void GetInBandMetadataTrackDispatchType(nsAString& aType) const
   {
     aType = mType;
@@ -95,7 +89,7 @@ public:
 
   TextTrackCueList* GetActiveCues();
   void UpdateActiveCueList();
-  void GetActiveCueArray(nsTArray<nsRefPtr<TextTrackCue> >& aCues);
+  void GetActiveCueArray(nsTArray<RefPtr<TextTrackCue> >& aCues);
 
   TextTrackReadyState ReadyState() const;
   void SetReadyState(TextTrackReadyState aState);
@@ -118,10 +112,14 @@ public:
     return mTextTrackSource;
   }
 
+  void SetCuesInactive();
+
+  void NotifyCueUpdated(TextTrackCue *aCue);
+
 private:
   ~TextTrack();
 
-  nsRefPtr<TextTrackList> mTextTrackList;
+  RefPtr<TextTrackList> mTextTrackList;
 
   TextTrackKind mKind;
   nsString mLabel;
@@ -129,9 +127,9 @@ private:
   nsString mType;
   TextTrackMode mMode;
 
-  nsRefPtr<TextTrackCueList> mCueList;
-  nsRefPtr<TextTrackCueList> mActiveCueList;
-  nsRefPtr<HTMLTrackElement> mTrackElement;
+  RefPtr<TextTrackCueList> mCueList;
+  RefPtr<TextTrackCueList> mActiveCueList;
+  RefPtr<HTMLTrackElement> mTrackElement;
 
   uint32_t mCuePos;
   TextTrackReadyState mReadyState;

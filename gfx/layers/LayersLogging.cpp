@@ -7,13 +7,13 @@
 
 #include "LayersLogging.h"
 #include <stdint.h>                     // for uint8_t
-#include "gfxColor.h"                   // for gfxRGBA
 #include "ImageTypes.h"                 // for ImageFormat
 #include "mozilla/gfx/Matrix.h"         // for Matrix4x4, Matrix
 #include "mozilla/gfx/Point.h"          // for IntSize
 #include "nsDebug.h"                    // for NS_ERROR
 #include "nsPoint.h"                    // for nsIntPoint
 #include "nsRect.h"                     // for mozilla::gfx::IntRect
+#include "base/basictypes.h"
 
 using namespace mozilla::gfx;
 
@@ -30,25 +30,6 @@ AppendToString(std::stringstream& aStream, const void* p,
 }
 
 void
-AppendToString(std::stringstream& aStream, const GraphicsFilter& f,
-               const char* pfx, const char* sfx)
-{
-  aStream << pfx;
-  switch (f) {
-  case GraphicsFilter::FILTER_FAST:      aStream << "fast"; break;
-  case GraphicsFilter::FILTER_GOOD:      aStream << "good"; break;
-  case GraphicsFilter::FILTER_BEST:      aStream << "best"; break;
-  case GraphicsFilter::FILTER_NEAREST:   aStream << "nearest"; break;
-  case GraphicsFilter::FILTER_BILINEAR:  aStream << "bilinear"; break;
-  case GraphicsFilter::FILTER_GAUSSIAN:  aStream << "gaussian"; break;
-  default:
-    NS_ERROR("unknown filter type");
-    aStream << "???";
-  }
-  aStream << sfx;
-}
-
-void
 AppendToString(std::stringstream& aStream, FrameMetrics::ViewID n,
                const char* pfx, const char* sfx)
 {
@@ -58,13 +39,13 @@ AppendToString(std::stringstream& aStream, FrameMetrics::ViewID n,
 }
 
 void
-AppendToString(std::stringstream& aStream, const gfxRGBA& c,
+AppendToString(std::stringstream& aStream, const Color& c,
                const char* pfx, const char* sfx)
 {
   aStream << pfx;
   aStream << nsPrintfCString(
-    "rgba(%d, %d, %d, %g)",
-    uint8_t(c.r*255.0), uint8_t(c.g*255.0), uint8_t(c.b*255.0), c.a).get();
+    "rgba(%d, %d, %d, %f)",
+    uint8_t(c.r*255.f), uint8_t(c.g*255.f), uint8_t(c.b*255.f), c.a).get();
   aStream << sfx;
 }
 
@@ -114,10 +95,9 @@ AppendToString(std::stringstream& aStream, const nsRegion& r,
 {
   aStream << pfx;
 
-  nsRegionRectIterator it(r);
   aStream << "< ";
-  while (const nsRect* sr = it.Next()) {
-    AppendToString(aStream, *sr);
+  for (auto iter = r.RectIter(); !iter.Done(); iter.Next()) {
+    AppendToString(aStream, iter.Get());
     aStream << "; ";
   }
   aStream << ">";
@@ -131,10 +111,9 @@ AppendToString(std::stringstream& aStream, const nsIntRegion& r,
 {
   aStream << pfx;
 
-  nsIntRegionRectIterator it(r);
   aStream << "< ";
-  while (const IntRect* sr = it.Next()) {
-    AppendToString(aStream, *sr);
+  for (auto iter = r.RectIter(); !iter.Done(); iter.Next()) {
+    AppendToString(aStream, iter.Get());
     aStream << "; ";
   }
   aStream << ">";
@@ -166,6 +145,22 @@ AppendToString(std::stringstream& aStream, const EventRegions& e,
 }
 
 void
+AppendToString(std::stringstream& aStream, const ScrollMetadata& m,
+               const char* pfx, const char* sfx)
+{
+  aStream << pfx;
+  AppendToString(aStream, m.GetMetrics(), "{ [metrics=");
+  AppendToString(aStream, m.GetBackgroundColor(), "] [color=");
+  if (m.GetScrollParentId() != FrameMetrics::NULL_SCROLL_ID) {
+    AppendToString(aStream, m.GetScrollParentId(), "] [scrollParent=");
+  }
+  if (m.HasScrollClip()) {
+    AppendToString(aStream, m.ScrollClip().GetClipRect(), "] [clip=");
+  }
+  aStream << "] }" << sfx;
+}
+
+void
 AppendToString(std::stringstream& aStream, const FrameMetrics& m,
                const char* pfx, const char* sfx, bool detailed)
 {
@@ -178,17 +173,10 @@ AppendToString(std::stringstream& aStream, const FrameMetrics& m,
   }
   AppendToString(aStream, m.GetDisplayPort(), "] [dp=");
   AppendToString(aStream, m.GetCriticalDisplayPort(), "] [cdp=");
-  AppendToString(aStream, m.GetBackgroundColor(), "] [color=");
   if (!detailed) {
     AppendToString(aStream, m.GetScrollId(), "] [scrollId=");
-    if (m.GetScrollParentId() != FrameMetrics::NULL_SCROLL_ID) {
-      AppendToString(aStream, m.GetScrollParentId(), "] [scrollParent=");
-    }
     if (m.IsRootContent()) {
       aStream << "] [rcd";
-    }
-    if (m.HasClipRect()) {
-      AppendToString(aStream, m.ClipRect(), "] [clip=");
     }
     AppendToString(aStream, m.GetZoom(), "] [z=", "] }");
   } else {
@@ -203,9 +191,8 @@ AppendToString(std::stringstream& aStream, const FrameMetrics& m,
     AppendToString(aStream, m.GetZoom(), " z=");
     AppendToString(aStream, m.GetExtraResolution(), " er=");
     aStream << nsPrintfCString(")] [u=(%d %d %lu)",
-            m.GetScrollOffsetUpdated(), m.GetDoSmoothScroll(),
+            m.GetScrollUpdateType(), m.GetDoSmoothScroll(),
             m.GetScrollGeneration()).get();
-    AppendToString(aStream, m.GetScrollParentId(), "] [p=");
     aStream << nsPrintfCString("] [i=(%ld %lld %d)] }",
             m.GetPresShellId(), m.GetScrollId(), m.IsRootContent()).get();
   }
@@ -246,26 +233,6 @@ AppendToString(std::stringstream& aStream, const Matrix& m,
 }
 
 void
-AppendToString(std::stringstream& aStream, const Matrix4x4& m,
-               const char* pfx, const char* sfx)
-{
-  if (m.Is2D()) {
-    Matrix matrix = m.As2D();
-    AppendToString(aStream, matrix, pfx, sfx);
-    return;
-  }
-
-  aStream << pfx;
-  aStream << nsPrintfCString(
-    "[ %g %g %g %g; %g %g %g %g; %g %g %g %g; %g %g %g %g; ]",
-    m._11, m._12, m._13, m._14,
-    m._21, m._22, m._23, m._24,
-    m._31, m._32, m._33, m._34,
-    m._41, m._42, m._43, m._44).get();
-  aStream << sfx;
-}
-
-void
 AppendToString(std::stringstream& aStream, const Matrix5x4& m,
                const char* pfx, const char* sfx)
 {
@@ -280,17 +247,19 @@ AppendToString(std::stringstream& aStream, const Matrix5x4& m,
   aStream << sfx;
 }
 
-
 void
-AppendToString(std::stringstream& aStream, const Filter filter,
+AppendToString(std::stringstream& aStream, const SamplingFilter filter,
                const char* pfx, const char* sfx)
 {
   aStream << pfx;
 
   switch (filter) {
-    case Filter::GOOD: aStream << "Filter::GOOD"; break;
-    case Filter::LINEAR: aStream << "Filter::LINEAR"; break;
-    case Filter::POINT: aStream << "Filter::POINT"; break;
+    case SamplingFilter::GOOD: aStream << "SamplingFilter::GOOD"; break;
+    case SamplingFilter::LINEAR: aStream << "SamplingFilter::LINEAR"; break;
+    case SamplingFilter::POINT: aStream << "SamplingFilter::POINT"; break;
+    default:
+      NS_ERROR("unknown SamplingFilter type");
+      aStream << "???";
   }
   aStream << sfx;
 }
@@ -334,9 +303,12 @@ AppendToString(std::stringstream& aStream, mozilla::gfx::SurfaceFormat format,
   case SurfaceFormat::B8G8R8X8:  aStream << "SurfaceFormat::B8G8R8X8"; break;
   case SurfaceFormat::R8G8B8A8:  aStream << "SurfaceFormat::R8G8B8A8"; break;
   case SurfaceFormat::R8G8B8X8:  aStream << "SurfaceFormat::R8G8B8X8"; break;
-  case SurfaceFormat::R5G6B5:    aStream << "SurfaceFormat::R5G6B5"; break;
+  case SurfaceFormat::R5G6B5_UINT16:
+                                 aStream << "SurfaceFormat::R5G6B5_UINT16"; break;
   case SurfaceFormat::A8:        aStream << "SurfaceFormat::A8"; break;
   case SurfaceFormat::YUV:       aStream << "SurfaceFormat::YUV"; break;
+  case SurfaceFormat::NV12:      aStream << "SurfaceFormat::NV12"; break;
+  case SurfaceFormat::YUV422:    aStream << "SurfaceFormat::YUV422"; break;
   case SurfaceFormat::UNKNOWN:   aStream << "SurfaceFormat::UNKNOWN"; break;
   default:
     NS_ERROR("unknown surface format");

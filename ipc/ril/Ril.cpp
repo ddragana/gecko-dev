@@ -38,7 +38,7 @@ class RilConsumer;
 
 static const char RIL_SOCKET_NAME[] = "/dev/socket/rilproxy";
 
-static nsTArray<nsAutoPtr<RilConsumer>> sRilConsumers;
+static nsTArray<UniquePtr<RilConsumer>> sRilConsumers;
 
 //
 // RilConsumer
@@ -60,7 +60,7 @@ public:
 
   void ReceiveSocketData(JSContext* aCx,
                          int aIndex,
-                         nsAutoPtr<UnixSocketBuffer>& aBuffer) override;
+                         UniquePtr<UnixSocketBuffer>& aBuffer) override;
   void OnConnectSuccess(int aIndex) override;
   void OnConnectError(int aIndex) override;
   void OnDisconnect(int aIndex) override;
@@ -75,7 +75,7 @@ protected:
   void Close();
 
 private:
-  nsRefPtr<RilSocket> mSocket;
+  RefPtr<RilSocket> mSocket;
   nsCString mAddress;
   bool mShutdown;
 };
@@ -89,14 +89,14 @@ RilConsumer::ConnectWorkerToRIL(JSContext* aCx)
 {
   // Set up the postRILMessage on the function for worker -> RIL thread
   // communication.
-  NS_ASSERTION(!JS_IsRunning(aCx), "Are we being called somehow?");
   Rooted<JSObject*> workerGlobal(aCx, CurrentGlobalOrNull(aCx));
 
   // Check whether |postRILMessage| has been defined.  No one but this class
   // should ever define |postRILMessage| in a RIL worker.
   Rooted<Value> val(aCx);
   if (!JS_GetProperty(aCx, workerGlobal, "postRILMessage", &val)) {
-    JS_ReportPendingException(aCx);
+    // Just returning failure here will cause the exception on the JSContext to
+    // be reported as needed.
     return NS_ERROR_FAILURE;
   }
 
@@ -109,6 +109,8 @@ RilConsumer::ConnectWorkerToRIL(JSContext* aCx)
                                                  "postRILMessage",
                                                  PostRILMessage, 2, 0);
   if (NS_WARN_IF(!postRILMessage)) {
+    // Just returning failure here will cause the exception on the JSContext to
+    // be reported as needed.
     return NS_ERROR_FAILURE;
   }
   return NS_OK;
@@ -180,7 +182,7 @@ RilConsumer::Send(JSContext* aCx, const CallArgs& aArgs)
     return NS_OK;
   }
 
-  nsAutoPtr<UnixSocketRawData> raw;
+  UniquePtr<UnixSocketRawData> raw;
 
   Value v = aArgs[1];
 
@@ -191,7 +193,7 @@ RilConsumer::Send(JSContext* aCx, const CallArgs& aArgs)
       return NS_ERROR_FAILURE;
     }
 
-    raw = new UnixSocketRawData(abs.ptr(), abs.length());
+    raw = MakeUnique<UnixSocketRawData>(abs.ptr(), abs.length());
   } else if (!v.isPrimitive()) {
     JSObject* obj = v.toObjectOrNull();
     if (!JS_IsTypedArrayObject(obj)) {
@@ -207,10 +209,19 @@ RilConsumer::Send(JSContext* aCx, const CallArgs& aArgs)
       return NS_ERROR_FAILURE;
     }
 
-    AutoCheckCannotGC nogc;
     size_t size = JS_GetTypedArrayByteLength(obj);
-    void* data = JS_GetArrayBufferViewData(obj, nogc);
-    raw = new UnixSocketRawData(data, size);
+    bool isShared;
+    void* data;
+    {
+      AutoCheckCannotGC nogc;
+      data = JS_GetArrayBufferViewData(obj, &isShared, nogc);
+    }
+    if (isShared) {
+      JS_ReportError(
+        aCx, "Incorrect argument.  Shared memory not supported");
+      return NS_ERROR_FAILURE;
+    }
+    raw = MakeUnique<UnixSocketRawData>(data, size);
   } else {
     JS_ReportError(
       aCx, "Incorrect argument. Expecting a string or a typed array");
@@ -222,7 +233,7 @@ RilConsumer::Send(JSContext* aCx, const CallArgs& aArgs)
     return NS_ERROR_FAILURE;
   }
 
-  mSocket->SendSocketData(raw.forget());
+  mSocket->SendSocketData(raw.release());
 
   return NS_OK;
 }
@@ -238,12 +249,17 @@ RilConsumer::Receive(JSContext* aCx,
 
   Rooted<JSObject*> array(aCx, JS_NewUint8Array(aCx, aBuffer->GetSize()));
   if (NS_WARN_IF(!array)) {
+    // Just suppress the exception, since our callers don't have a way to
+    // indicate they failed.
+    JS_ClearPendingException(aCx);
     return NS_ERROR_FAILURE;
   }
   {
     AutoCheckCannotGC nogc;
-    memcpy(JS_GetArrayBufferViewData(array, nogc),
+    bool isShared;
+    memcpy(JS_GetArrayBufferViewData(array, &isShared, nogc),
            aBuffer->GetData(), aBuffer->GetSize());
+    MOZ_ASSERT(!isShared);      // Array was constructed above.
   }
 
   AutoValueArray<2> args(aCx);
@@ -252,6 +268,9 @@ RilConsumer::Receive(JSContext* aCx,
 
   Rooted<Value> rval(aCx);
   JS_CallFunctionName(aCx, obj, "onRILMessage", args, &rval);
+  // Just suppress the exception, since our callers don't have a way to
+  // indicate they failed.
+  JS_ClearPendingException(aCx);
 
   return NS_OK;
 }
@@ -270,9 +289,9 @@ RilConsumer::Close()
 void
 RilConsumer::ReceiveSocketData(JSContext* aCx,
                                int aIndex,
-                               nsAutoPtr<UnixSocketBuffer>& aBuffer)
+                               UniquePtr<UnixSocketBuffer>& aBuffer)
 {
-  Receive(aCx, (uint32_t)aIndex, aBuffer);
+  Receive(aCx, (uint32_t)aIndex, aBuffer.get());
 }
 
 void
@@ -304,7 +323,7 @@ RilConsumer::OnDisconnect(int aIndex)
 // RilWorker
 //
 
-nsTArray<nsAutoPtr<RilWorker>> RilWorker::sRilWorkers;
+nsTArray<UniquePtr<RilWorker>> RilWorker::sRilWorkers;
 
 nsresult
 RilWorker::Register(unsigned int aClientId,
@@ -320,7 +339,7 @@ RilWorker::Register(unsigned int aClientId,
   }
 
   // Now that we're set up, connect ourselves to the RIL thread.
-  sRilWorkers[aClientId] = new RilWorker(aDispatcher);
+  sRilWorkers[aClientId] = MakeUnique<RilWorker>(aDispatcher);
 
   nsresult rv = sRilWorkers[aClientId]->RegisterConsumer(aClientId);
   if (NS_FAILED(rv)) {
@@ -367,7 +386,7 @@ public:
 
     MOZ_ASSERT(!sRilConsumers[mClientId]);
 
-    nsAutoPtr<RilConsumer> rilConsumer(new RilConsumer());
+    auto rilConsumer = MakeUnique<RilConsumer>();
 
     nsresult rv = rilConsumer->ConnectWorkerToRIL(aCx);
     if (NS_FAILED(rv)) {
@@ -378,20 +397,20 @@ public:
     if (NS_FAILED(rv)) {
       return false;
     }
-    sRilConsumers[mClientId] = rilConsumer;
+    sRilConsumers[mClientId] = Move(rilConsumer);
 
     return true;
   }
 
 private:
   unsigned int mClientId;
-  nsRefPtr<WorkerCrossThreadDispatcher> mDispatcher;
+  RefPtr<WorkerCrossThreadDispatcher> mDispatcher;
 };
 
 nsresult
 RilWorker::RegisterConsumer(unsigned int aClientId)
 {
-  nsRefPtr<RegisterConsumerTask> task = new RegisterConsumerTask(aClientId,
+  RefPtr<RegisterConsumerTask> task = new RegisterConsumerTask(aClientId,
                                                                  mDispatcher);
   if (!mDispatcher->PostTask(task)) {
     NS_WARNING("Failed to post register-consumer task.");
@@ -426,7 +445,7 @@ private:
 void
 RilWorker::UnregisterConsumer(unsigned int aClientId)
 {
-  nsRefPtr<UnregisterConsumerTask> task =
+  RefPtr<UnregisterConsumerTask> task =
     new UnregisterConsumerTask(aClientId);
 
   if (!mDispatcher->PostTask(task)) {

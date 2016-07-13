@@ -8,7 +8,6 @@
 #define TraceLogging_h
 
 #include "mozilla/GuardObjects.h"
-#include "mozilla/UniquePtr.h"
 
 #include "jsalloc.h"
 #include "jslock.h"
@@ -16,6 +15,7 @@
 #include "js/HashTable.h"
 #include "js/TypeDecls.h"
 #include "js/Vector.h"
+#include "threading/Mutex.h"
 #include "vm/TraceLoggingGraph.h"
 #include "vm/TraceLoggingTypes.h"
 
@@ -35,7 +35,7 @@ namespace jit {
 /*
  * Tracelogging overview.
  *
- * Tracelogging makes it possible to trace the occurence of a single event and/or
+ * Tracelogging makes it possible to trace the occurrence of a single event and/or
  * the start and stop of an event. This is implemented to give an as low overhead as
  * possible so it doesn't interfere with running.
  *
@@ -47,17 +47,17 @@ namespace jit {
  *
  * 2) Optionally create a TraceLoggerEvent for the text that needs to get logged. This
  *    step takes some time, so try to do this beforehand, outside the hot
- *    path and don't do unnecessary repetitions, since it will criple
+ *    path and don't do unnecessary repetitions, since it will cripple
  *    performance.
  *     - TraceLoggerEvent event(logger, "foo");
  *
  *    There are also some predefined events. They are located in
  *    TraceLoggerTextId. They don't require to create an TraceLoggerEvent and
  *    can also be used as an argument to these functions.
- * 3) Log the occurence of a single event:
+ * 3) Log the occurrence of a single event:
  *    - TraceLogTimestamp(logger, TraceLoggerTextId);
  *      Note: it is temporarily not supported to provide an TraceLoggerEvent as
- *            argument to log the occurence of a single event.
+ *            argument to log the occurrence of a single event.
  *
  *    or log the start and stop of an event:
  *    - TraceLogStartEvent(logger, TraceLoggerTextId);
@@ -93,6 +93,8 @@ class TraceLoggerEvent {
     TraceLoggerEvent(TraceLoggerThread* logger, TraceLoggerTextId type,
                      const JS::ReadOnlyCompileOptions& compileOptions);
     TraceLoggerEvent(TraceLoggerThread* logger, const char* text);
+    TraceLoggerEvent(const TraceLoggerEvent& event);
+    TraceLoggerEvent& operator=(const TraceLoggerEvent& other);
     ~TraceLoggerEvent();
 #else
     TraceLoggerEvent (TraceLoggerThread* logger, TraceLoggerTextId textId) {}
@@ -100,6 +102,8 @@ class TraceLoggerEvent {
     TraceLoggerEvent (TraceLoggerThread* logger, TraceLoggerTextId type,
                       const JS::ReadOnlyCompileOptions& compileOptions) {}
     TraceLoggerEvent (TraceLoggerThread* logger, const char* text) {}
+    TraceLoggerEvent(const TraceLoggerEvent& event) {}
+    TraceLoggerEvent& operator=(const TraceLoggerEvent& other) {};
     ~TraceLoggerEvent() {}
 #endif
 
@@ -120,7 +124,7 @@ class TraceLoggerEvent {
  */
 class TraceLoggerEventPayload {
     uint32_t textId_;
-    mozilla::UniquePtr<char, JS::FreePolicy> string_;
+    UniqueChars string_;
     uint32_t uses_;
 
   public:
@@ -129,6 +133,10 @@ class TraceLoggerEventPayload {
         string_(string),
         uses_(0)
     { }
+
+    ~TraceLoggerEventPayload() {
+        MOZ_ASSERT(uses_ == 0);
+    }
 
     uint32_t textId() {
         return textId_;
@@ -163,10 +171,11 @@ class TraceLoggerThread
     uint32_t enabled;
     bool failed;
 
-    mozilla::UniquePtr<TraceLoggerGraph> graph;
+    UniquePtr<TraceLoggerGraph> graph;
 
     PointerHashMap pointerMap;
-    TextIdHashMap extraTextId;
+    TextIdHashMap textIdPayloads;
+    uint32_t nextTextId;
 
     ContinuousSpace<EventEntry> events;
 
@@ -181,6 +190,7 @@ class TraceLoggerThread
       : enabled(0),
         failed(false),
         graph(),
+        nextTextId(TraceLogger_Last),
         iteration_(0),
         top(nullptr)
     { }
@@ -199,22 +209,22 @@ class TraceLoggerThread
     bool fail(JSContext* cx, const char* error);
 
   public:
-    // Given the previous iteration and lastEntryId, return an array of events
+    // Given the previous iteration and size, return an array of events
     // (there could be lost events). At the same time update the iteration and
-    // lastEntry and gives back how many events there are.
-    EventEntry* getEventsStartingAt(uint32_t* lastIteration, uint32_t* lastEntryId, size_t* num) {
+    // size and gives back how many events there are.
+    EventEntry* getEventsStartingAt(uint32_t* lastIteration, uint32_t* lastSize, size_t* num) {
         EventEntry* start;
         if (iteration_ == *lastIteration) {
-            MOZ_ASSERT(events.lastEntryId() >= *lastEntryId);
-            *num = events.lastEntryId() - *lastEntryId;
-            start = events.data() + *lastEntryId + 1;
+            MOZ_ASSERT(*lastSize <= events.size());
+            *num = events.size() - *lastSize;
+            start = events.data() + *lastSize;
         } else {
-            *num = events.lastEntryId() + 1;
+            *num = events.size();
             start = events.data();
         }
 
         *lastIteration = iteration_;
-        *lastEntryId = events.lastEntryId();
+        *lastSize = events.size();
         return start;
     }
 
@@ -224,16 +234,16 @@ class TraceLoggerThread
                               const char** lineno, size_t* lineno_len, const char** colno,
                               size_t* colno_len);
 
-    bool lostEvents(uint32_t lastIteration, uint32_t lastEntryId) {
+    bool lostEvents(uint32_t lastIteration, uint32_t lastSize) {
         // If still logging in the same iteration, there are no lost events.
         if (lastIteration == iteration_) {
-            MOZ_ASSERT(lastEntryId <= events.lastEntryId());
+            MOZ_ASSERT(lastSize <= events.size());
             return false;
         }
 
-        // When proceeded to the next iteration and lastEntryId points to
-        // the maximum capacity there are no logs that are lost.
-        if (lastIteration + 1 == iteration_ && lastEntryId == events.capacity())
+        // If we are in a consecutive iteration we are only sure we didn't lose any events,
+        // when the lastSize equals the maximum size 'events' can get.
+        if (lastIteration == iteration_ - 1 && lastSize == events.maxSize())
             return false;
 
         return true;
@@ -272,6 +282,7 @@ class TraceLoggerThread
     void stopEvent(uint32_t id);
   private:
     void stopEvent();
+    void log(uint32_t id);
 
   public:
     static unsigned offsetOfEnabled() {
@@ -302,7 +313,7 @@ class TraceLoggerThreadState
 
   public:
     uint64_t startupTime;
-    PRLock* lock;
+    Mutex lock;
 
     TraceLoggerThreadState()
       :
@@ -311,8 +322,7 @@ class TraceLoggerThreadState
 #endif
         mainThreadEnabled(false),
         offThreadEnabled(false),
-        graphSpewingEnabled(false),
-        lock(nullptr)
+        graphSpewingEnabled(false)
     { }
 
     bool init();
@@ -439,7 +449,7 @@ inline void TraceLogStopEventPrivate(TraceLoggerThread* logger, uint32_t id) {
 }
 
 // Automatic logging at the start and end of function call.
-class AutoTraceLog
+class MOZ_RAII AutoTraceLog
 {
 #ifdef JS_TRACE_LOGGING
     TraceLoggerThread* logger;

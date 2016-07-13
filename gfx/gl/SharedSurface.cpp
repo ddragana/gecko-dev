@@ -78,7 +78,7 @@ SharedSurface::ProdCopy(SharedSurface* src, SharedSurface* dest,
                                                            dest->mSize,
                                                            true);
         } else {
-            MOZ_CRASH("Unhandled dest->mAttachType.");
+            MOZ_CRASH("GFX: Unhandled dest->mAttachType 1.");
         }
 
         if (srcNeedsUnlock)
@@ -123,7 +123,7 @@ SharedSurface::ProdCopy(SharedSurface* src, SharedSurface* dest,
                                                            dest->mSize,
                                                            true);
         } else {
-            MOZ_CRASH("Unhandled src->mAttachType.");
+            MOZ_CRASH("GFX: Unhandled src->mAttachType 2.");
         }
 
         if (destNeedsUnlock)
@@ -163,7 +163,7 @@ SharedSurface::ProdCopy(SharedSurface* src, SharedSurface* dest,
             return;
         }
 
-        MOZ_CRASH("Unhandled dest->mAttachType.");
+        MOZ_CRASH("GFX: Unhandled dest->mAttachType 3.");
     }
 
     if (src->mAttachType == AttachmentType::GLRenderbuffer) {
@@ -190,10 +190,10 @@ SharedSurface::ProdCopy(SharedSurface* src, SharedSurface* dest,
             return;
         }
 
-        MOZ_CRASH("Unhandled dest->mAttachType.");
+        MOZ_CRASH("GFX: Unhandled dest->mAttachType 4.");
     }
 
-    MOZ_CRASH("Unhandled src->mAttachType.");
+    MOZ_CRASH("GFX: Unhandled src->mAttachType 5.");
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -220,6 +220,12 @@ SharedSurface::SharedSurface(SharedSurfaceType type,
 #endif
 { }
 
+layers::TextureFlags
+SharedSurface::GetTextureFlags() const
+{
+    return layers::TextureFlags::NO_FLAGS;
+}
+
 void
 SharedSurface::LockProd()
 {
@@ -241,27 +247,6 @@ SharedSurface::UnlockProd()
 
     mGL->UnlockSurface(this);
     mIsLocked = false;
-}
-
-void
-SharedSurface::Fence_ContentThread()
-{
-    MOZ_ASSERT(NS_GetCurrentThread() == mOwningThread);
-    Fence_ContentThread_Impl();
-}
-
-bool
-SharedSurface::WaitSync_ContentThread()
-{
-    MOZ_ASSERT(NS_GetCurrentThread() == mOwningThread);
-    return WaitSync_ContentThread_Impl();
-}
-
-bool
-SharedSurface::PollSync_ContentThread()
-{
-    MOZ_ASSERT(NS_GetCurrentThread() == mOwningThread);
-    return PollSync_ContentThread_Impl();
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -303,7 +288,7 @@ ChooseBufferBits(const SurfaceCaps& caps,
 
 SurfaceFactory::SurfaceFactory(SharedSurfaceType type, GLContext* gl,
                                const SurfaceCaps& caps,
-                               const RefPtr<layers::ISurfaceAllocator>& allocator,
+                               const RefPtr<layers::ClientIPCAllocator>& allocator,
                                const layers::TextureFlags& flags)
     : mType(type)
     , mGL(gl)
@@ -311,6 +296,7 @@ SurfaceFactory::SurfaceFactory(SharedSurfaceType type, GLContext* gl,
     , mAllocator(allocator)
     , mFlags(flags)
     , mFormats(gl->ChooseGLFormats(caps))
+    , mMutex("SurfaceFactor::mMutex")
 {
     ChooseBufferBits(mCaps, &mDrawCaps, &mReadCaps);
 }
@@ -318,10 +304,12 @@ SurfaceFactory::SurfaceFactory(SharedSurfaceType type, GLContext* gl,
 SurfaceFactory::~SurfaceFactory()
 {
     while (!mRecycleTotalPool.empty()) {
-        StopRecycling(*mRecycleTotalPool.begin());
+        RefPtr<layers::SharedSurfaceTextureClient> tex = *mRecycleTotalPool.begin();
+        StopRecycling(tex);
+        tex->CancelWaitForRecycle();
     }
 
-    MOZ_RELEASE_ASSERT(mRecycleTotalPool.empty());
+    MOZ_RELEASE_ASSERT(mRecycleTotalPool.empty(),"GFX: Surface recycle pool not empty.");
 
     // If we mRecycleFreePool.clear() before StopRecycling(), we may try to recycle it,
     // fail, call StopRecycling(), then return here and call it again.
@@ -336,6 +324,7 @@ SurfaceFactory::NewTexClient(const gfx::IntSize& size)
         mRecycleFreePool.pop();
 
         if (cur->Surf()->mSize == size) {
+            cur->Surf()->WaitForBufferOwnership();
             return cur.forget();
         }
 
@@ -347,7 +336,7 @@ SurfaceFactory::NewTexClient(const gfx::IntSize& size)
         return nullptr;
 
     RefPtr<layers::SharedSurfaceTextureClient> ret;
-    ret = new layers::SharedSurfaceTextureClient(mAllocator, mFlags, Move(surf), this);
+    ret = layers::SharedSurfaceTextureClient::Create(Move(surf), this, mAllocator, mFlags);
 
     StartRecycling(ret);
 
@@ -360,32 +349,30 @@ SurfaceFactory::StartRecycling(layers::SharedSurfaceTextureClient* tc)
     tc->SetRecycleCallback(&SurfaceFactory::RecycleCallback, static_cast<void*>(this));
 
     bool didInsert = mRecycleTotalPool.insert(tc);
-    MOZ_RELEASE_ASSERT(didInsert);
-    mozilla::unused << didInsert;
+    MOZ_RELEASE_ASSERT(didInsert, "GFX: Shared surface texture client was not inserted to recycle.");
+    mozilla::Unused << didInsert;
 }
 
 void
 SurfaceFactory::StopRecycling(layers::SharedSurfaceTextureClient* tc)
 {
+    MutexAutoLock autoLock(mMutex);
     // Must clear before releasing ref.
     tc->ClearRecycleCallback();
 
     bool didErase = mRecycleTotalPool.erase(tc);
-    MOZ_RELEASE_ASSERT(didErase);
-    mozilla::unused << didErase;
+    MOZ_RELEASE_ASSERT(didErase, "GFX: Shared texture surface client was not erased.");
+    mozilla::Unused << didErase;
 }
 
 /*static*/ void
 SurfaceFactory::RecycleCallback(layers::TextureClient* rawTC, void* rawFactory)
 {
-    MOZ_ASSERT(NS_IsMainThread());
-
     RefPtr<layers::SharedSurfaceTextureClient> tc;
     tc = static_cast<layers::SharedSurfaceTextureClient*>(rawTC);
-
     SurfaceFactory* factory = static_cast<SurfaceFactory*>(rawFactory);
 
-    if (tc->mSurf->mCanRecycle) {
+    if (tc->Surf()->mCanRecycle) {
         if (factory->Recycle(tc))
             return;
     }
@@ -398,6 +385,7 @@ bool
 SurfaceFactory::Recycle(layers::SharedSurfaceTextureClient* texClient)
 {
     MOZ_ASSERT(texClient);
+    MutexAutoLock autoLock(mMutex);
 
     if (mRecycleFreePool.size() >= 2) {
         return false;
@@ -463,7 +451,7 @@ ScopedReadbackFB::ScopedReadbackFB(SharedSurface* src)
             break;
         }
     default:
-        MOZ_CRASH("Unhandled `mAttachType`.");
+        MOZ_CRASH("GFX: Unhandled `mAttachType`.");
     }
 
     if (src->NeedsIndirectReads()) {

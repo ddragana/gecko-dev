@@ -78,11 +78,11 @@ gfxGDIFont::CopyWithAntialiasOption(AntialiasOption anAAOption)
 }
 
 bool
-gfxGDIFont::ShapeText(gfxContext     *aContext,
+gfxGDIFont::ShapeText(DrawTarget     *aDrawTarget,
                       const char16_t *aText,
                       uint32_t        aOffset,
                       uint32_t        aLength,
-                      int32_t         aScript,
+                      Script          aScript,
                       bool            aVertical,
                       gfxShapedText  *aShapedText)
 {
@@ -98,11 +98,11 @@ gfxGDIFont::ShapeText(gfxContext     *aContext,
     // creating a "toy" font internally (see bug 544617).
     // We must check that this succeeded, otherwise we risk cairo creating the
     // wrong kind of font internally as a fallback (bug 744480).
-    if (!SetupCairoFont(aContext)) {
+    if (!SetupCairoFont(aDrawTarget)) {
         return false;
     }
 
-    return gfxFont::ShapeText(aContext, aText, aOffset, aLength, aScript,
+    return gfxFont::ShapeText(aDrawTarget, aText, aOffset, aLength, aScript,
                               aVertical, aShapedText);
 }
 
@@ -125,7 +125,7 @@ gfxGDIFont::GetSpaceGlyph()
 }
 
 bool
-gfxGDIFont::SetupCairoFont(gfxContext *aContext)
+gfxGDIFont::SetupCairoFont(DrawTarget* aDrawTarget)
 {
     if (!mMetrics) {
         Initialize();
@@ -136,22 +136,21 @@ gfxGDIFont::SetupCairoFont(gfxContext *aContext)
         // the cairo_t, precluding any further drawing.
         return false;
     }
-    cairo_set_scaled_font(aContext->GetCairo(), mScaledFont);
+    cairo_set_scaled_font(gfxFont::RefCairo(aDrawTarget), mScaledFont);
     return true;
 }
 
 gfxFont::RunMetrics
-gfxGDIFont::Measure(gfxTextRun *aTextRun,
+gfxGDIFont::Measure(const gfxTextRun *aTextRun,
                     uint32_t aStart, uint32_t aEnd,
                     BoundingBoxType aBoundingBoxType,
-                    gfxContext *aRefContext,
+                    DrawTarget *aRefDrawTarget,
                     Spacing *aSpacing,
                     uint16_t aOrientation)
 {
     gfxFont::RunMetrics metrics =
-        gfxFont::Measure(aTextRun, aStart, aEnd,
-                         aBoundingBoxType, aRefContext, aSpacing,
-                         aOrientation);
+        gfxFont::Measure(aTextRun, aStart, aEnd, aBoundingBoxType,
+                         aRefDrawTarget, aSpacing, aOrientation);
 
     // if aBoundingBoxType is LOOSE_INK_EXTENTS
     // and the underlying cairo font may be antialiased,
@@ -177,9 +176,8 @@ gfxGDIFont::Initialize()
 
     // Figure out if we want to do synthetic oblique styling.
     GDIFontEntry* fe = static_cast<GDIFontEntry*>(GetFontEntry());
-    bool wantFakeItalic =
-        (mStyle.style & (NS_FONT_STYLE_ITALIC | NS_FONT_STYLE_OBLIQUE)) &&
-        !fe->IsItalic() && mStyle.allowSyntheticStyle;
+    bool wantFakeItalic = mStyle.style != NS_FONT_STYLE_NORMAL &&
+                          fe->IsUpright() && mStyle.allowSyntheticStyle;
 
     // If the font's family has an actual italic face (but font matching
     // didn't choose it), we have to use a cairo transform instead of asking
@@ -361,6 +359,8 @@ gfxGDIFont::Initialize()
         }
 
         SanitizeMetrics(mMetrics, GetFontEntry()->mIsBadUnderlineFont);
+    } else {
+        mFUnitsConvFactor = 0.0; // zero-sized font: all values scale to zero
     }
 
     if (IsSyntheticBold()) {
@@ -469,7 +469,7 @@ gfxGDIFont::GetGlyph(uint32_t aUnicode, uint32_t aVarSelector)
     }
 
     if (!mGlyphIDs) {
-        mGlyphIDs = new nsDataHashtable<nsUint32HashKey,uint32_t>(64);
+        mGlyphIDs = MakeUnique<nsDataHashtable<nsUint32HashKey,uint32_t>>(64);
     }
 
     uint32_t gid;
@@ -480,13 +480,22 @@ gfxGDIFont::GetGlyph(uint32_t aUnicode, uint32_t aVarSelector)
     wchar_t ch = aUnicode;
     WORD glyph;
     DWORD ret = ScriptGetCMap(nullptr, &mScriptCache, &ch, 1, 0, &glyph);
-    if (ret == E_PENDING) {
+    if (ret != S_OK) {
         AutoDC dc;
         AutoSelectFont fs(dc.GetDC(), GetHFONT());
-        ret = ScriptGetCMap(dc.GetDC(), &mScriptCache, &ch, 1, 0, &glyph);
-    }
-    if (ret != S_OK) {
-        glyph = 0;
+        if (ret == E_PENDING) {
+            // Try ScriptGetCMap again now that we've set up the font.
+            ret = ScriptGetCMap(dc.GetDC(), &mScriptCache, &ch, 1, 0, &glyph);
+        }
+        if (ret != S_OK) {
+            // If ScriptGetCMap still failed, fall back to GetGlyphIndicesW
+            // (see bug 1105807).
+            ret = GetGlyphIndicesW(dc.GetDC(), &ch, 1, &glyph,
+                                   GGI_MARK_NONEXISTING_GLYPHS);
+            if (ret == GDI_ERROR || glyph == 0xFFFF) {
+                glyph = 0;
+            }
+        }
     }
 
     mGlyphIDs->Put(aUnicode, glyph);
@@ -497,7 +506,7 @@ int32_t
 gfxGDIFont::GetGlyphWidth(DrawTarget& aDrawTarget, uint16_t aGID)
 {
     if (!mGlyphWidths) {
-        mGlyphWidths = new nsDataHashtable<nsUint32HashKey,int32_t>(128);
+        mGlyphWidths = MakeUnique<nsDataHashtable<nsUint32HashKey,int32_t>>(128);
     }
 
     int32_t width;
@@ -528,7 +537,7 @@ gfxGDIFont::AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
     aSizes->mFontInstances += aMallocSizeOf(mMetrics);
     if (mGlyphWidths) {
         aSizes->mFontInstances +=
-            mGlyphWidths->SizeOfIncludingThis(nullptr, aMallocSizeOf);
+            mGlyphWidths->ShallowSizeOfIncludingThis(aMallocSizeOf);
     }
 }
 

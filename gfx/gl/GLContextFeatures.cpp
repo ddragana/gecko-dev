@@ -36,6 +36,7 @@ enum class GLESVersion : uint32_t {
     ES2   = 200,
     ES3   = 300,
     ES3_1 = 310,
+    ES3_2 = 320,
 };
 
 // ARB_ES2_compatibility is natively supported in OpenGL 4.1.
@@ -187,6 +188,16 @@ static const FeatureInfo sFeatureInfoArr[] = {
         }
     },
     {
+        "EXT_color_buffer_float",
+        GLVersion::GL3,
+        GLESVersion::ES3_2,
+        GLContext::Extension_None,
+        {
+            GLContext::EXT_color_buffer_float,
+            GLContext::Extensions_End
+        }
+    },
+    {
         // Removes clamping for float color outputs from frag shaders.
         "frag_color_float",
         GLVersion::GL3,
@@ -210,34 +221,53 @@ static const FeatureInfo sFeatureInfoArr[] = {
         }
     },
     {
+        // Check for just the blit framebuffer blit part of
+        // ARB_framebuffer_object
         "framebuffer_blit",
         GLVersion::GL3,
         GLESVersion::ES3,
-        GLContext::Extension_None,
+        GLContext::ARB_framebuffer_object,
         {
-            GLContext::EXT_framebuffer_blit,
             GLContext::ANGLE_framebuffer_blit,
+            GLContext::EXT_framebuffer_blit,
+            GLContext::NV_framebuffer_blit,
             GLContext::Extensions_End
         }
     },
     {
+        // Check for just the multisample renderbuffer part of
+        // ARB_framebuffer_object
         "framebuffer_multisample",
         GLVersion::GL3,
         GLESVersion::ES3,
-        GLContext::Extension_None,
+        GLContext::ARB_framebuffer_object,
         {
-            GLContext::EXT_framebuffer_multisample,
             GLContext::ANGLE_framebuffer_multisample,
+            GLContext::APPLE_framebuffer_multisample,
+            GLContext::EXT_framebuffer_multisample,
+            GLContext::EXT_multisampled_render_to_texture,
             GLContext::Extensions_End
         }
     },
     {
+        // ARB_framebuffer_object support
         "framebuffer_object",
         GLVersion::GL3,
-        GLESVersion::ES2,
+        GLESVersion::ES3,
         GLContext::ARB_framebuffer_object,
         {
+            GLContext::Extensions_End
+        }
+    },
+    {
+        // EXT_framebuffer_object/OES_framebuffer_object support
+        "framebuffer_object_EXT_OES",
+        GLVersion::GL3,
+        GLESVersion::ES2,
+        GLContext::Extension_None,
+        {
             GLContext::EXT_framebuffer_object,
+            GLContext::OES_framebuffer_object,
             GLContext::Extensions_End
         }
     },
@@ -331,6 +361,15 @@ static const FeatureInfo sFeatureInfoArr[] = {
          * ANGLE_instanced_arrays and NV_instanced_arrays forbid this, but GLES3
          * has no such restriction.
          */
+    },
+    {
+        "internalformat_query",
+        GLVersion::GL4_2,
+        GLESVersion::ES3,
+        GLContext::ARB_internalformat_query,
+        {
+            GLContext::Extensions_End
+        }
     },
     {
         "invalidate_framebuffer",
@@ -458,7 +497,7 @@ static const FeatureInfo sFeatureInfoArr[] = {
     {
         "renderbuffer_color_float",
         GLVersion::GL3,
-        GLESVersion::ES3,
+        GLESVersion::ES3_2,
         GLContext::Extension_None,
         {
             GLContext::ARB_texture_float,
@@ -469,10 +508,11 @@ static const FeatureInfo sFeatureInfoArr[] = {
     {
         "renderbuffer_color_half_float",
         GLVersion::GL3,
-        GLESVersion::ES3,
+        GLESVersion::ES3_2,
         GLContext::Extension_None,
         {
             GLContext::ARB_texture_float,
+            GLContext::EXT_color_buffer_float,
             GLContext::EXT_color_buffer_half_float,
             GLContext::Extensions_End
         }
@@ -520,6 +560,40 @@ static const FeatureInfo sFeatureInfoArr[] = {
         }
     },
     {
+        "seamless_cube_map_opt_in",
+        GLVersion::GL3_2,
+        GLESVersion::NONE,
+        GLContext::ARB_seamless_cube_map,
+        {
+            GLContext::Extensions_End
+        }
+    },
+    {
+        "shader_texture_lod",
+        GLVersion::NONE,
+        GLESVersion::NONE,
+        GLContext::Extension_None,
+        {
+            GLContext::ARB_shader_texture_lod,
+            GLContext::EXT_shader_texture_lod,
+            GLContext::Extensions_End
+        }
+    },
+    {
+        // Do we have separate DRAW and READ framebuffer bind points?
+        "split_framebuffer",
+        GLVersion::GL3,
+        GLESVersion::ES3,
+        GLContext::ARB_framebuffer_object,
+        {
+            GLContext::ANGLE_framebuffer_blit,
+            GLContext::APPLE_framebuffer_multisample,
+            GLContext::EXT_framebuffer_blit,
+            GLContext::NV_framebuffer_blit,
+            GLContext::Extensions_End
+        }
+    },
+    {
         "standard_derivatives",
         GLVersion::GL2,
         GLESVersion::ES3,
@@ -533,8 +607,10 @@ static const FeatureInfo sFeatureInfoArr[] = {
         "sync",
         GLVersion::GL3_2,
         GLESVersion::ES3,
-        GLContext::ARB_sync,
+        GLContext::Extension_None,
         {
+            GLContext::ARB_sync,
+            GLContext::APPLE_sync,
             GLContext::Extensions_End
         }
     },
@@ -634,6 +710,15 @@ static const FeatureInfo sFeatureInfoArr[] = {
         {
             GLContext::ARB_texture_non_power_of_two,
             GLContext::OES_texture_npot,
+            GLContext::Extensions_End
+        }
+    },
+    {
+        "texture_rg",
+        GLVersion::GL3,
+        GLESVersion::ES3,
+        GLContext::ARB_texture_rg,
+        {
             GLContext::Extensions_End
         }
     },
@@ -789,6 +874,15 @@ GLContext::InitFeatures()
                 mAvailableFeatures[featureId] = true;
                 break;
             }
+        }
+    }
+
+    if (ShouldDumpExts()) {
+        for (size_t featureId = 0; featureId < size_t(GLFeature::EnumMax); featureId++) {
+            GLFeature feature = GLFeature(featureId);
+            printf_stderr("[%s] Feature::%s\n",
+                          IsSupported(feature) ? "enabled" : "disabled",
+                          GetFeatureName(feature));
         }
     }
 

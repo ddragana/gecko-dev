@@ -1283,7 +1283,7 @@ moz_gtk_scrollbar_button_paint(GdkDrawable* drawable, GdkRectangle* rect,
 }
 
 static gint
-moz_gtk_scrollbar_trough_paint(GtkThemeWidgetType widget,
+moz_gtk_scrollbar_trough_paint(WidgetNodeType widget,
                                GdkDrawable* drawable, GdkRectangle* rect,
                                GdkRectangle* cliprect, GtkWidgetState* state,
                                GtkTextDirection direction)
@@ -1293,7 +1293,7 @@ moz_gtk_scrollbar_trough_paint(GtkThemeWidgetType widget,
 
     ensure_scrollbar_widget();
 
-    if (widget ==  MOZ_GTK_SCROLLBAR_TRACK_HORIZONTAL)
+    if (widget ==  MOZ_GTK_SCROLLBAR_HORIZONTAL)
         scrollbar = GTK_SCROLLBAR(gHorizScrollbarWidget);
     else
         scrollbar = GTK_SCROLLBAR(gVertScrollbarWidget);
@@ -1321,7 +1321,7 @@ moz_gtk_scrollbar_trough_paint(GtkThemeWidgetType widget,
 }
 
 static gint
-moz_gtk_scrollbar_thumb_paint(GtkThemeWidgetType widget,
+moz_gtk_scrollbar_thumb_paint(WidgetNodeType widget,
                               GdkDrawable* drawable, GdkRectangle* rect,
                               GdkRectangle* cliprect, GtkWidgetState* state,
                               GtkTextDirection direction)
@@ -2228,7 +2228,7 @@ moz_gtk_progressbar_paint(GdkDrawable* drawable, GdkRectangle* rect,
 static gint
 moz_gtk_progress_chunk_paint(GdkDrawable* drawable, GdkRectangle* rect,
                              GdkRectangle* cliprect, GtkTextDirection direction,
-                             GtkThemeWidgetType widget)
+                             WidgetNodeType widget)
 {
     GtkStyle* style;
 
@@ -2614,16 +2614,16 @@ moz_gtk_menu_separator_paint(GdkDrawable* drawable, GdkRectangle* rect,
 }
 
 static gint
-moz_gtk_menu_item_paint(GdkDrawable* drawable, GdkRectangle* rect,
-                        GdkRectangle* cliprect, GtkWidgetState* state,
-                        gint flags, GtkTextDirection direction)
+moz_gtk_menu_item_paint(WidgetNodeType widget, GdkDrawable* drawable,
+                        GdkRectangle* rect, GdkRectangle* cliprect,
+                        GtkWidgetState* state, GtkTextDirection direction)
 {
     GtkStyle* style;
     GtkShadowType shadow_type;
     GtkWidget* item_widget;
 
     if (state->inHover && !state->disabled) {
-        if (flags & MOZ_TOPLEVEL_MENU_ITEM) {
+        if (widget == MOZ_GTK_MENUBARITEM) {
             ensure_menu_bar_item_widget();
             item_widget = gMenuBarItemWidget;
         } else {
@@ -2682,7 +2682,8 @@ moz_gtk_check_menu_item_paint(GdkDrawable* drawable, GdkRectangle* rect,
     gint indicator_size, horizontal_padding;
     gint x, y;
 
-    moz_gtk_menu_item_paint(drawable, rect, cliprect, state, FALSE, direction);
+    moz_gtk_menu_item_paint(MOZ_GTK_MENUITEM, drawable, rect, cliprect, state,
+                            direction);
 
     ensure_check_menu_item_widget();
     gtk_widget_set_direction(gCheckMenuItemWidget, direction);
@@ -2740,7 +2741,7 @@ moz_gtk_window_paint(GdkDrawable* drawable, GdkRectangle* rect,
 }
 
 gint
-moz_gtk_get_widget_border(GtkThemeWidgetType widget, gint* left, gint* top,
+moz_gtk_get_widget_border(WidgetNodeType widget, gint* left, gint* top,
                           gint* right, gint* bottom, GtkTextDirection direction,
                           gboolean inhtml)
 {
@@ -2748,6 +2749,7 @@ moz_gtk_get_widget_border(GtkThemeWidgetType widget, gint* left, gint* top,
 
     switch (widget) {
     case MOZ_GTK_BUTTON:
+    case MOZ_GTK_TOOLBAR_BUTTON:
         {
             GtkBorder inner_border;
             gboolean interior_focus;
@@ -2956,6 +2958,9 @@ moz_gtk_get_widget_border(GtkThemeWidgetType widget, gint* left, gint* top,
         ensure_menu_popup_widget();
         w = gMenuPopupWidget;
         break;
+    case MOZ_GTK_MENUBARITEM:
+        // Bug 1274143 for MOZ_GTK_MENUBARITEM.
+        // Fall through to MOZ_GTK_MENUITEM for now.
     case MOZ_GTK_MENUITEM:
         ensure_menu_item_widget();
         ensure_menu_bar_item_widget();
@@ -2976,8 +2981,8 @@ moz_gtk_get_widget_border(GtkThemeWidgetType widget, gint* left, gint* top,
     case MOZ_GTK_CHECKBUTTON:
     case MOZ_GTK_RADIOBUTTON:
     case MOZ_GTK_SCROLLBAR_BUTTON:
-    case MOZ_GTK_SCROLLBAR_TRACK_HORIZONTAL:
-    case MOZ_GTK_SCROLLBAR_TRACK_VERTICAL:
+    case MOZ_GTK_SCROLLBAR_HORIZONTAL:
+    case MOZ_GTK_SCROLLBAR_VERTICAL:
     case MOZ_GTK_SCROLLBAR_THUMB_HORIZONTAL:
     case MOZ_GTK_SCROLLBAR_THUMB_VERTICAL:
     case MOZ_GTK_SCALE_THUMB_HORIZONTAL:
@@ -3063,17 +3068,25 @@ moz_gtk_get_tab_scroll_arrow_size(gint* width, gint* height)
     return MOZ_GTK_SUCCESS;
 }
 
-gint
-moz_gtk_get_arrow_size(gint* width, gint* height)
+void
+moz_gtk_get_arrow_size(WidgetNodeType widgetType, gint* width, gint* height)
 {
-    GtkRequisition requisition;
-    ensure_button_arrow_widget();
+    GtkWidget* widget;
+    switch (widgetType) {
+        case MOZ_GTK_DROPDOWN:
+            ensure_combo_box_widgets();
+            widget = gComboBoxArrowWidget;
+            break;
+        default:
+            ensure_button_arrow_widget();
+            widget = gButtonArrowWidget;
+            break;
+    }
 
-    gtk_widget_size_request(gButtonArrowWidget, &requisition);
+    GtkRequisition requisition;
+    gtk_widget_size_request(widget, &requisition);
     *width = requisition.width;
     *height = requisition.height;
-
-    return MOZ_GTK_SUCCESS;
 }
 
 gint
@@ -3142,6 +3155,14 @@ moz_gtk_get_menu_separator_height(gint *size)
     return MOZ_GTK_SUCCESS;
 }
 
+void
+moz_gtk_get_scale_metrics(GtkOrientation orient, gint* scale_width,
+                          gint* scale_height)
+{
+  moz_gtk_get_scalethumb_metrics(orient, scale_width, scale_height);
+}
+
+
 gint
 moz_gtk_get_scalethumb_metrics(GtkOrientation orient, gint* thumb_length, gint* thumb_height)
 {
@@ -3203,13 +3224,14 @@ moz_gtk_images_in_buttons()
 }
 
 gint
-moz_gtk_widget_paint(GtkThemeWidgetType widget, GdkDrawable* drawable,
+moz_gtk_widget_paint(WidgetNodeType widget, GdkDrawable* drawable,
                      GdkRectangle* rect, GdkRectangle* cliprect,
                      GtkWidgetState* state, gint flags,
                      GtkTextDirection direction)
 {
     switch (widget) {
     case MOZ_GTK_BUTTON:
+    case MOZ_GTK_TOOLBAR_BUTTON:
         if (state->depressed) {
             ensure_toggle_button_widget();
             return moz_gtk_button_paint(drawable, rect, cliprect, state,
@@ -3234,8 +3256,8 @@ moz_gtk_widget_paint(GtkThemeWidgetType widget, GdkDrawable* drawable,
                                               (GtkScrollbarButtonFlags) flags,
                                               direction);
         break;
-    case MOZ_GTK_SCROLLBAR_TRACK_HORIZONTAL:
-    case MOZ_GTK_SCROLLBAR_TRACK_VERTICAL:
+    case MOZ_GTK_SCROLLBAR_HORIZONTAL:
+    case MOZ_GTK_SCROLLBAR_VERTICAL:
         return moz_gtk_scrollbar_trough_paint(widget, drawable, rect,
                                               cliprect, state, direction);
         break;
@@ -3367,8 +3389,9 @@ moz_gtk_widget_paint(GtkThemeWidgetType widget, GdkDrawable* drawable,
         return moz_gtk_menu_separator_paint(drawable, rect, cliprect,
                                             direction);
         break;
+    case MOZ_GTK_MENUBARITEM:
     case MOZ_GTK_MENUITEM:
-        return moz_gtk_menu_item_paint(drawable, rect, cliprect, state, flags,
+        return moz_gtk_menu_item_paint(widget, drawable, rect, cliprect, state,
                                        direction);
         break;
     case MOZ_GTK_MENUARROW:

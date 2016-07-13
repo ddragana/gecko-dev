@@ -10,7 +10,6 @@ import subprocess
 import sys
 
 from distutils.version import LooseVersion
-from distutils.version import StrictVersion
 
 
 NO_MERCURIAL = '''
@@ -74,7 +73,9 @@ We recommend the following tools for installing Python:
 
 
 # Upgrade Mercurial older than this.
-MODERN_MERCURIAL_VERSION = StrictVersion('3.2.4')
+# This should match OLDEST_NON_LEGACY_VERSION from
+# the hg setup wizard in version-control-tools.
+MODERN_MERCURIAL_VERSION = LooseVersion('3.7.3')
 
 # Upgrade Python older than this.
 MODERN_PYTHON_VERSION = LooseVersion('2.7.3')
@@ -135,6 +136,28 @@ class BaseBootstrapper(object):
         raise NotImplementedError('%s does not yet implement suggest_mobile_android_mozconfig()' %
                                   __name__)
 
+    def install_mobile_android_artifact_mode_packages(self):
+        '''
+        Install packages required to build Firefox for Android (application
+        'mobile/android', also known as Fennec) in Artifact Mode.
+        '''
+        raise NotImplementedError(
+            'Cannot bootstrap Firefox for Android Artifact Mode: '
+            '%s does not yet implement install_mobile_android_artifact_mode_packages()'
+            % __name__)
+
+    def suggest_mobile_android_artifact_mode_mozconfig(self):
+        '''
+        Print a message to the console detailing what the user's mozconfig
+        should contain.
+
+        Firefox for Android Artifact Mode needs an application and an ABI set,
+        and it needs paths to the Android SDK.
+        '''
+        raise NotImplementedError(
+            '%s does not yet implement suggest_mobile_android_artifact_mode_mozconfig()'
+            % __name__)
+
     def which(self, name):
         """Python implementation of which.
 
@@ -158,22 +181,36 @@ class BaseBootstrapper(object):
 
         subprocess.check_call(command, stdin=sys.stdin)
 
-    def yum_install(self, *packages):
-        command = ['yum', 'install']
+    def dnf_install(self, *packages):
+        if self.which('dnf'):
+            command = ['dnf', 'install']
+        else:
+            command = ['yum', 'install']
+
         if self.no_interactive:
             command.append('-y')
         command.extend(packages)
 
         self.run_as_root(command)
 
-    def yum_groupinstall(self, *packages):
-        command = ['yum', 'groupinstall']
+    def dnf_groupinstall(self, *packages):
+        if self.which('dnf'):
+            command = ['dnf', 'groupinstall']
+        else:
+            command = ['yum', 'groupinstall']
+
+        if self.no_interactive:
+            command.append('-y')
         command.extend(packages)
 
         self.run_as_root(command)
 
-    def yum_update(self, *packages):
-        command = ['yum', 'update']
+    def dnf_update(self, *packages):
+        if self.which('dnf'):
+            command = ['dnf', 'update']
+        else:
+            command = ['yum', 'update']
+
         if self.no_interactive:
             command.append('-y')
         command.extend(packages)
@@ -262,7 +299,8 @@ class BaseBootstrapper(object):
         making it suitable for use in scripts.
         """
         env = os.environ.copy()
-        env['HGPLAIN'] = '1'
+        env[b'HGPLAIN'] = b'1'
+
         return env
 
     def is_mercurial_modern(self):
@@ -278,30 +316,46 @@ class BaseBootstrapper(object):
             print('ERROR: Unable to identify Mercurial version.')
             return True, False, None
 
-        our = StrictVersion(match.group(1))
+        our = LooseVersion(match.group(1))
 
         return True, our >= MODERN_MERCURIAL_VERSION, our
 
     def ensure_mercurial_modern(self):
         installed, modern, version = self.is_mercurial_modern()
 
-        if not installed or modern:
+        if modern:
             print('Your version of Mercurial (%s) is sufficiently modern.' %
                   version)
-            return
+            return installed, modern
 
         self._ensure_package_manager_updated()
-        self.upgrade_mercurial(version)
+
+        if installed:
+            print('Your version of Mercurial (%s) is not modern enough.' %
+                  version)
+            print('(Older versions of Mercurial have known security vulnerabilities. '
+                  'Unless you are running a patched Mercurial version, you may be '
+                  'vulnerable.')
+        else:
+            print('You do not have Mercurial installed')
+
+        if self.upgrade_mercurial(version) is False:
+            return installed, modern
 
         installed, modern, after = self.is_mercurial_modern()
 
         if installed and not modern:
             print(MERCURIAL_UPGRADE_FAILED % (MODERN_MERCURIAL_VERSION, after))
 
+        return installed, modern
+
     def upgrade_mercurial(self, current):
         """Upgrade Mercurial.
 
         Child classes should reimplement this.
+
+        Return False to not perform a version check after the upgrade is
+        performed.
         """
         print(MERCURIAL_UNABLE_UPGRADE % (current, MODERN_MERCURIAL_VERSION))
 

@@ -69,11 +69,11 @@ class AndroidChannel : public nsBaseChannel
 private:
     AndroidChannel(nsIURI *aURI, jni::Object::Param aConnection) {
         mConnection = aConnection;
-        mURI = aURI;
+        SetURI(aURI);
 
         auto type = widget::GeckoAppShell::ConnectionGetMimeType(mConnection);
         if (type) {
-            SetContentType(nsCString(type));
+            SetContentType(type->ToCString());
         }
     }
 

@@ -9,10 +9,11 @@
 #include "LoadContextInfo.h"
 #include "nsICacheStorage.h"
 #include "nsIObserverService.h"
-#include "mozIApplicationClearPrivateDataParams.h"
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/TimeStamp.h"
 #include "nsServiceManagerUtils.h"
+#include "mozilla/net/NeckoCommon.h"
 #include "prsystem.h"
 #include <time.h>
 #include <math.h>
@@ -51,7 +52,8 @@ int32_t CacheObserver::sMemoryCacheCapacity = kDefaultMemoryCacheCapacity;
 int32_t CacheObserver::sAutoMemoryCacheCapacity = -1;
 
 static uint32_t const kDefaultDiskCacheCapacity = 250 * 1024; // 250 MB
-uint32_t CacheObserver::sDiskCacheCapacity = kDefaultDiskCacheCapacity;
+Atomic<uint32_t,Relaxed> CacheObserver::sDiskCacheCapacity
+                                           (kDefaultDiskCacheCapacity);
 
 static uint32_t const kDefaultDiskFreeSpaceSoftLimit = 5 * 1024; // 5MB
 uint32_t CacheObserver::sDiskFreeSpaceSoftLimit = kDefaultDiskFreeSpaceSoftLimit;
@@ -92,6 +94,11 @@ bool CacheObserver::sCacheFSReported = kDefaultCacheFSReported;
 static bool kDefaultHashStatsReported = false;
 bool CacheObserver::sHashStatsReported = kDefaultHashStatsReported;
 
+static uint32_t const kDefaultMaxShutdownIOLag = 2; // seconds
+Atomic<uint32_t, Relaxed> CacheObserver::sMaxShutdownIOLag(kDefaultMaxShutdownIOLag);
+
+Atomic<PRIntervalTime> CacheObserver::sShutdownDemandedTime(PR_INTERVAL_NO_TIMEOUT);
+
 NS_IMPL_ISUPPORTS(CacheObserver,
                   nsIObserver,
                   nsISupportsWeakReference)
@@ -100,6 +107,10 @@ NS_IMPL_ISUPPORTS(CacheObserver,
 nsresult
 CacheObserver::Init()
 {
+  if (IsNeckoChild()) {
+    return NS_OK;
+  }
+
   if (sSelf) {
     return NS_OK;
   }
@@ -118,7 +129,7 @@ CacheObserver::Init()
   obs->AddObserver(sSelf, "profile-before-change", true);
   obs->AddObserver(sSelf, "xpcom-shutdown", true);
   obs->AddObserver(sSelf, "last-pb-context-exited", true);
-  obs->AddObserver(sSelf, "webapps-clear-data", true);
+  obs->AddObserver(sSelf, "clear-origin-data", true);
   obs->AddObserver(sSelf, "memory-pressure", true);
 
   return NS_OK;
@@ -155,7 +166,7 @@ CacheObserver::AttachToPreferences()
   mozilla::Preferences::AddUintVarCache(
     &sMetadataMemoryLimit, "browser.cache.disk.metadata_memory_limit", kDefaultMetadataMemoryLimit);
 
-  mozilla::Preferences::AddUintVarCache(
+  mozilla::Preferences::AddAtomicUintVarCache(
     &sDiskCacheCapacity, "browser.cache.disk.capacity", kDefaultDiskCacheCapacity);
   mozilla::Preferences::AddBoolVarCache(
     &sSmartCacheSizeEnabled, "browser.cache.disk.smart_size.enabled", kDefaultSmartCacheSizeEnabled);
@@ -238,10 +249,13 @@ CacheObserver::AttachToPreferences()
     &sSanitizeOnShutdown, "privacy.sanitize.sanitizeOnShutdown", kDefaultSanitizeOnShutdown);
   mozilla::Preferences::AddBoolVarCache(
     &sClearCacheOnShutdown, "privacy.clearOnShutdown.cache", kDefaultClearCacheOnShutdown);
+
+  mozilla::Preferences::AddAtomicUintVarCache(
+    &sMaxShutdownIOLag, "browser.cache.max_shutdown_io_lag", kDefaultMaxShutdownIOLag);
 }
 
 // static
-uint32_t const CacheObserver::MemoryCacheCapacity()
+uint32_t CacheObserver::MemoryCacheCapacity()
 {
   if (sMemoryCacheCapacity >= 0)
     return sMemoryCacheCapacity << 10;
@@ -279,7 +293,7 @@ uint32_t const CacheObserver::MemoryCacheCapacity()
 }
 
 // static
-bool const CacheObserver::UseNewCache()
+bool CacheObserver::UseNewCache()
 {
   uint32_t useNewCache = sUseNewCache;
 
@@ -311,7 +325,7 @@ CacheObserver::SetDiskCacheCapacity(uint32_t aCapacity)
     sSelf->StoreDiskCacheCapacity();
   } else {
     nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(sSelf, &CacheObserver::StoreDiskCacheCapacity);
+      NewRunnableMethod(sSelf, &CacheObserver::StoreDiskCacheCapacity);
     NS_DispatchToMainThread(event);
   }
 }
@@ -337,7 +351,7 @@ CacheObserver::SetCacheFSReported()
     sSelf->StoreCacheFSReported();
   } else {
     nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(sSelf, &CacheObserver::StoreCacheFSReported);
+      NewRunnableMethod(sSelf, &CacheObserver::StoreCacheFSReported);
     NS_DispatchToMainThread(event);
   }
 }
@@ -363,7 +377,7 @@ CacheObserver::SetHashStatsReported()
     sSelf->StoreHashStatsReported();
   } else {
     nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(sSelf, &CacheObserver::StoreHashStatsReported);
+      NewRunnableMethod(sSelf, &CacheObserver::StoreHashStatsReported);
     NS_DispatchToMainThread(event);
   }
 }
@@ -392,58 +406,18 @@ void CacheObserver::ParentDirOverride(nsIFile** aDir)
 }
 
 namespace {
+namespace CacheStorageEvictHelper {
 
-class CacheStorageEvictHelper
-{
-public:
-  nsresult Run(mozIApplicationClearPrivateDataParams* aParams);
-
-private:
-  uint32_t mAppId;
-  nsresult ClearStorage(bool const aPrivate,
-                        bool const aInBrowser,
-                        bool const aAnonymous);
-};
-
-nsresult
-CacheStorageEvictHelper::Run(mozIApplicationClearPrivateDataParams* aParams)
+nsresult ClearStorage(bool const aPrivate,
+                      bool const aAnonymous,
+                      NeckoOriginAttributes const &aOa)
 {
   nsresult rv;
 
-  rv = aParams->GetAppId(&mAppId);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool aBrowserOnly;
-  rv = aParams->GetBrowserOnly(&aBrowserOnly);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  MOZ_ASSERT(mAppId != nsILoadContextInfo::UNKNOWN_APP_ID);
-
-  // Clear all [private X anonymous] combinations
-  rv = ClearStorage(false, aBrowserOnly, false);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = ClearStorage(false, aBrowserOnly, true);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = ClearStorage(true, aBrowserOnly, false);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = ClearStorage(true, aBrowserOnly, true);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
-}
-
-nsresult
-CacheStorageEvictHelper::ClearStorage(bool const aPrivate,
-                                      bool const aInBrowser,
-                                      bool const aAnonymous)
-{
-  nsresult rv;
-
-  nsRefPtr<LoadContextInfo> info = GetLoadContextInfo(
-    aPrivate, mAppId, aInBrowser, aAnonymous);
+  RefPtr<LoadContextInfo> info = GetLoadContextInfo(aPrivate, aAnonymous, aOa);
 
   nsCOMPtr<nsICacheStorage> storage;
-  nsRefPtr<CacheStorageService> service = CacheStorageService::Self();
+  RefPtr<CacheStorageService> service = CacheStorageService::Self();
   NS_ENSURE_TRUE(service, NS_ERROR_FAILURE);
 
   // Clear disk storage
@@ -458,18 +432,31 @@ CacheStorageEvictHelper::ClearStorage(bool const aPrivate,
   rv = storage->AsyncEvictStorage(nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (!aInBrowser) {
-    rv = ClearStorage(aPrivate, true, aAnonymous);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
+  return NS_OK;
+}
+
+nsresult Run(NeckoOriginAttributes const &aOa)
+{
+  nsresult rv;
+
+  // Clear all [private X anonymous] combinations
+  rv = ClearStorage(false, false, aOa);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = ClearStorage(false, true, aOa);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = ClearStorage(true, false, aOa);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = ClearStorage(true, true, aOa);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }
 
-} // namespace
+} // CacheStorageEvictHelper
+} // anon
 
 // static
-bool const CacheObserver::EntryIsTooBig(int64_t aSize, bool aUsingDisk)
+bool CacheObserver::EntryIsTooBig(int64_t aSize, bool aUsingDisk)
 {
   // If custom limit is set, check it.
   int64_t preferredLimit = aUsingDisk ? sMaxDiskEntrySize : sMaxMemoryEntrySize;
@@ -490,6 +477,28 @@ bool const CacheObserver::EntryIsTooBig(int64_t aSize, bool aUsingDisk)
 
   if (aSize > derivedLimit)
     return true;
+
+  return false;
+}
+
+// static
+bool CacheObserver::IsPastShutdownIOLag()
+{
+#ifdef DEBUG
+  return false;
+#endif
+
+  if (sShutdownDemandedTime == PR_INTERVAL_NO_TIMEOUT ||
+      sMaxShutdownIOLag == UINT32_MAX) {
+    return false;
+  }
+
+  static const PRIntervalTime kMaxShutdownIOLag =
+    PR_SecondsToInterval(sMaxShutdownIOLag);
+
+  if ((PR_IntervalNow() - sShutdownDemandedTime) > kMaxShutdownIOLag) {
+    return true;
+  }
 
   return false;
 }
@@ -517,48 +526,46 @@ CacheObserver::Observe(nsISupports* aSubject,
     return NS_OK;
   }
 
-  if (!strcmp(aTopic, "profile-before-change")) {
-    nsRefPtr<CacheStorageService> service = CacheStorageService::Self();
-    if (service)
-      service->Shutdown();
+  if (!strcmp(aTopic, "profile-change-net-teardown") ||
+      !strcmp(aTopic, "profile-before-change") ||
+      !strcmp(aTopic, "xpcom-shutdown")) {
+    if (sShutdownDemandedTime == PR_INTERVAL_NO_TIMEOUT) {
+      sShutdownDemandedTime = PR_IntervalNow();
+    }
 
-    return NS_OK;
-  }
-
-  if (!strcmp(aTopic, "xpcom-shutdown")) {
-    nsRefPtr<CacheStorageService> service = CacheStorageService::Self();
-    if (service)
+    RefPtr<CacheStorageService> service = CacheStorageService::Self();
+    if (service) {
       service->Shutdown();
+    }
 
     CacheFileIOManager::Shutdown();
     return NS_OK;
   }
 
   if (!strcmp(aTopic, "last-pb-context-exited")) {
-    nsRefPtr<CacheStorageService> service = CacheStorageService::Self();
-    if (service)
+    RefPtr<CacheStorageService> service = CacheStorageService::Self();
+    if (service) {
       service->DropPrivateBrowsingEntries();
+    }
 
     return NS_OK;
   }
 
-  if (!strcmp(aTopic, "webapps-clear-data")) {
-    nsCOMPtr<mozIApplicationClearPrivateDataParams> params =
-            do_QueryInterface(aSubject);
-    if (!params) {
-      NS_ERROR("'webapps-clear-data' notification's subject should be a mozIApplicationClearPrivateDataParams");
-      return NS_ERROR_UNEXPECTED;
+  if (!strcmp(aTopic, "clear-origin-data")) {
+    NeckoOriginAttributes oa;
+    if (!oa.Init(nsDependentString(aData))) {
+      NS_ERROR("Could not parse NeckoOriginAttributes JSON in clear-origin-data notification");
+      return NS_OK;
     }
 
-    CacheStorageEvictHelper helper;
-    nsresult rv = helper.Run(params);
+    nsresult rv = CacheStorageEvictHelper::Run(oa);
     NS_ENSURE_SUCCESS(rv, rv);
 
     return NS_OK;
   }
 
   if (!strcmp(aTopic, "memory-pressure")) {
-    nsRefPtr<CacheStorageService> service = CacheStorageService::Self();
+    RefPtr<CacheStorageService> service = CacheStorageService::Self();
     if (service)
       service->PurgeFromMemory(nsICacheStorageService::PURGE_EVERYTHING);
 

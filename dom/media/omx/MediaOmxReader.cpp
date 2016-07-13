@@ -28,10 +28,10 @@ using namespace android;
 
 namespace mozilla {
 
-extern PRLogModuleInfo* gMediaDecoderLog;
+extern LazyLogModule gMediaDecoderLog;
 #define DECODER_LOG(type, msg) MOZ_LOG(gMediaDecoderLog, type, msg)
 
-class MediaOmxReader::ProcessCachedDataTask : public Task
+class MediaOmxReader::ProcessCachedDataTask : public Runnable
 {
 public:
   ProcessCachedDataTask(MediaOmxReader* aOmxReader, int64_t aOffset)
@@ -39,15 +39,16 @@ public:
     mOffset(aOffset)
   { }
 
-  void Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(!NS_IsMainThread());
     MOZ_ASSERT(mOmxReader.get());
     mOmxReader->ProcessCachedData(mOffset);
+    return NS_OK;
   }
 
 private:
-  nsRefPtr<MediaOmxReader> mOmxReader;
+  RefPtr<MediaOmxReader> mOmxReader;
   int64_t                  mOffset;
 };
 
@@ -66,7 +67,7 @@ private:
 // the IO task dispatches a runnable to the main thread for parsing the
 // data. This goes on until all of the MP3 file has been parsed.
 
-class MediaOmxReader::NotifyDataArrivedRunnable : public nsRunnable
+class MediaOmxReader::NotifyDataArrivedRunnable : public Runnable
 {
 public:
   NotifyDataArrivedRunnable(MediaOmxReader* aOmxReader,
@@ -96,7 +97,7 @@ private:
 
     while (mLength) {
       uint32_t length = std::min<uint64_t>(mLength, UINT32_MAX);
-      mOmxReader->NotifyDataArrived(Interval<int64_t>(mOffset, mOffset + length));
+      mOmxReader->NotifyDataArrived();
       mLength -= length;
       mOffset += length;
     }
@@ -105,12 +106,12 @@ private:
       // We cannot read data in the main thread because it
       // might block for too long. Instead we post an IO task
       // to the IO thread if there is more data available.
-      XRE_GetIOMessageLoop()->PostTask(FROM_HERE,
-          new ProcessCachedDataTask(mOmxReader.get(), mOffset));
+      RefPtr<Runnable> task = new ProcessCachedDataTask(mOmxReader.get(), mOffset);
+      XRE_GetIOMessageLoop()->PostTask(task.forget());
     }
   }
 
-  nsRefPtr<MediaOmxReader>         mOmxReader;
+  RefPtr<MediaOmxReader>         mOmxReader;
   uint64_t                         mLength;
   int64_t                          mOffset;
   uint64_t                         mFullLength;
@@ -128,10 +129,6 @@ MediaOmxReader::MediaOmxReader(AbstractMediaDecoder *aDecoder)
   , mIsShutdown(false)
   , mMP3FrameParser(-1)
 {
-  if (!gMediaDecoderLog) {
-    gMediaDecoderLog = PR_NewLogModule("MediaDecoder");
-  }
-
   mAudioChannel = dom::AudioChannelService::GetDefaultAudioChannel();
 }
 
@@ -139,14 +136,9 @@ MediaOmxReader::~MediaOmxReader()
 {
 }
 
-nsresult MediaOmxReader::Init(MediaDecoderReader* aCloneDonor)
-{
-  return NS_OK;
-}
-
 already_AddRefed<AbstractMediaDecoder>
 MediaOmxReader::SafeGetDecoder() {
-  nsRefPtr<AbstractMediaDecoder> decoder;
+  RefPtr<AbstractMediaDecoder> decoder;
   MutexAutoLock lock(mShutdownMutex);
   if (!mIsShutdown) {
     decoder = mDecoder;
@@ -162,7 +154,7 @@ void MediaOmxReader::ReleaseDecoder()
   mOmxDecoder.clear();
 }
 
-nsRefPtr<ShutdownPromise>
+RefPtr<ShutdownPromise>
 MediaOmxReader::Shutdown()
 {
   {
@@ -170,7 +162,7 @@ MediaOmxReader::Shutdown()
     mIsShutdown = true;
   }
 
-  nsRefPtr<ShutdownPromise> p = MediaDecoderReader::Shutdown();
+  RefPtr<ShutdownPromise> p = MediaDecoderReader::Shutdown();
 
   // Wait for the superclass to finish tearing things down before releasing
   // the decoder on the main thread.
@@ -209,15 +201,16 @@ nsresult MediaOmxReader::InitOmxDecoder()
     if (!mExtractor.get()) {
       return NS_ERROR_FAILURE;
     }
-    mOmxDecoder = new OmxDecoder(mDecoder);
+    mOmxDecoder = new OmxDecoder(mDecoder, OwnerThread());
     if (!mOmxDecoder->Init(mExtractor)) {
       return NS_ERROR_FAILURE;
     }
+    mStreamSource = static_cast<MediaStreamSource*>(dataSource.get());
   }
   return NS_OK;
 }
 
-nsRefPtr<MediaDecoderReader::MetadataPromise>
+RefPtr<MediaDecoderReader::MetadataPromise>
 MediaOmxReader::AsyncReadMetadata()
 {
   MOZ_ASSERT(OnTaskQueue());
@@ -239,9 +232,9 @@ MediaOmxReader::AsyncReadMetadata()
     ProcessCachedData(0);
   }
 
-  nsRefPtr<MediaDecoderReader::MetadataPromise> p = mMetadataPromise.Ensure(__func__);
+  RefPtr<MediaDecoderReader::MetadataPromise> p = mMetadataPromise.Ensure(__func__);
 
-  nsRefPtr<MediaOmxReader> self = this;
+  RefPtr<MediaOmxReader> self = this;
   mMediaResourceRequest.Begin(mOmxDecoder->AllocateMediaResources()
     ->Then(OwnerThread(), __func__,
       [self] (bool) -> void {
@@ -306,7 +299,7 @@ void MediaOmxReader::HandleResourceAllocated()
     mInitialFrame = frameSize;
     VideoFrameContainer* container = mDecoder->GetVideoFrameContainer();
     if (container) {
-      container->ClearCurrentFrame(gfxIntSize(displaySize.width, displaySize.height));
+      container->ClearCurrentFrame(IntSize(displaySize.width, displaySize.height));
     }
   }
 
@@ -318,7 +311,9 @@ void MediaOmxReader::HandleResourceAllocated()
     mInfo.mAudio.mRate = sampleRate;
   }
 
-  nsRefPtr<MetadataHolder> metadata = new MetadataHolder();
+  mInfo.mMediaSeekable = mExtractor->flags() & MediaExtractor::CAN_SEEK;
+
+  RefPtr<MetadataHolder> metadata = new MetadataHolder();
   metadata->mInfo = mInfo;
   metadata->mTags = nullptr;
 
@@ -327,13 +322,6 @@ void MediaOmxReader::HandleResourceAllocated()
 #endif
 
   mMetadataPromise.Resolve(metadata, __func__);
-}
-
-bool
-MediaOmxReader::IsMediaSeekable()
-{
-  // Check the MediaExtract flag if the source is seekable.
-  return (mExtractor->flags() & MediaExtractor::CAN_SEEK);
 }
 
 bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
@@ -393,9 +381,9 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
     }
 
     // This is the approximate byte position in the stream.
-    int64_t pos = mDecoder->GetResource()->Tell();
+    int64_t pos = mStreamSource ? mStreamSource->Tell() : 0;
 
-    nsRefPtr<VideoData> v;
+    RefPtr<VideoData> v;
     if (!frame.mGraphicBuffer) {
 
       VideoData::YCbCrBuffer b;
@@ -457,10 +445,10 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
   return true;
 }
 
-void MediaOmxReader::NotifyDataArrivedInternal(uint32_t aLength, int64_t aOffset)
+void MediaOmxReader::NotifyDataArrivedInternal()
 {
   MOZ_ASSERT(OnTaskQueue());
-  nsRefPtr<AbstractMediaDecoder> decoder = SafeGetDecoder();
+  RefPtr<AbstractMediaDecoder> decoder = SafeGetDecoder();
   if (!decoder) { // reader has shut down
     return;
   }
@@ -471,13 +459,29 @@ void MediaOmxReader::NotifyDataArrivedInternal(uint32_t aLength, int64_t aOffset
     return;
   }
 
-  nsRefPtr<MediaByteBuffer> bytes = mDecoder->GetResource()->SilentReadAt(aOffset, aLength);
-  NS_ENSURE_TRUE_VOID(bytes);
-  mMP3FrameParser.Parse(bytes->Elements(), aLength, aOffset);
-  if (!mMP3FrameParser.IsMP3()) {
+  AutoPinned<MediaResource> resource(mDecoder->GetResource());
+  MediaByteRangeSet byteRanges;
+  nsresult rv = resource->GetCachedRanges(byteRanges);
+
+  if (NS_FAILED(rv)) {
     return;
   }
 
+  if (byteRanges == mLastCachedRanges) {
+    return;
+  }
+  MediaByteRangeSet intervals = byteRanges - mLastCachedRanges;
+  mLastCachedRanges = byteRanges;
+
+  for (const auto& interval : intervals) {
+    RefPtr<MediaByteBuffer> bytes =
+      resource->MediaReadAt(interval.mStart, interval.Length());
+    NS_ENSURE_TRUE_VOID(bytes);
+    mMP3FrameParser.Parse(bytes->Elements(), interval.Length(), interval.mStart);
+    if (!mMP3FrameParser.IsMP3()) {
+      return;
+    }
+  }
   int64_t duration = mMP3FrameParser.GetDuration();
   if (duration != mLastParserDuration) {
     mLastParserDuration = duration;
@@ -491,7 +495,7 @@ bool MediaOmxReader::DecodeAudioData()
   EnsureActive();
 
   // This is the approximate byte position in the stream.
-  int64_t pos = mDecoder->GetResource()->Tell();
+  int64_t pos = mStreamSource ? mStreamSource->Tell() : 0;
 
   // Read next frame
   MPAPI::AudioFrame source;
@@ -519,12 +523,12 @@ bool MediaOmxReader::DecodeAudioData()
                                       source.mAudioChannels));
 }
 
-nsRefPtr<MediaDecoderReader::SeekPromise>
-MediaOmxReader::Seek(int64_t aTarget, int64_t aEndTime)
+RefPtr<MediaDecoderReader::SeekPromise>
+MediaOmxReader::Seek(SeekTarget aTarget, int64_t aEndTime)
 {
   MOZ_ASSERT(OnTaskQueue());
   EnsureActive();
-  nsRefPtr<SeekPromise> p = mSeekPromise.Ensure(__func__);
+  RefPtr<SeekPromise> p = mSeekPromise.Ensure(__func__);
 
   if (mHasAudio && mHasVideo) {
     // The OMXDecoder seeks/demuxes audio and video streams separately. So if
@@ -535,21 +539,21 @@ MediaOmxReader::Seek(int64_t aTarget, int64_t aEndTime)
     // stream to the preceeding keyframe first, get the stream time, and then
     // seek the audio stream to match the video stream's time. Otherwise, the
     // audio and video streams won't be in sync after the seek.
-    mVideoSeekTimeUs = aTarget;
+    mVideoSeekTimeUs = aTarget.GetTime().ToMicroseconds();
 
-    nsRefPtr<MediaOmxReader> self = this;
-    mSeekRequest.Begin(DecodeToFirstVideoData()->Then(OwnerThread(), __func__, [self] (VideoData* v) {
+    RefPtr<MediaOmxReader> self = this;
+    mSeekRequest.Begin(DecodeToFirstVideoData()->Then(OwnerThread(), __func__, [self] (MediaData* v) {
       self->mSeekRequest.Complete();
       self->mAudioSeekTimeUs = v->mTime;
-      self->mSeekPromise.Resolve(self->mAudioSeekTimeUs, __func__);
+      self->mSeekPromise.Resolve(media::TimeUnit::FromMicroseconds(self->mAudioSeekTimeUs), __func__);
     }, [self, aTarget] () {
       self->mSeekRequest.Complete();
-      self->mAudioSeekTimeUs = aTarget;
-      self->mSeekPromise.Resolve(aTarget, __func__);
+      self->mAudioSeekTimeUs = aTarget.GetTime().ToMicroseconds();
+      self->mSeekPromise.Resolve(aTarget.GetTime(), __func__);
     }));
   } else {
-    mAudioSeekTimeUs = mVideoSeekTimeUs = aTarget;
-    mSeekPromise.Resolve(aTarget, __func__);
+    mAudioSeekTimeUs = mVideoSeekTimeUs = aTarget.GetTime().ToMicroseconds();
+    mSeekPromise.Resolve(aTarget.GetTime(), __func__);
   }
 
   return p;
@@ -573,7 +577,7 @@ void MediaOmxReader::EnsureActive() {
 int64_t MediaOmxReader::ProcessCachedData(int64_t aOffset)
 {
   // Could run on decoder thread or IO thread.
-  nsRefPtr<AbstractMediaDecoder> decoder = SafeGetDecoder();
+  RefPtr<AbstractMediaDecoder> decoder = SafeGetDecoder();
   if (!decoder) { // reader has shut down
     return -1;
   }
@@ -594,7 +598,7 @@ int64_t MediaOmxReader::ProcessCachedData(int64_t aOffset)
   }
 
   int64_t bufferLength = std::min<int64_t>(resourceLength-aOffset, sReadSize);
-  nsRefPtr<NotifyDataArrivedRunnable> runnable(
+  RefPtr<NotifyDataArrivedRunnable> runnable(
     new NotifyDataArrivedRunnable(this, bufferLength, aOffset, resourceLength));
 
   if (OnTaskQueue()) {

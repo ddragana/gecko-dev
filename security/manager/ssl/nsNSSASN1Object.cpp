@@ -2,12 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "nsNSSASN1Object.h"
-#include "nsIComponentManager.h"
-#include "secasn1.h"
-#include "nsReadableUtils.h"
-#include "nsIMutableArray.h"
+
+#include "nsArray.h"
 #include "nsArrayUtils.h"
+#include "nsIComponentManager.h"
+#include "nsReadableUtils.h"
 #include "nsXPCOMCID.h"
+#include "secasn1.h"
 
 NS_IMPL_ISUPPORTS(nsNSSASN1Sequence, nsIASN1Sequence, nsIASN1Object)
 NS_IMPL_ISUPPORTS(nsNSSASN1PrintableItem, nsIASN1PrintableItem, nsIASN1Object)
@@ -196,12 +197,11 @@ CreateFromDER(unsigned char *data,
 
     sequence->GetASN1Objects(getter_AddRefs(elements));
     nsCOMPtr<nsIASN1Object> asn1Obj = do_QueryElementAt(elements, 0);
-    *retval = asn1Obj;
-    if (!*retval)
+    if (!asn1Obj) {
       return NS_ERROR_FAILURE;
+    }
 
-    NS_ADDREF(*retval);
-      
+    asn1Obj.forget(retval);
   }
   return rv; 
 }
@@ -223,7 +223,7 @@ NS_IMETHODIMP
 nsNSSASN1Sequence::GetASN1Objects(nsIMutableArray * *aASN1Objects)
 {
   if (!mASN1Objects) {
-    mASN1Objects = do_CreateInstance(NS_ARRAY_CONTRACTID);
+    mASN1Objects = nsArrayBase::Create();
   }
   *aASN1Objects = mASN1Objects;
   NS_IF_ADDREF(*aASN1Objects);
@@ -339,7 +339,6 @@ nsNSSASN1PrintableItem::~nsNSSASN1PrintableItem()
     free(mData);
 }
 
-/* readonly attribute wstring value; */
 NS_IMETHODIMP 
 nsNSSASN1PrintableItem::GetDisplayValue(nsAString &aValue)
 {
@@ -416,7 +415,6 @@ nsNSSASN1PrintableItem::GetData(char **outData, uint32_t *outLen)
   return NS_OK;
 }
 
-/* attribute wstring displayName; */
 NS_IMETHODIMP 
 nsNSSASN1PrintableItem::GetDisplayName(nsAString &aDisplayName)
 {

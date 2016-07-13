@@ -10,11 +10,13 @@
 #include "gfxRect.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/BezierUtils.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/RefPtr.h"
 #include "nsColor.h"
 #include "nsCOMPtr.h"
 #include "nsStyleConsts.h"
+#include "nsPresContext.h"
 
 struct nsBorderColors;
 
@@ -26,22 +28,6 @@ class GradientStops;
 
 // define this to enable a bunch of debug dump info
 #undef DEBUG_NEW_BORDERS
-
-//thickness of dashed line relative to dotted line
-#define DOT_LENGTH  1           //square
-#define DASH_LENGTH 3           //3 times longer than dot
-
-//some shorthand for side bits
-#define SIDE_BIT_TOP (1 << NS_SIDE_TOP)
-#define SIDE_BIT_RIGHT (1 << NS_SIDE_RIGHT)
-#define SIDE_BIT_BOTTOM (1 << NS_SIDE_BOTTOM)
-#define SIDE_BIT_LEFT (1 << NS_SIDE_LEFT)
-#define SIDE_BITS_ALL (SIDE_BIT_TOP|SIDE_BIT_RIGHT|SIDE_BIT_BOTTOM|SIDE_BIT_LEFT)
-
-#define C_TL NS_CORNER_TOP_LEFT
-#define C_TR NS_CORNER_TOP_RIGHT
-#define C_BR NS_CORNER_BOTTOM_RIGHT
-#define C_BL NS_CORNER_BOTTOM_LEFT
 
 /*
  * Helper class that handles border rendering.
@@ -74,18 +60,27 @@ typedef enum {
   BorderColorStyleDark
 } BorderColorStyle;
 
+class nsIDocument;
+class nsPresContext;
+
 class nsCSSBorderRenderer final
 {
+  typedef mozilla::gfx::Bezier Bezier;
   typedef mozilla::gfx::ColorPattern ColorPattern;
   typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef mozilla::gfx::Float Float;
   typedef mozilla::gfx::Path Path;
+  typedef mozilla::gfx::Point Point;
   typedef mozilla::gfx::Rect Rect;
   typedef mozilla::gfx::RectCornerRadii RectCornerRadii;
+  typedef mozilla::gfx::StrokeOptions StrokeOptions;
 
 public:
 
-  nsCSSBorderRenderer(DrawTarget* aDrawTarget,
+  nsCSSBorderRenderer(nsPresContext* aPresContext,
+                      const nsIDocument* aDocument,
+                      DrawTarget* aDrawTarget,
+                      const Rect& aDirtyRect,
                       Rect& aOuterRect,
                       const uint8_t* aBorderStyles,
                       const Float* aBorderWidths,
@@ -114,8 +109,13 @@ private:
 
   RectCornerRadii mBorderCornerDimensions;
 
-  // destination DrawTarget
+  // Target document to report warning
+  nsPresContext* mPresContext;
+  const nsIDocument* mDocument;
+
+  // destination DrawTarget and dirty rect
   DrawTarget* mDrawTarget;
+  const Rect& mDirtyRect;
 
   // the rectangle of the outside and the inside of the border
   Rect mOuterRect;
@@ -145,6 +145,9 @@ private:
   // For the given style, is the given corner a solid color?
   bool IsSolidCornerStyle(uint8_t aStyle, mozilla::css::Corner aCorner);
 
+  // For the given corner, is the given corner mergeable into one dot?
+  bool IsCornerMergeable(mozilla::css::Corner aCorner);
+
   // For the given solid corner, what color style should be used?
   BorderColorStyle BorderColorStyleForSolidCorner(uint8_t aStyle, mozilla::css::Corner aCorner);
 
@@ -166,6 +169,17 @@ private:
   // don't ever (mathematically) overlap; the pixel overlap
   // is taken care of by the ADD compositing.
   already_AddRefed<Path> GetSideClipSubPath(mozilla::css::Side aSide);
+
+  // Return start or end point for dashed/dotted side
+  Point GetStraightBorderPoint(mozilla::css::Side aSide,
+                               mozilla::css::Corner aCorner,
+                               bool* aIsUnfilled);
+
+  // Return bezier control points for the outer and the inner curve for given
+  // corner
+  void GetOuterAndInnerBezier(Bezier* aOuterBezier,
+                              Bezier* aInnerBezier,
+                              mozilla::css::Corner aCorner);
 
   // Given a set of sides to fill and a color, do so in the fastest way.
   //
@@ -197,11 +211,32 @@ private:
   // function used by the above to handle -moz-border-colors
   void DrawBorderSidesCompositeColors(int aSides, const nsBorderColors *compositeColors);
 
-  // draw the given dashed side
-  void DrawDashedSide (mozilla::css::Side aSide);
+  // Setup the stroke options for the given dashed/dotted side
+  void SetupDashedOptions(StrokeOptions* aStrokeOptions,
+                          Float aDash[2], mozilla::css::Side aSide,
+                          Float aBorderLength, bool isCorner);
 
-  // Setup the stroke style for a given side
-  void SetupStrokeStyle(mozilla::css::Side aSize);
+  // Draw the given dashed/dotte side
+  void DrawDashedOrDottedSide(mozilla::css::Side aSide);
+
+  // Draw the given dotted side, each dot separately
+  void DrawDottedSideSlow(mozilla::css::Side aSide);
+
+  // Draw the given dashed/dotted corner
+  void DrawDashedOrDottedCorner(mozilla::css::Side aSide,
+                                mozilla::css::Corner aCorner);
+
+  // Draw the given dotted corner, each segment separately
+  void DrawDottedCornerSlow(mozilla::css::Side aSide,
+                            mozilla::css::Corner aCorner);
+
+  // Draw the given dashed corner, each dot separately
+  void DrawDashedCornerSlow(mozilla::css::Side aSide,
+                            mozilla::css::Corner aCorner);
+
+  // Draw the given dashed/dotted corner with solid style
+  void DrawFallbackSolidCorner(mozilla::css::Side aSide,
+                               mozilla::css::Corner aCorner);
 
   // Analyze if all border sides have the same width.
   bool AllBordersSameWidth();
@@ -210,12 +245,6 @@ private:
   // borders because they can be considered 'solid' borders of 0 width and
   // with no color effect.
   bool AllBordersSolid(bool *aHasCompositeColors);
-
-  // Azure variant of CreateCornerGradient.
-  already_AddRefed<mozilla::gfx::GradientStops>
-  CreateCornerGradient(mozilla::css::Corner aCorner, nscolor aFirstColor,
-                       nscolor aSecondColor, mozilla::gfx::DrawTarget *aDT,
-                       mozilla::gfx::Point &aPoint1, mozilla::gfx::Point &aPoint2);
 
   // Draw a solid color border that is uniformly the same width.
   void DrawSingleWidthSolidBorder();

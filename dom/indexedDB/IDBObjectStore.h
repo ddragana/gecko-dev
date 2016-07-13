@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_indexeddb_idbobjectstore_h__
-#define mozilla_dom_indexeddb_idbobjectstore_h__
+#ifndef mozilla_dom_idbobjectstore_h__
+#define mozilla_dom_idbobjectstore_h__
 
 #include "js/RootingAPI.h"
 #include "mozilla/dom/IDBCursorBinding.h"
@@ -18,7 +18,7 @@
 #include "nsWrapperCache.h"
 
 struct JSClass;
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 
@@ -27,29 +27,36 @@ class ErrorResult;
 namespace dom {
 
 class DOMStringList;
-template <typename> class Sequence;
-
-namespace indexedDB {
-
 class IDBCursor;
 class IDBRequest;
 class IDBTransaction;
-class IndexUpdateInfo;
+class StringOrStringSequence;
+template <typename> class Sequence;
+
+namespace indexedDB {
 class Key;
 class KeyPath;
+class IndexUpdateInfo;
 class ObjectStoreSpec;
 struct StructuredCloneReadInfo;
+} // namespace indexedDB
 
 class IDBObjectStore final
   : public nsISupports
   , public nsWrapperCache
 {
+  typedef indexedDB::IndexUpdateInfo IndexUpdateInfo;
+  typedef indexedDB::Key Key;
+  typedef indexedDB::KeyPath KeyPath;
+  typedef indexedDB::ObjectStoreSpec ObjectStoreSpec;
+  typedef indexedDB::StructuredCloneReadInfo StructuredCloneReadInfo;
+
   // For AddOrPut() and DeleteInternal().
-  friend class IDBCursor; 
+  friend class IDBCursor;
 
   static const JSClass sDummyPropJSClass;
 
-  nsRefPtr<IDBTransaction> mTransaction;
+  RefPtr<IDBTransaction> mTransaction;
   JS::Heap<JS::Value> mCachedKeyPath;
 
   // This normally points to the ObjectStoreSpec owned by the parent IDBDatabase
@@ -59,7 +66,7 @@ class IDBObjectStore final
   const ObjectStoreSpec* mSpec;
   nsAutoPtr<ObjectStoreSpec> mDeletedSpec;
 
-  nsTArray<nsRefPtr<IDBIndex>> mIndexes;
+  nsTArray<RefPtr<IDBIndex>> mIndexes;
 
   const int64_t mId;
   bool mRooted;
@@ -75,6 +82,7 @@ public:
                         const KeyPath& aKeyPath,
                         bool aUnique,
                         bool aMultiEntry,
+                        const nsCString& aLocale,
                         JSContext* aCx,
                         JS::Handle<JS::Value> aObject,
                         nsTArray<IndexUpdateInfo>& aUpdateInfoArray);
@@ -91,6 +99,13 @@ public:
   DeserializeIndexValue(JSContext* aCx,
                         StructuredCloneReadInfo& aCloneReadInfo,
                         JS::MutableHandle<JS::Value> aValue);
+
+#if !defined(MOZ_B2G)
+  static bool
+  DeserializeUpgradeValue(JSContext* aCx,
+                          StructuredCloneReadInfo& aCloneReadInfo,
+                          JS::MutableHandle<JS::Value> aValue);
+#endif
 
   static const JSClass*
   DummyPropClass()
@@ -126,7 +141,7 @@ public:
   bool
   HasValidKeyPath() const;
 
-  nsPIDOMWindow*
+  nsPIDOMWindowInner*
   GetParentObject() const;
 
   void
@@ -136,6 +151,9 @@ public:
 
     aName = Name();
   }
+
+  void
+  SetName(const nsAString& aName, ErrorResult& aRv);
 
   void
   GetKeyPath(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
@@ -188,17 +206,11 @@ public:
   Get(JSContext* aCx, JS::Handle<JS::Value> aKey, ErrorResult& aRv);
 
   already_AddRefed<IDBRequest>
-  Clear(ErrorResult& aRv);
+  Clear(JSContext* aCx, ErrorResult& aRv);
 
   already_AddRefed<IDBIndex>
   CreateIndex(const nsAString& aName,
-              const nsAString& aKeyPath,
-              const IDBIndexParameters& aOptionalParameters,
-              ErrorResult& aRv);
-
-  already_AddRefed<IDBIndex>
-  CreateIndex(const nsAString& aName,
-              const Sequence<nsString>& aKeyPath,
+              const StringOrStringSequence& aKeyPath,
               const IDBIndexParameters& aOptionalParameters,
               ErrorResult& aRv);
 
@@ -245,6 +257,17 @@ public:
 
     return OpenCursorInternal(/* aKeysOnly */ false, aCx, aRange, aDirection,
                               aRv);
+  }
+
+  already_AddRefed<IDBRequest>
+  OpenCursor(JSContext* aCx,
+             IDBCursorDirection aDirection,
+             ErrorResult& aRv)
+  {
+    AssertIsOnOwningThread();
+
+    return OpenCursorInternal(/* aKeysOnly */ false, aCx,
+                              JS::UndefinedHandleValue, aDirection, aRv);
   }
 
   already_AddRefed<IDBRequest>
@@ -317,12 +340,6 @@ private:
                  const Optional<uint32_t>& aLimit,
                  ErrorResult& aRv);
 
-  already_AddRefed<IDBIndex>
-  CreateIndexInternal(const nsAString& aName,
-                      const KeyPath& aKeyPath,
-                      const IDBIndexParameters& aOptionalParameters,
-                      ErrorResult& aRv);
-
   already_AddRefed<IDBRequest>
   OpenCursorInternal(bool aKeysOnly,
                      JSContext* aCx,
@@ -331,8 +348,7 @@ private:
                      ErrorResult& aRv);
 };
 
-} // namespace indexedDB
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_indexeddb_idbobjectstore_h__
+#endif // mozilla_dom_idbobjectstore_h__

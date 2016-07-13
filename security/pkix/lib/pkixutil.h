@@ -102,6 +102,14 @@ public:
   {
     return MaybeInput(subjectAltName);
   }
+  const Input* GetRequiredTLSFeatures() const
+  {
+    return MaybeInput(requiredTLSFeatures);
+  }
+  const Input* GetSignedCertificateTimestamps() const
+  {
+    return MaybeInput(signedCertificateTimestamps);
+  }
 
 private:
   const Input der;
@@ -144,6 +152,8 @@ private:
   Input nameConstraints;
   Input subjectAltName;
   Input criticalNetscapeCertificateType;
+  Input requiredTLSFeatures;
+  Input signedCertificateTimestamps; // RFC 6962 (Certificate Transparency)
 
   Result RememberExtension(Reader& extnID, Input extnValue, bool critical,
                            /*out*/ bool& understood);
@@ -191,6 +201,12 @@ private:
   NonOwningDERArray(const NonOwningDERArray&) = delete;
   void operator=(const NonOwningDERArray&) = delete;
 };
+
+// Extracts the SignedCertificateTimestampList structure which is encoded as an
+// OCTET STRING within the X.509v3 / OCSP extensions (see RFC 6962 section 3.3).
+Result
+ExtractSignedCertificateTimestampListFromExtension(Input extnValue,
+                                                   Input& sctList);
 
 inline unsigned int
 DaysBeforeYear(unsigned int year)

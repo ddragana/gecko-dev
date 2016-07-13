@@ -61,8 +61,6 @@ else:
         'FallbackCameraManager.cpp',
     ]
 
-FAIL_ON_WARNINGS = True
-
 LOCAL_INCLUDES += [
     '../base',
     '/media/libyuv/include',
@@ -74,6 +72,9 @@ include('/ipc/chromium/chromium-config.mozbuild')
 #  - about attributes on forward declarations for types that are already
 #    defined, which complains about an important MOZ_EXPORT for android::AString
 if CONFIG['GNU_CC']:
-  CXXFLAGS += ['-Wno-error=attributes']
+    CXXFLAGS += [
+        '-Wno-error=attributes',
+        '-Wno-error=shadow',
+    ]
 
 FINAL_LIBRARY = 'xul'

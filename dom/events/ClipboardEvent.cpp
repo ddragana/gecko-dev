@@ -16,13 +16,13 @@ ClipboardEvent::ClipboardEvent(EventTarget* aOwner,
                                nsPresContext* aPresContext,
                                InternalClipboardEvent* aEvent)
   : Event(aOwner, aPresContext,
-          aEvent ? aEvent : new InternalClipboardEvent(false, 0))
+          aEvent ? aEvent : new InternalClipboardEvent(false, eVoidEvent))
 {
   if (aEvent) {
     mEventIsInternal = false;
   } else {
     mEventIsInternal = true;
-    mEvent->time = PR_Now();
+    mEvent->mTime = PR_Now();
   }
 }
 
@@ -43,7 +43,7 @@ ClipboardEvent::InitClipboardEvent(const nsAString& aType,
   // Null clipboardData is OK
 
   ErrorResult rv;
-  InitClipboardEvent(aType, aCanBubble, aCancelable, clipboardData, rv);
+  InitClipboardEvent(aType, aCanBubble, aCancelable, clipboardData);
 
   return rv.StealNSResult();
 }
@@ -51,15 +51,10 @@ ClipboardEvent::InitClipboardEvent(const nsAString& aType,
 void
 ClipboardEvent::InitClipboardEvent(const nsAString& aType, bool aCanBubble,
                                    bool aCancelable,
-                                   DataTransfer* aClipboardData,
-                                   ErrorResult& aError)
+                                   DataTransfer* aClipboardData)
 {
-  aError = Event::InitEvent(aType, aCanBubble, aCancelable);
-  if (aError.Failed()) {
-    return;
-  }
-
-  mEvent->AsClipboardEvent()->clipboardData = aClipboardData;
+  Event::InitEvent(aType, aCanBubble, aCancelable);
+  mEvent->AsClipboardEvent()->mClipboardData = aClipboardData;
 }
 
 already_AddRefed<ClipboardEvent>
@@ -69,23 +64,24 @@ ClipboardEvent::Constructor(const GlobalObject& aGlobal,
                             ErrorResult& aRv)
 {
   nsCOMPtr<EventTarget> t = do_QueryInterface(aGlobal.GetAsSupports());
-  nsRefPtr<ClipboardEvent> e = new ClipboardEvent(t, nullptr, nullptr);
+  RefPtr<ClipboardEvent> e = new ClipboardEvent(t, nullptr, nullptr);
   bool trusted = e->Init(t);
 
-  nsRefPtr<DataTransfer> clipboardData;
+  RefPtr<DataTransfer> clipboardData;
   if (e->mEventIsInternal) {
     InternalClipboardEvent* event = e->mEvent->AsClipboardEvent();
     if (event) {
       // Always create a clipboardData for the copy event. If this is changed to
       // support other types of events, make sure that read/write privileges are
       // checked properly within DataTransfer.
-      clipboardData = new DataTransfer(ToSupports(e), NS_COPY, false, -1);
-      clipboardData->SetData(aParam.mDataType, aParam.mData);
+      clipboardData = new DataTransfer(ToSupports(e), eCopy, false, -1);
+      clipboardData->SetData(aParam.mDataType, aParam.mData, aRv);
+      NS_ENSURE_TRUE(!aRv.Failed(), nullptr);
     }
   }
 
   e->InitClipboardEvent(aType, aParam.mBubbles, aParam.mCancelable,
-                        clipboardData, aRv);
+                        clipboardData);
   e->SetTrusted(trusted);
   return e.forget();
 }
@@ -102,19 +98,19 @@ ClipboardEvent::GetClipboardData()
 {
   InternalClipboardEvent* event = mEvent->AsClipboardEvent();
 
-  if (!event->clipboardData) {
+  if (!event->mClipboardData) {
     if (mEventIsInternal) {
-      event->clipboardData =
-        new DataTransfer(ToSupports(this), NS_COPY, false, -1);
+      event->mClipboardData =
+        new DataTransfer(ToSupports(this), eCopy, false, -1);
     } else {
-      event->clipboardData =
-        new DataTransfer(ToSupports(this), event->message,
-                         event->message == NS_PASTE,
+      event->mClipboardData =
+        new DataTransfer(ToSupports(this), event->mMessage,
+                         event->mMessage == ePaste,
                          nsIClipboard::kGlobalClipboard);
     }
   }
 
-  return event->clipboardData;
+  return event->mClipboardData;
 }
 
 } // namespace dom
@@ -123,14 +119,12 @@ ClipboardEvent::GetClipboardData()
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsresult
-NS_NewDOMClipboardEvent(nsIDOMEvent** aInstancePtrResult,
-                        EventTarget* aOwner,
+already_AddRefed<ClipboardEvent>
+NS_NewDOMClipboardEvent(EventTarget* aOwner,
                         nsPresContext* aPresContext,
                         InternalClipboardEvent* aEvent)
 {
-  ClipboardEvent* it = new ClipboardEvent(aOwner, aPresContext, aEvent);
-  NS_ADDREF(it);
-  *aInstancePtrResult = static_cast<Event*>(it);
-  return NS_OK;
+  RefPtr<ClipboardEvent> it =
+    new ClipboardEvent(aOwner, aPresContext, aEvent);
+  return it.forget();
 }

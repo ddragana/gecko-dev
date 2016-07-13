@@ -12,23 +12,20 @@
 #include "nsIChannel.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
+#include "nsILoadInfo.h"
 
+namespace mozilla {
+namespace net {
+
+static LazyLogModule gRedirectLog("nsRedirect");
 #undef LOG
-static PRLogModuleInfo *
-GetRedirectLog()
-{
-    static PRLogModuleInfo *sLog;
-    if (!sLog)
-        sLog = PR_NewLogModule("nsRedirect");
-    return sLog;
-}
-#define LOG(args) MOZ_LOG(GetRedirectLog(), mozilla::LogLevel::Debug, args)
+#define LOG(args) MOZ_LOG(gRedirectLog, LogLevel::Debug, args)
 
 NS_IMPL_ISUPPORTS(nsAsyncRedirectVerifyHelper,
                   nsIAsyncVerifyRedirectCallback,
                   nsIRunnable)
 
-class nsAsyncVerifyRedirectCallbackEvent : public nsRunnable {
+class nsAsyncVerifyRedirectCallbackEvent : public Runnable {
 public:
     nsAsyncVerifyRedirectCallbackEvent(nsIAsyncVerifyRedirectCallback *cb,
                                        nsresult result)
@@ -49,7 +46,9 @@ private:
 };
 
 nsAsyncRedirectVerifyHelper::nsAsyncRedirectVerifyHelper()
-    : mCallbackInitiated(false),
+    : mFlags(0),
+      mWaitingForRedirectCallback(false),
+      mCallbackInitiated(false),
       mExpectedCallbacks(0),
       mResult(NS_OK)
 {
@@ -71,6 +70,15 @@ nsAsyncRedirectVerifyHelper::Init(nsIChannel* oldChan, nsIChannel* newChan,
     mNewChan           = newChan;
     mFlags             = flags;
     mCallbackThread    = do_GetCurrentThread();
+
+    if (!(flags & (nsIChannelEventSink::REDIRECT_INTERNAL |
+                   nsIChannelEventSink::REDIRECT_STS_UPGRADE))) {
+      nsCOMPtr<nsILoadInfo> loadInfo = oldChan->GetLoadInfo();
+      if (loadInfo && loadInfo->GetDontFollowRedirects()) {
+        ExplicitCallback(NS_BINDING_ABORTED);
+        return NS_OK;
+      }
+    }
 
     if (synchronize)
       mWaitingForRedirectCallback = true;
@@ -269,3 +277,6 @@ nsAsyncRedirectVerifyHelper::IsOldChannelCanceled()
 
     return false;
 }
+
+} // namespace net
+} // namespace mozilla

@@ -43,8 +43,18 @@ public:
   /**
    * Notify this Axis that a new touch has been received, including a timestamp
    * for when the touch was received. This triggers a recalculation of velocity.
+   * This can also used for pan gesture events. For those events, the "touch"
+   * location is stationary and the scroll displacement is passed in as
+   * aAdditionalDelta.
    */
-  void UpdateWithTouchAtDevicePoint(ParentLayerCoord aPos, uint32_t aTimestampMs);
+  void UpdateWithTouchAtDevicePoint(ParentLayerCoord aPos, ParentLayerCoord aAdditionalDelta, uint32_t aTimestampMs);
+
+protected:
+  float ApplyFlingCurveToVelocity(float aVelocity) const;
+  void AddVelocityToQueue(uint32_t aTimestampMs, float aVelocity);
+
+public:
+  void HandleTouchVelocity(uint32_t aTimestampMs, float aSpeed);
 
   /**
    * Notify this Axis that a touch has begun, i.e. the user has put their finger
@@ -59,12 +69,12 @@ public:
   void EndTouch(uint32_t aTimestampMs);
 
   /**
-   * Notify this Axis that a touch has ended forcefully. Useful for stopping
+   * Notify this Axis that the gesture has ended forcefully. Useful for stopping
    * flings when a user puts their finger down in the middle of one (i.e. to
    * stop a previous touch including its fling so that a new one can take its
    * place).
    */
-  void CancelTouch();
+  void CancelGesture();
 
   /**
    * Takes a requested displacement to the position of this axis, and adjusts it
@@ -163,7 +173,7 @@ public:
   /**
    * Returns whether this axis can scroll any more in a particular direction.
    */
-  bool CanScroll(double aDelta) const;
+  bool CanScroll(ParentLayerCoord aDelta) const;
 
   /**
    * Returns true if the page has room to be scrolled along this axis
@@ -223,12 +233,18 @@ public:
    */
   bool ScaleWillOverscrollBothSides(float aScale) const;
 
+  /**
+   * Returns true if movement on this axis is locked.
+   */
+  bool IsAxisLocked() const;
+
   ParentLayerCoord GetOrigin() const;
   ParentLayerCoord GetCompositionLength() const;
   ParentLayerCoord GetPageStart() const;
   ParentLayerCoord GetPageLength() const;
   ParentLayerCoord GetCompositionEnd() const;
   ParentLayerCoord GetPageEnd() const;
+  ParentLayerCoord GetScrollRangeEnd() const;
 
   ParentLayerCoord GetPos() const { return mPos; }
 
@@ -243,7 +259,14 @@ public:
 
 protected:
   ParentLayerCoord mPos;
-  uint32_t mPosTimeMs;
+
+  // mVelocitySampleTimeMs and mVelocitySamplePos are the time and position
+  // used in the last velocity sampling. They get updated when a new sample is
+  // taken (which may not happen on every input event, if the time delta is too
+  // small).
+  uint32_t mVelocitySampleTimeMs;
+  ParentLayerCoord mVelocitySamplePos;
+
   ParentLayerCoord mStartPos;
   float mVelocity;      // Units: ParentLayerCoords per millisecond
   bool mAxisLocked;     // Whether movement on this axis is locked.
@@ -277,9 +300,6 @@ protected:
   // Adjust a requested overscroll amount for resistance, yielding a smaller
   // actual overscroll amount.
   ParentLayerCoord ApplyResistance(ParentLayerCoord aOverscroll) const;
-
-  // Clear the state associated with an overscroll animation.
-  void ClearOverscrollAnimationState();
 
   // Helper function for SampleOverscrollAnimation().
   void StepOverscrollAnimation(double aStepDurationMilliseconds);

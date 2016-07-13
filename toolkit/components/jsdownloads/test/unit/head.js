@@ -12,17 +12,16 @@
 ////////////////////////////////////////////////////////////////////////////////
 //// Globals
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
+var Cc = Components.classes;
+var Ci = Components.interfaces;
+var Cu = Components.utils;
+var Cr = Components.results;
 
+Cu.import("resource://gre/modules/Integration.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "DownloadPaths",
                                   "resource://gre/modules/DownloadPaths.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "DownloadIntegration",
-                                  "resource://gre/modules/DownloadIntegration.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
                                   "resource://gre/modules/Downloads.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
@@ -49,6 +48,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "MockRegistrar",
 XPCOMUtils.defineLazyServiceGetter(this, "gExternalHelperAppService",
            "@mozilla.org/uriloader/external-helper-app-service;1",
            Ci.nsIExternalHelperAppService);
+
+Integration.downloads.defineModuleGetter(this, "DownloadIntegration",
+            "resource://gre/modules/DownloadIntegration.jsm");
 
 const ServerSocket = Components.Constructor(
                                 "@mozilla.org/network/server-socket;1",
@@ -94,7 +96,7 @@ function run_test()
 /**
  * HttpServer object initialized before tests start.
  */
-let gHttpServer;
+var gHttpServer;
 
 /**
  * Given a file name, returns a string containing an URI that points to the file
@@ -109,7 +111,7 @@ function httpUrl(aFileName) {
 // used, on Windows these might still be pending deletion on the physical file
 // system.  Thus, start from a new base number every time, to make a collision
 // with a file that is still pending deletion highly unlikely.
-let gFileCounter = Math.floor(Math.random() * 1000000);
+var gFileCounter = Math.floor(Math.random() * 1000000);
 
 /**
  * Returns a reference to a temporary file, that is guaranteed not to exist, and
@@ -409,11 +411,11 @@ function promiseStartExternalHelperAppServiceDownload(aSourceUrl) {
 
     let channel = NetUtil.newChannel({
       uri: sourceURI,
-      loadUsingSystemPrincipal: true,
+      loadUsingSystemPrincipal: true
     });
 
     // Start the actual download process.
-    channel.asyncOpen({
+    channel.asyncOpen2({
       contentListener: null,
 
       onStartRequest: function (aRequest, aContext)
@@ -435,7 +437,7 @@ function promiseStartExternalHelperAppServiceDownload(aSourceUrl) {
         this.contentListener.onDataAvailable(aRequest, aContext, aInputStream,
                                              aOffset, aCount);
       },
-    }, null);
+    });
   }.bind(this)).then(null, do_report_unexpected_exception);
 
   return deferred.promise;
@@ -532,7 +534,7 @@ function promiseNewList(aIsPrivate)
  */
 function promiseVerifyContents(aPath, aExpectedContents)
 {
-  return Task.spawn(function() {
+  return Task.spawn(function* () {
     let file = new FileUtils.File(aPath);
 
     if (!(yield OS.File.exists(aPath))) {
@@ -587,7 +589,7 @@ function startFakeServer()
 /**
  * This is an internal reference that should not be used directly by tests.
  */
-let _gDeferResponses = Promise.defer();
+var _gDeferResponses = Promise.defer();
 
 /**
  * Ensures that all the interruptible requests started after this function is
@@ -672,7 +674,7 @@ function isValidDate(aDate) {
  * Position of the first byte served by the "interruptible_resumable.txt"
  * handler during the most recent response.
  */
-let gMostRecentFirstBytePos;
+var gMostRecentFirstBytePos;
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Initialization functions common to all tests
@@ -683,6 +685,14 @@ add_task(function test_common_initialize()
   gHttpServer = new HttpServer();
   gHttpServer.registerDirectory("/", do_get_file("../data"));
   gHttpServer.start(-1);
+  do_register_cleanup(() => {
+    return new Promise(resolve => {
+      // Ensure all the pending HTTP requests have a chance to finish.
+      continueResponses();
+      // Stop the HTTP server, calling resolve when it's done.
+      gHttpServer.stop(resolve);
+    });
+  });
 
   // Cache locks might prevent concurrent requests to the same resource, and
   // this may block tests that use the interruptible handlers.
@@ -779,21 +789,39 @@ add_task(function test_common_initialize()
                               "Blocked by Windows Parental Controls");
     });
 
-  // Disable integration with the host application requiring profile access.
-  DownloadIntegration.dontLoadList = true;
-  DownloadIntegration.dontLoadObservers = true;
-  // Disable the parental controls checking.
-  DownloadIntegration.dontCheckParentalControls = true;
-  // Disable application reputation checks.
-  DownloadIntegration.dontCheckApplicationReputation = true;
-  // Disable the calls to the OS to launch files and open containing folders
-  DownloadIntegration.dontOpenFileAndFolder = true;
-  DownloadIntegration._deferTestOpenFile = Promise.defer();
-  DownloadIntegration._deferTestShowDir = Promise.defer();
-
-  // Avoid leaking uncaught promise errors
-  DownloadIntegration._deferTestOpenFile.promise.then(null, () => undefined);
-  DownloadIntegration._deferTestShowDir.promise.then(null, () => undefined);
+  // During unit tests, most of the functions that require profile access or
+  // operating system features will be disabled. Individual tests may override
+  // them again to check for specific behaviors.
+  Integration.downloads.register(base => ({
+    __proto__: base,
+    loadPublicDownloadListFromStore: () => Promise.resolve(),
+    shouldKeepBlockedData: () => Promise.resolve(false),
+    shouldBlockForParentalControls: () => Promise.resolve(false),
+    shouldBlockForRuntimePermissions: () => Promise.resolve(false),
+    shouldBlockForReputationCheck: () => Promise.resolve({
+      shouldBlock: false,
+      verdict: "",
+    }),
+    confirmLaunchExecutable: () => Promise.resolve(),
+    launchFile: () => Promise.resolve(),
+    showContainingDirectory: () => Promise.resolve(),
+    // This flag allows re-enabling the default observers during their tests.
+    allowObservers: false,
+    addListObservers() {
+      return this.allowObservers ? super.addListObservers(...arguments)
+                                 : Promise.resolve();
+    },
+    // This flag allows re-enabling the download directory logic for its tests.
+    _allowDirectories: false,
+    set allowDirectories(value) {
+      this._allowDirectories = value;
+      // We have to invalidate the previously computed directory path.
+      this._downloadsDirectory = null;
+    },
+    _getDirectory(name) {
+      return super._getDirectory(this._allowDirectories ? name : "TmpD");
+    },
+  }));
 
   // Get a reference to nsIComponentRegistrar, and ensure that is is freed
   // before the XPCOM shutdown.

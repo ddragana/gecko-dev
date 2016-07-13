@@ -6,7 +6,6 @@
 #ifndef nsEditorEventListener_h__
 #define nsEditorEventListener_h__
 
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsError.h"
 #include "nsIDOMEventListener.h"
@@ -85,7 +84,7 @@ protected:
   nsresult HandleMiddleClickPaste(nsIDOMMouseEvent* aMouseEvent);
 
   nsEditor* mEditor; // weak
-  nsRefPtr<nsCaret> mCaret;
+  RefPtr<nsCaret> mCaret;
   bool mCommitText;
   bool mInTransaction;
   bool mMouseDownOrUpConsumedByIME;

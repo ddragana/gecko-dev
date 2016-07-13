@@ -28,6 +28,9 @@ _mochitest_summary = {
 TinderBoxPrintRe = {
     "mochitest_summary": _mochitest_summary,
     "mochitest-gl_summary": _mochitest_summary,
+    "mochitest-media_summary": _mochitest_summary,
+    "mochitest-plain-clipboard_summary": _mochitest_summary,
+    "mochitest-plain-gpu_summary": _mochitest_summary,
     "reftest_summary": {
         'regex': re.compile(r'''REFTEST INFO \| (Successful|Unexpected|Known problems): (\d+) \('''),
         'pass_group': "Successful",
@@ -60,6 +63,12 @@ TinderBoxPrintRe = {
         'fail_group': "Failed",
         'known_fail_group': None,
     },
+    "gtest_summary": {
+        'regex': re.compile(r'''(Passed|Failed): (\d+)'''),
+        'pass_group': "Passed",
+        'fail_group': "Failed",
+        'known_fail_group': None,
+    },
     "jittest_summary": {
         'regex': re.compile(r'''(Passed|Failed): (\d+)'''),
         'pass_group': "Passed",
@@ -72,7 +81,12 @@ TinderBoxPrintRe = {
         'fail_group': "FAILED",
         'known_fail_group': None,
     },
-    "webapprt_summary": _mochitest_summary,
+    "mozmill_summary": {
+        'regex': re.compile(r'''INFO (Passed|Failed|Skipped): (\d+)'''),
+        'pass_group': "Passed",
+        'fail_group': "Failed",
+        'known_fail_group': "Skipped",
+    },
 
     "harness_error": {
         'full_regex': re.compile(r"(?:TEST-UNEXPECTED-FAIL|PROCESS-CRASH) \| .* \| (application crashed|missing output line for total leaks!|negative leaks caught!|\d+ bytes leaked)"),

@@ -4,11 +4,13 @@
 
 from abc import ABCMeta, abstractmethod, abstractproperty
 from argparse import ArgumentParser, SUPPRESS
+from distutils.util import strtobool
 from urlparse import urlparse
+import json
 import os
 import tempfile
 
-from droid import DroidADB, DroidSUT
+from mozdevice import DroidADB, DroidSUT
 from mozprofile import DEFAULT_PORTS
 import mozinfo
 import mozlog
@@ -28,7 +30,37 @@ except ImportError:
     conditions = None
 
 
-VMWARE_RECORDING_HELPER_BASENAME = "vmwarerecordinghelper"
+def get_default_valgrind_suppression_files():
+    # We are trying to locate files in the source tree.  So if we
+    # don't know where the source tree is, we must give up.
+    #
+    # When this is being run by |mach mochitest --valgrind ...|, it is
+    # expected that |build_obj| is not None, and so the logic below will
+    # select the correct suppression files.
+    #
+    # When this is run from mozharness, |build_obj| is None, and we expect
+    # that testing/mozharness/configs/unittests/linux_unittests.py will
+    # select the correct suppression files (and paths to them) and
+    # will specify them using the --valgrind-supp-files= flag.  Hence this
+    # function will not get called when running from mozharness.
+    #
+    # Note: keep these Valgrind .sup file names consistent with those
+    # in testing/mozharness/configs/unittests/linux_unittest.py.
+    if build_obj is None or build_obj.topsrcdir is None:
+        return []
+
+    supps_path = os.path.join(build_obj.topsrcdir, "build", "valgrind")
+
+    rv = []
+    if mozinfo.os == "linux":
+        if mozinfo.processor == "x86_64":
+            rv.append(os.path.join(supps_path, "x86_64-redhat-linux-gnu.sup"))
+            rv.append(os.path.join(supps_path, "cross-architecture.sup"))
+        elif mozinfo.processor == "x86":
+            rv.append(os.path.join(supps_path, "i386-redhat-linux-gnu.sup"))
+            rv.append(os.path.join(supps_path, "cross-architecture.sup"))
+
+    return rv
 
 
 class ArgumentContainer():
@@ -66,10 +98,12 @@ class MochitestArguments(ArgumentContainer):
                   "(to run recursively). If omitted, the entire suite is run.",
           }],
         [["--keep-open"],
-         {"action": "store_false",
-          "dest": "closeWhenDone",
-          "default": True,
-          "help": "Always keep the browser open after tests complete.",
+         {"nargs": "?",
+          "type": strtobool,
+          "const": "true",
+          "default": None,
+          "help": "Always keep the browser open after tests complete. Or always close the "
+                  "browser with --keep-open=false",
           }],
         [["--appname"],
          {"dest": "app",
@@ -77,7 +111,6 @@ class MochitestArguments(ArgumentContainer):
           "help": "Override the default binary used to run tests with the path provided, e.g "
                   "/usr/bin/firefox. If you have run ./mach package beforehand, you can "
                   "specify 'dist' to run tests against the distribution bundle's binary.",
-          "suppress": build_obj is not None,
           }],
         [["--utility-path"],
          {"dest": "utilityPath",
@@ -158,13 +191,6 @@ class MochitestArguments(ArgumentContainer):
           "help": "Run chrome mochitests.",
           "suppress": True,
           }],
-        [["--ipcplugins"],
-         {"action": "store_true",
-          "dest": "ipcplugins",
-          "help": "Run ipcplugins mochitests.",
-          "default": False,
-          "suppress": True,
-          }],
         [["--bisect-chunk"],
          {"dest": "bisectChunk",
           "default": None,
@@ -204,20 +230,6 @@ class MochitestArguments(ArgumentContainer):
          {"action": "store_true",
           "dest": "jetpackAddon",
           "help": "Run jetpack addon tests.",
-          "default": False,
-          "suppress": True,
-          }],
-        [["--webapprt-content"],
-         {"action": "store_true",
-          "dest": "webapprtContent",
-          "help": "Run WebappRT content tests.",
-          "default": False,
-          "suppress": True,
-          }],
-        [["--webapprt-chrome"],
-         {"action": "store_true",
-          "dest": "webapprtChrome",
-          "help": "Run WebappRT chrome tests.",
           "default": False,
           "suppress": True,
           }],
@@ -293,14 +305,6 @@ class MochitestArguments(ArgumentContainer):
           "help": "Directory where testing-only JS modules are located.",
           "suppress": True,
           }],
-        [["--use-vmware-recording"],
-         {"action": "store_true",
-          "dest": "vmwareRecording",
-          "default": False,
-          "help": "Enables recording while the application is running inside a VMware "
-                  "Workstation 7.0 or later VM.",
-          "suppress": True,
-          }],
         [["--repeat"],
          {"type": int,
           "default": 0,
@@ -319,12 +323,24 @@ class MochitestArguments(ArgumentContainer):
           "help": "Path to a manifestparser (.ini formatted) manifest of tests to run.",
           "suppress": True,
           }],
+        [["--extra-mozinfo-json"],
+         {"dest": "extra_mozinfo_json",
+          "default": None,
+          "help": "Filter tests based on a given mozinfo file.",
+          "suppress": True,
+          }],
         [["--testrun-manifest-file"],
          {"dest": "testRunManifestFile",
           "default": 'tests.json',
           "help": "Overrides the default filename of the tests.json manifest file that is "
                   "generated by the harness and used by SimpleTest. Only useful when running "
                   "multiple test runs simulatenously on the same machine.",
+          "suppress": True,
+          }],
+        [["--dump-tests"],
+         {"dest": "dump_tests",
+          "default": None,
+          "help": "Specify path to a filename to dump all the tests that will be run",
           "suppress": True,
           }],
         [["--failure-file"],
@@ -372,10 +388,26 @@ class MochitestArguments(ArgumentContainer):
           "help": "Breaks execution and enters the JS debugger on a test failure. Should "
                   "be used together with --jsdebugger."
           }],
-        [["--e10s"],
-         {"action": "store_true",
-          "default": False,
-          "help": "Run tests with electrolysis preferences and test filtering enabled.",
+        [["--disable-e10s"],
+         {"action": "store_false",
+          "default": True,
+          "dest": "e10s",
+          "help": "Run tests with electrolysis preferences and test filtering disabled.",
+          }],
+        [["--store-chrome-manifest"],
+         {"action": "store",
+          "help": "Destination path to write a copy of any chrome manifest "
+                  "written by the harness.",
+          "default": None,
+          "suppress": True,
+          }],
+        [["--jscov-dir-prefix"],
+         {"action": "store",
+          "help": "Directory to store per-test line coverage data as json "
+                  "(browser-chrome only). To emit lcov formatted data, set "
+                  "JS_CODE_COVERAGE_OUTPUT_DIR in the environment.",
+          "default": None,
+          "suppress": True,
           }],
         [["--strict-content-sandbox"],
          {"action": "store_true",
@@ -478,6 +510,20 @@ class MochitestArguments(ArgumentContainer):
           "default": None,
           "help": "Arguments to pass to the debugger.",
           }],
+        [["--valgrind"],
+         {"default": None,
+          "help": "Valgrind binary to run tests with. Program name or path.",
+          }],
+        [["--valgrind-args"],
+         {"dest": "valgrindArgs",
+          "default": None,
+          "help": "Comma-separated list of extra arguments to pass to Valgrind.",
+          }],
+        [["--valgrind-supp-files"],
+         {"dest": "valgrindSuppFiles",
+          "default": None,
+          "help": "Comma-separated list of suppression files to pass to Valgrind.",
+          }],
         [["--debugger-interactive"],
          {"action": "store_true",
           "dest": "debuggerInteractive",
@@ -499,13 +545,34 @@ class MochitestArguments(ArgumentContainer):
           "help": "Enable logging of unsafe CPOW usage, which is disabled by default for tests",
           "suppress": True,
           }],
+        [["--marionette"],
+         {"default": None,
+          "help": "host:port to use when connecting to Marionette",
+          }],
+        [["--marionette-port-timeout"],
+         {"default": None,
+          "help": "Timeout while waiting for the marionette port to open.",
+          "suppress": True,
+          }],
+        [["--marionette-socket-timeout"],
+         {"default": None,
+          "help": "Timeout while waiting to receive a message from the marionette server.",
+          "suppress": True,
+          }],
+        [["--cleanup-crashes"],
+         {"action": "store_true",
+          "dest": "cleanupCrashes",
+          "default": False,
+          "help": "Delete pending crash reports before running tests.",
+          "suppress": True,
+          }],
     ]
 
     defaults = {
         # Bug 1065098 - The geckomediaplugin process fails to produce a leak
         # log for some reason.
         'ignoreMissingLeaks': ["geckomediaplugin"],
-
+        'extensionsToExclude': ['specialpowers'],
         # Set server information on the args object
         'webServer': '127.0.0.1',
         'httpPort': DEFAULT_PORTS['http'],
@@ -552,12 +619,16 @@ class MochitestArguments(ArgumentContainer):
             options.gmp_path = os.pathsep.join(
                 os.path.join(build_obj.bindir, *p) for p in gmp_modules)
 
-        if options.ipcplugins:
-            options.test_paths.append('dom/plugins/test/mochitest')
-
         if options.totalChunks is not None and options.thisChunk is None:
             parser.error(
                 "thisChunk must be specified when totalChunks is specified")
+
+        if options.extra_mozinfo_json:
+            if not os.path.isfile(options.extra_mozinfo_json):
+                parser.error("Error: couldn't find mozinfo.json at '%s'."
+                             % options.extra_mozinfo_json)
+
+            options.extra_mozinfo_json = json.load(open(options.extra_mozinfo_json))
 
         if options.totalChunks:
             if not 1 <= options.thisChunk <= options.totalChunks:
@@ -596,7 +667,7 @@ class MochitestArguments(ArgumentContainer):
 
         if options.dmd and not options.dmdPath:
             if build_obj:
-                options.dmdPath = build_obj.bin_dir
+                options.dmdPath = build_obj.bindir
             else:
                 parser.error(
                     "could not find dmd libraries, specify them with --dmd-path")
@@ -614,20 +685,6 @@ class MochitestArguments(ArgumentContainer):
         elif not options.symbolsPath and build_obj:
             options.symbolsPath = os.path.join(build_obj.distdir, 'crashreporter-symbols')
 
-        if options.vmwareRecording:
-            if not mozinfo.isWin:
-                parser.error(
-                    "use-vmware-recording is only supported on Windows.")
-            options.vmwareHelperPath = os.path.join(
-                options.utilityPath, VMWARE_RECORDING_HELPER_BASENAME + ".dll")
-            if not os.path.exists(options.vmwareHelperPath):
-                parser.error("%s not found, cannot automate VMware recording." %
-                             options.vmwareHelperPath)
-
-        if options.webapprtContent and options.webapprtChrome:
-            parser.error(
-                "Only one of --webapprt-content and --webapprt-chrome may be given.")
-
         if options.jsdebugger:
             options.extraPrefs += [
                 "devtools.debugger.remote-enabled=true",
@@ -643,6 +700,26 @@ class MochitestArguments(ArgumentContainer):
         if options.debuggerArgs and not options.debugger:
             parser.error(
                 "--debugger-args requires --debugger.")
+
+        if options.valgrind or options.debugger:
+            # valgrind and some debuggers may cause Gecko to start slowly. Make sure
+            # marionette waits long enough to connect.
+            options.marionette_port_timeout = 900
+            options.marionette_socket_timeout = 540
+
+        if options.store_chrome_manifest:
+            options.store_chrome_manifest = os.path.abspath(options.store_chrome_manifest)
+            if not os.path.isdir(os.path.dirname(options.store_chrome_manifest)):
+                parser.error(
+                    "directory for %s does not exist as a destination to copy a "
+                    "chrome manifest." % options.store_chrome_manifest)
+
+        if options.jscov_dir_prefix:
+            options.jscov_dir_prefix = os.path.abspath(options.jscov_dir_prefix)
+            if not os.path.isdir(options.jscov_dir_prefix):
+                parser.error(
+                    "directory %s does not exist as a destination for coverage "
+                    "data." % options.jscov_dir_prefix)
 
         if options.testingModulesDir is None:
             if build_obj:
@@ -717,9 +794,7 @@ class MochitestArguments(ArgumentContainer):
                         '--use-test-media-devices' % f)
 
         if options.nested_oop:
-            if not options.e10s:
-                options.e10s = True
-        mozinfo.update({"e10s": options.e10s})  # for test manifest parsing.
+            options.e10s = True
 
         options.leakThresholds = {
             "default": options.defaultLeakThreshold,
@@ -728,11 +803,6 @@ class MochitestArguments(ArgumentContainer):
             "geckomediaplugin": 20000,
         }
 
-        # Bug 1091917 - We exit early in tab processes on Windows, so we don't
-        # get leak logs yet.
-        if mozinfo.isWin:
-            options.ignoreMissingLeaks.append("tab")
-
         # XXX We can't normalize test_paths in the non build_obj case here,
         # because testRoot depends on the flavor, which is determined by the
         # mach command and therefore not finalized yet. Conversely, test paths
@@ -740,7 +810,7 @@ class MochitestArguments(ArgumentContainer):
         if options.test_paths and build_obj:
             # Normalize test paths so they are relative to test root
             options.test_paths = [build_obj._wrap_path_argument(p).relpath()
-                for p in options.test_paths]
+                                  for p in options.test_paths]
 
         return options
 
@@ -754,16 +824,6 @@ class B2GArguments(ArgumentContainer):
           "default": None,
           "help": "Path to B2G repo or QEMU directory.",
           "suppress": True,
-          }],
-        [["--desktop"],
-         {"action": "store_true",
-          "default": False,
-          "help": "Run the tests on a B2G desktop build.",
-          "suppress": True,
-          }],
-        [["--marionette"],
-         {"default": None,
-          "help": "host:port to use when connecting to Marionette",
           }],
         [["--emulator"],
          {"default": None,
@@ -787,7 +847,7 @@ class B2GArguments(ArgumentContainer):
           }],
         [["--adbpath"],
          {"dest": "adbPath",
-          "default": "adb",
+          "default": None,
           "help": "Path to adb binary.",
           "suppress": True,
           }],
@@ -834,11 +894,6 @@ class B2GArguments(ArgumentContainer):
                   "prior to test.",
           "suppress": True,
           }],
-        [["--profile"],
-         {"dest": "profile",
-          "default": None,
-          "help": "For desktop testing, the path to the gaia profile to use.",
-          }],
         [["--logdir"],
          {"dest": "logdir",
           "default": None,
@@ -860,27 +915,17 @@ class B2GArguments(ArgumentContainer):
 
     defaults = {
         'logFile': 'mochitest.log',
+        # Specialpowers is integrated with marionette for b2g,
+        # see marionette's jar.mn.
         'extensionsToExclude': ['specialpowers'],
+        # mochijar doesn't get installed via marionette on android
+        'extensionsToInstall': [os.path.join(here, 'mochijar')],
         # See dependencies of bug 1038943.
         'defaultLeakThreshold': 5536,
     }
 
     def validate(self, parser, options, context):
         """Validate b2g options."""
-
-        if options.desktop and not options.app:
-            if not (build_obj and conditions.is_b2g_desktop(build_obj)):
-                parser.error(
-                    "--desktop specified, but no b2g desktop build detected! Either "
-                    "build for b2g desktop, or point --appname to a b2g desktop binary.")
-        elif build_obj and conditions.is_b2g_desktop(build_obj):
-            options.desktop = True
-            if not options.app:
-                options.app = build_obj.get_binary_path()
-                if not options.app.endswith('-bin'):
-                    options.app = '%s-bin' % options.app
-                if not os.path.isfile(options.app):
-                    options.app = options.app[:-len('-bin')]
 
         if options.remoteWebServer is None:
             if os.name != "nt":
@@ -1027,6 +1072,10 @@ class AndroidArguments(ArgumentContainer):
 
     defaults = {
         'dm': None,
+        # we don't want to exclude specialpowers on android just yet
+        'extensionsToExclude': [],
+        # mochijar doesn't get installed via marionette on android
+        'extensionsToInstall': [os.path.join(here, 'mochijar')],
         'logFile': 'mochitest.log',
         'utilityPath': None,
     }
@@ -1114,7 +1163,8 @@ class AndroidArguments(ArgumentContainer):
             options.robocopIni = os.path.abspath(options.robocopIni)
 
             if not options.robocopApk and build_obj:
-                options.robocopApk = os.path.join(build_obj.topobjdir, 'build', 'mobile',
+                options.robocopApk = os.path.join(build_obj.topobjdir, 'mobile', 'android',
+                                                  'tests', 'browser',
                                                   'robocop', 'robocop-debug.apk')
 
         if options.robocopApk != "":
@@ -1123,6 +1173,11 @@ class AndroidArguments(ArgumentContainer):
                     "Unable to find robocop APK '%s'" %
                     options.robocopApk)
             options.robocopApk = os.path.abspath(options.robocopApk)
+
+        # Disable e10s by default on Android because we don't run Android
+        # e10s jobs anywhere yet.
+        options.e10s = False
+        mozinfo.update({'e10s': options.e10s})
 
         # allow us to keep original application around for cleanup while
         # running robocop via 'am'
@@ -1138,14 +1193,7 @@ container_map = {
 
 
 class MochitestArgumentParser(ArgumentParser):
-    """
-    Usage instructions for Mochitest.
-
-    All arguments are optional.
-    If --chrome is specified, chrome tests will be run instead of web content tests.
-    If --browser-chrome is specified, browser-chrome tests will be run instead of web content tests.
-    See <http://mochikit.com/doc/html/MochiKit/Logging.html> for details on the logging levels.
-    """
+    """%(prog)s [options] [test paths]"""
 
     _containers = None
     context = {}
@@ -1158,7 +1206,7 @@ class MochitestArgumentParser(ArgumentParser):
         if not self.app and build_obj:
             if conditions.is_android(build_obj):
                 self.app = 'android'
-            elif conditions.is_b2g(build_obj) or conditions.is_b2g_desktop(build_obj):
+            elif conditions.is_b2g(build_obj):
                 self.app = 'b2g'
         if not self.app:
             # platform can't be determined and app wasn't specified explicitly,

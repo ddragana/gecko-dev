@@ -94,6 +94,7 @@ public:
   NS_IMETHOD OnFileDoomed(CacheFileHandle *aHandle, nsresult aResult) override;
   NS_IMETHOD OnEOFSet(CacheFileHandle *aHandle, nsresult aResult) override;
   NS_IMETHOD OnFileRenamed(CacheFileHandle *aHandle, nsresult aResult) override;
+  virtual bool IsKilled() override;
 
   bool   IsReady() const;
   bool   IsDirty() const;
@@ -150,7 +151,7 @@ private:
   uint32_t            mRWBufSize;
   CacheHash::Hash16_t mReadHash;
 
-  nsRefPtr<CacheFile>              mFile; // is null if chunk is cached to
+  RefPtr<CacheFile>                mFile; // is null if chunk is cached to
                                           // prevent reference cycles
   nsCOMPtr<CacheFileChunkListener> mListener;
   nsTArray<ChunkListenerItem *>    mUpdateListeners;

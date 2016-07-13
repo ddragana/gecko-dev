@@ -10,7 +10,7 @@
 namespace mozilla {
 namespace dom {
 
-DisplayPortInputPort::DisplayPortInputPort(nsPIDOMWindow* aWindow)
+DisplayPortInputPort::DisplayPortInputPort(nsPIDOMWindowInner* aWindow)
   : InputPort(aWindow)
 {
 }
@@ -20,12 +20,12 @@ DisplayPortInputPort::~DisplayPortInputPort()
 }
 
 /* static */ already_AddRefed<DisplayPortInputPort>
-DisplayPortInputPort::Create(nsPIDOMWindow* aWindow,
+DisplayPortInputPort::Create(nsPIDOMWindowInner* aWindow,
                              nsIInputPortListener* aListener,
                              nsIInputPortData* aData,
                              ErrorResult& aRv)
 {
-  nsRefPtr<DisplayPortInputPort> inputport = new DisplayPortInputPort(aWindow);
+  RefPtr<DisplayPortInputPort> inputport = new DisplayPortInputPort(aWindow);
   inputport->Init(aData, aListener, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;

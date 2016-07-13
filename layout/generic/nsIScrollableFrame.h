@@ -11,6 +11,7 @@
 #define nsIScrollFrame_h___
 
 #include "nsCoord.h"
+#include "DisplayItemClip.h"
 #include "ScrollbarStyles.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/gfx/Point.h"
@@ -32,17 +33,9 @@ class nsDisplayListBuilder;
 
 namespace mozilla {
 struct ContainerLayerParameters;
-class DisplayItemClip;
 namespace layers {
 class Layer;
 } // namespace layers
-
-struct FrameMetricsAndClip
-{
-  layers::FrameMetrics metrics;
-  const DisplayItemClip* clip;
-};
-
 } // namespace mozilla
 
 /**
@@ -55,6 +48,7 @@ public:
   typedef mozilla::CSSIntPoint CSSIntPoint;
   typedef mozilla::ContainerLayerParameters ContainerLayerParameters;
   typedef mozilla::layers::FrameMetrics FrameMetrics;
+  typedef mozilla::layers::ScrollSnapInfo ScrollSnapInfo;
 
   NS_DECL_QUERYFRAME_TARGET(nsIScrollableFrame)
 
@@ -107,8 +101,10 @@ public:
   /**
    * Return the width for non-disappearing scrollbars.
    */
-  virtual nscoord GetNondisappearingScrollbarWidth(nsPresContext* aPresContext,
-                                                   nsRenderingContext* aRC) = 0;
+  virtual nscoord
+  GetNondisappearingScrollbarWidth(nsPresContext* aPresContext,
+                                   nsRenderingContext* aRC,
+                                   mozilla::WritingMode aWM) = 0;
   /**
    * GetScrolledRect is designed to encapsulate deciding which
    * directions of overflow should be reachable by scrolling and which
@@ -154,20 +150,6 @@ public:
    * position.
    */
   virtual nsSize GetScrollPositionClampingScrollPortSize() const = 0;
-  /**
-   * Get the element resolution.
-   */
-  virtual float GetResolution() const = 0;
-  /**
-   * Set the element resolution.
-   */
-  virtual void SetResolution(float aResolution) = 0;
-  /**
-   * Set the element resolution and specify that content should be scaled by
-   * the amount of the resolution. This is only meaningful for root scroll
-   * frames. See nsIDOMWindowUtils.setResolutionAndScaleTo().
-   */
-  virtual void SetResolutionAndScaleTo(float aResolution) = 0;
   /**
    * Return how much we would try to scroll by in each direction if
    * asked to scroll by one "line" vertically and horizontally.
@@ -288,16 +270,6 @@ public:
 
   /**
    * Perform scroll snapping, possibly resulting in a smooth scroll to
-   * maintain the scroll snap position constraints.  A predicted landing
-   * position determined by the APZC is used to select the best matching
-   * snap point, allowing touchscreen fling gestures to navigate between
-   * snap points.
-   * @param aDestination The desired landing position of the fling, which
-   * is used to select the best matching snap point.
-   */
-  virtual void FlingSnap(const mozilla::CSSPoint& aDestination) = 0;
-  /**
-   * Perform scroll snapping, possibly resulting in a smooth scroll to
    * maintain the scroll snap position constraints.  Velocity sampled from
    * main thread scrolling is used to determine best matching snap point
    * when called after a fling gesture on a trackpad or mouse wheel.
@@ -358,23 +330,19 @@ public:
    */
   virtual bool DidHistoryRestore() const = 0;
   /**
-   * Was the current resolution set by the user or just default initialized?
-   */
-  virtual bool IsResolutionSet() const = 0;
-  /**
    * Clear the flag so that DidHistoryRestore() returns false until the next
    * RestoreState call.
    * @see nsIStatefulFrame::RestoreState
    */
   virtual void ClearDidHistoryRestore() = 0;
   /**
-   * Determine if the passed in rect is nearly visible according to the image
+   * Determine if the passed in rect is nearly visible according to the frame
    * visibility heuristics for how close it is to the visible scrollport.
    */
   virtual bool IsRectNearlyVisible(const nsRect& aRect) = 0;
  /**
   * Expand the given rect taking into account which directions we can scroll
-  * and how far we want to expand for image visibility purposes.
+  * and how far we want to expand for frame visibility purposes.
   */
   virtual nsRect ExpandRectToNearlyVisible(const nsRect& aRect) const = 0;
   /**
@@ -421,13 +389,13 @@ public:
   virtual bool WantAsyncScroll() const = 0;
   /**
    * aLayer's animated geometry root is this frame. If there needs to be a
-   * FrameMetrics contributed by this frame, append it to aOutput.
+   * ScrollMetadata contributed by this frame, append it to aOutput.
    */
-  virtual mozilla::Maybe<mozilla::FrameMetricsAndClip> ComputeFrameMetrics(
+  virtual mozilla::Maybe<mozilla::layers::ScrollMetadata> ComputeScrollMetadata(
     mozilla::layers::Layer* aLayer,
     nsIFrame* aContainerReferenceFrame,
     const ContainerLayerParameters& aParameters,
-    bool aIsForCaret) const = 0;
+    const mozilla::DisplayItemClip* aClip) const = 0;
 
   /**
    * If this scroll frame is ignoring viewporting clipping
@@ -443,11 +411,59 @@ public:
   virtual bool IsTransformingByAPZ() const = 0;
 
   /**
+   * Notify this scroll frame that it can be scrolled by APZ. In particular,
+   * this is called *after* the APZ code has created an APZC for this scroll
+   * frame and verified that it is not a scrollinfo layer. Therefore, setting an
+   * async transform on it is actually user visible.
+   */
+  virtual void SetScrollableByAPZ(bool aScrollable) = 0;
+
+  /**
+   * Notify this scroll frame that it can be zoomed by APZ.
+   */
+  virtual void SetZoomableByAPZ(bool aZoomable) = 0;
+
+  /**
    * Whether or not this frame uses containerful scrolling.
    */
   virtual bool UsesContainerScrolling() const = 0;
 
-  virtual const mozilla::DisplayItemClip* ComputeScrollClip(bool aIsForCaret) const = 0;
+  /**
+   * Determine if we should build a scrollable layer for this scroll frame and
+   * return the result. It will also record this result on the scroll frame.
+   * Pass the dirty rect in aDirtyRect. On return it will be set to the
+   * displayport if there is one (ie the dirty rect that should be used).
+   * This function may create a display port where one did not exist before if
+   * aAllowCreateDisplayPort is true. It is only allowed to be false if there
+   * has been a call with it set to true before on the same paint.
+   */
+  virtual bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
+                                     nsRect* aDirtyRect,
+                                     bool aAllowCreateDisplayPort) = 0;
+
+  /**
+   * Notification that this scroll frame is getting its frame visibility updated.
+   */
+  virtual void NotifyApproximateFrameVisibilityUpdate() = 0;
+
+  /**
+   * Returns true if this scroll frame had a display port at the last frame
+   * visibility update and fills in aDisplayPort with that displayport. Returns
+   * false otherwise, and doesn't touch aDisplayPort.
+   */
+  virtual bool GetDisplayPortAtLastApproximateFrameVisibilityUpdate(nsRect* aDisplayPort) = 0;
+
+  /**
+   * This is called when a descendant scrollframe's has its displayport expired.
+   * This function will check to see if this scrollframe may safely expire its
+   * own displayport and schedule a timer to do that if it is safe.
+   */
+  virtual void TriggerDisplayPortExpiration() = 0;
+
+  /**
+   * Returns information required to determine where to snap to after a scroll.
+   */
+  virtual ScrollSnapInfo GetScrollSnapInfo() const = 0;
 };
 
 #endif

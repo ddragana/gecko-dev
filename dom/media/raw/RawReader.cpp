@@ -10,13 +10,14 @@
 #include "VideoUtils.h"
 #include "nsISeekableStream.h"
 #include "gfx2DGlue.h"
+#include "mozilla/UniquePtr.h"
 
 using namespace mozilla;
 using namespace mozilla::media;
 
 RawReader::RawReader(AbstractMediaDecoder* aDecoder)
   : MediaDecoderReader(aDecoder),
-    mCurrentFrame(0), mFrameSize(0)
+    mCurrentFrame(0), mFrameSize(0), mResource(aDecoder->GetResource())
 {
   MOZ_COUNT_CTOR(RawReader);
 }
@@ -26,15 +27,10 @@ RawReader::~RawReader()
   MOZ_COUNT_DTOR(RawReader);
 }
 
-nsresult RawReader::Init(MediaDecoderReader* aCloneDonor)
-{
-  return NS_OK;
-}
-
-nsresult RawReader::ResetDecode()
+nsresult RawReader::ResetDecode(TrackSet aTracks)
 {
   mCurrentFrame = 0;
-  return MediaDecoderReader::ResetDecode();
+  return MediaDecoderReader::ResetDecode(aTracks);
 }
 
 nsresult RawReader::ReadMetadata(MediaInfo* aInfo,
@@ -42,10 +38,7 @@ nsresult RawReader::ReadMetadata(MediaInfo* aInfo,
 {
   MOZ_ASSERT(OnTaskQueue());
 
-  MediaResource* resource = mDecoder->GetResource();
-  NS_ASSERTION(resource, "Decoder has no media resource");
-
-  if (!ReadFromResource(resource, reinterpret_cast<uint8_t*>(&mMetadata),
+  if (!ReadFromResource(reinterpret_cast<uint8_t*>(&mMetadata),
                         sizeof(mMetadata)))
     return NS_ERROR_FAILURE;
 
@@ -96,7 +89,7 @@ nsresult RawReader::ReadMetadata(MediaInfo* aInfo,
     (mMetadata.lumaChannelBpp + mMetadata.chromaChannelBpp) / 8.0 +
     sizeof(RawPacketHeader);
 
-  int64_t length = resource->GetLength();
+  int64_t length = mResource.GetLength();
   if (length != -1) {
     mInfo.mMetadataDuration.emplace(TimeUnit::FromSeconds((length - sizeof(RawVideoHeader)) /
                                                           (mFrameSize * mFrameRate)));
@@ -109,37 +102,23 @@ nsresult RawReader::ReadMetadata(MediaInfo* aInfo,
   return NS_OK;
 }
 
-bool
-RawReader::IsMediaSeekable()
-{
-  // not used
-  return true;
-}
-
  bool RawReader::DecodeAudioData()
 {
-  MOZ_ASSERT(OnTaskQueue() || mDecoder->OnStateMachineTaskQueue());
+  MOZ_ASSERT(OnTaskQueue());
   return false;
 }
 
 // Helper method that either reads until it gets aLength bytes
 // or returns false
-bool RawReader::ReadFromResource(MediaResource *aResource, uint8_t* aBuf,
-                                   uint32_t aLength)
+bool RawReader::ReadFromResource(uint8_t* aBuf, uint32_t aLength)
 {
-  while (aLength > 0) {
-    uint32_t bytesRead = 0;
-    nsresult rv;
+  uint32_t bytesRead = 0;
+  nsresult rv;
 
-    rv = aResource->Read(reinterpret_cast<char*>(aBuf), aLength, &bytesRead);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    if (bytesRead == 0) {
-      return false;
-    }
-
-    aLength -= bytesRead;
-    aBuf += bytesRead;
+  rv = mResource.Read(reinterpret_cast<char*>(aBuf), aLength, &bytesRead);
+  NS_ENSURE_SUCCESS(rv, false);
+  if (bytesRead == 0) {
+    return false;
   }
 
   return true;
@@ -160,22 +139,20 @@ bool RawReader::DecodeVideoFrame(bool &aKeyframeSkip,
   int64_t currentFrameTime = USECS_PER_S * mCurrentFrame / mFrameRate;
   uint32_t length = mFrameSize - sizeof(RawPacketHeader);
 
-  nsAutoArrayPtr<uint8_t> buffer(new uint8_t[length]);
-  MediaResource* resource = mDecoder->GetResource();
-  NS_ASSERTION(resource, "Decoder has no media resource");
+  auto buffer = MakeUnique<uint8_t[]>(length);
 
   // We're always decoding one frame when called
   while(true) {
     RawPacketHeader header;
 
     // Read in a packet header and validate
-    if (!(ReadFromResource(resource, reinterpret_cast<uint8_t*>(&header),
+    if (!(ReadFromResource(reinterpret_cast<uint8_t*>(&header),
                            sizeof(header))) ||
         !(header.packetID == 0xFF && header.codecID == RAW_ID /* "YUV" */)) {
       return false;
     }
 
-    if (!ReadFromResource(resource, buffer, length)) {
+    if (!ReadFromResource(buffer.get(), length)) {
       return false;
     }
 
@@ -189,7 +166,7 @@ bool RawReader::DecodeVideoFrame(bool &aKeyframeSkip,
   }
 
   VideoData::YCbCrBuffer b;
-  b.mPlanes[0].mData = buffer;
+  b.mPlanes[0].mData = buffer.get();
   b.mPlanes[0].mStride = mMetadata.frameWidth * mMetadata.lumaChannelBpp / 8.0;
   b.mPlanes[0].mHeight = mMetadata.frameHeight;
   b.mPlanes[0].mWidth = mMetadata.frameWidth;
@@ -197,7 +174,7 @@ bool RawReader::DecodeVideoFrame(bool &aKeyframeSkip,
 
   uint32_t cbcrStride = mMetadata.frameWidth * mMetadata.chromaChannelBpp / 8.0;
 
-  b.mPlanes[1].mData = buffer + mMetadata.frameHeight * b.mPlanes[0].mStride;
+  b.mPlanes[1].mData = buffer.get() + mMetadata.frameHeight * b.mPlanes[0].mStride;
   b.mPlanes[1].mStride = cbcrStride;
   b.mPlanes[1].mHeight = mMetadata.frameHeight / 2;
   b.mPlanes[1].mWidth = mMetadata.frameWidth / 2;
@@ -209,7 +186,7 @@ bool RawReader::DecodeVideoFrame(bool &aKeyframeSkip,
   b.mPlanes[2].mWidth = mMetadata.frameWidth / 2;
   b.mPlanes[2].mOffset = b.mPlanes[2].mSkip = 0;
 
-  nsRefPtr<VideoData> v = VideoData::Create(mInfo.mVideo,
+  RefPtr<VideoData> v = VideoData::Create(mInfo.mVideo,
                                             mDecoder->GetImageContainer(),
                                             -1,
                                             currentFrameTime,
@@ -228,43 +205,40 @@ bool RawReader::DecodeVideoFrame(bool &aKeyframeSkip,
   return true;
 }
 
-nsRefPtr<MediaDecoderReader::SeekPromise>
-RawReader::Seek(int64_t aTime, int64_t aEndTime)
+RefPtr<MediaDecoderReader::SeekPromise>
+RawReader::Seek(SeekTarget aTarget, int64_t aEndTime)
 {
   MOZ_ASSERT(OnTaskQueue());
 
-  MediaResource *resource = mDecoder->GetResource();
-  NS_ASSERTION(resource, "Decoder has no media resource");
-
   uint32_t frame = mCurrentFrame;
-  if (aTime >= UINT_MAX)
+  if (aTarget.GetTime().ToMicroseconds() >= UINT_MAX)
     return SeekPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
-  mCurrentFrame = aTime * mFrameRate / USECS_PER_S;
+  mCurrentFrame = aTarget.GetTime().ToMicroseconds() * mFrameRate / USECS_PER_S;
 
   CheckedUint32 offset = CheckedUint32(mCurrentFrame) * mFrameSize;
   offset += sizeof(RawVideoHeader);
   NS_ENSURE_TRUE(offset.isValid(), SeekPromise::CreateAndReject(NS_ERROR_FAILURE, __func__));
 
-  nsresult rv = resource->Seek(nsISeekableStream::NS_SEEK_SET, offset.value());
+  nsresult rv = mResource.Seek(nsISeekableStream::NS_SEEK_SET, offset.value());
   NS_ENSURE_SUCCESS(rv, SeekPromise::CreateAndReject(rv, __func__));
 
   mVideoQueue.Reset();
-  nsRefPtr<SeekPromise::Private> p = new SeekPromise::Private(__func__);
-  nsRefPtr<RawReader> self = this;
+  RefPtr<SeekPromise::Private> p = new SeekPromise::Private(__func__);
+  RefPtr<RawReader> self = this;
   InvokeUntil([self] () {
     MOZ_ASSERT(self->OnTaskQueue());
     NS_ENSURE_TRUE(!self->mShutdown, false);
     bool skip = false;
     return self->DecodeVideoFrame(skip, 0);
-  }, [self, aTime] () {
+  }, [self, aTarget] () {
     MOZ_ASSERT(self->OnTaskQueue());
     return self->mVideoQueue.Peek() &&
-           self->mVideoQueue.Peek()->GetEndTime() >= aTime;
-  })->Then(OwnerThread(), __func__, [self, p, aTime] () {
+           self->mVideoQueue.Peek()->GetEndTime() >= aTarget.GetTime().ToMicroseconds();
+  })->Then(OwnerThread(), __func__, [self, p, aTarget] () {
     while (self->mVideoQueue.GetSize() >= 2) {
-      nsRefPtr<VideoData> releaseMe = self->mVideoQueue.PopFront();
+      RefPtr<VideoData> releaseMe = self->mVideoQueue.PopFront();
     }
-    p->Resolve(aTime, __func__);
+    p->Resolve(aTarget.GetTime(), __func__);
   }, [self, p, frame] {
     self->mCurrentFrame = frame;
     self->mVideoQueue.Reset();

@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const CURRENT_SCHEMA_VERSION = 30;
+const CURRENT_SCHEMA_VERSION = 33;
 const FIRST_UPGRADABLE_SCHEMA_VERSION = 11;
 
 const NS_APP_USER_PROFILE_50_DIR = "ProfD";
@@ -18,6 +18,7 @@ const TRANSITION_FRAMED_LINK = Ci.nsINavHistoryService.TRANSITION_FRAMED_LINK;
 const TRANSITION_REDIRECT_PERMANENT = Ci.nsINavHistoryService.TRANSITION_REDIRECT_PERMANENT;
 const TRANSITION_REDIRECT_TEMPORARY = Ci.nsINavHistoryService.TRANSITION_REDIRECT_TEMPORARY;
 const TRANSITION_DOWNLOAD = Ci.nsINavHistoryService.TRANSITION_DOWNLOAD;
+const TRANSITION_RELOAD = Ci.nsINavHistoryService.TRANSITION_RELOAD;
 
 const TITLE_LENGTH_MAX = 4096;
 
@@ -68,10 +69,10 @@ XPCOMUtils.defineLazyGetter(this, "SMALLSVG_DATA_URI", function() {
          "IGhlaWdodD0iNDEuOCIvPg0KPC9zdmc%2BDQo%3D");
 });
 
-let gTestDir = do_get_cwd();
+var gTestDir = do_get_cwd();
 
 // Initialize profile.
-let gProfD = do_get_profile();
+var gProfD = do_get_profile();
 
 // Remove any old database.
 clearDB();
@@ -82,7 +83,9 @@ clearDB();
  * @param aSpec
  *        URLString of the uri.
  */
-function uri(aSpec) NetUtil.newURI(aSpec);
+function uri(aSpec) {
+  return NetUtil.newURI(aSpec);
+}
 
 
 /**
@@ -96,7 +99,7 @@ function uri(aSpec) NetUtil.newURI(aSpec);
  *
  * @return The database connection or null if unable to get one.
  */
-let gDBConn;
+var gDBConn;
 function DBConn(aForceNewConnection) {
   if (!aForceNewConnection) {
     let db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase)
@@ -116,7 +119,7 @@ function DBConn(aForceNewConnection) {
   }
 
   return gDBConn.connectionReady ? gDBConn : null;
-};
+}
 
 /**
  * Reads data from the provided inputstream.
@@ -296,7 +299,7 @@ function page_in_database(aURI)
 {
   let url = aURI instanceof Ci.nsIURI ? aURI.spec : aURI;
   let stmt = DBConn().createStatement(
-    "SELECT id FROM moz_places WHERE url = :url"
+    "SELECT id FROM moz_places WHERE url_hash = hash(:url) AND url = :url"
   );
   stmt.params.url = url;
   try {
@@ -321,7 +324,7 @@ function visits_in_database(aURI)
   let stmt = DBConn().createStatement(
     `SELECT count(*) FROM moz_historyvisits v
      JOIN moz_places h ON h.id = v.place_id
-     WHERE url = :url`
+     WHERE url_hash = hash(:url) AND url = :url`
   );
   stmt.params.url = url;
   try {
@@ -377,16 +380,16 @@ function promiseTopicObserved(aTopic)
 /**
  * Simulates a Places shutdown.
  */
-let shutdownPlaces = function() {
+var shutdownPlaces = function() {
   do_print("shutdownPlaces: starting");
   let promise = new Promise(resolve => {
     Services.obs.addObserver(resolve, "places-connection-closed", false);
   });
   let hs = PlacesUtils.history.QueryInterface(Ci.nsIObserver);
-  hs.observe(null, "test-simulate-places-shutdown-phase-1", null);
-  do_print("shutdownPlaces: sent test-simulate-places-shutdown-phase-1");
-  hs.observe(null, "test-simulate-places-shutdown-phase-2", null);
-  do_print("shutdownPlaces: sent test-simulate-places-shutdown-phase-2");
+  hs.observe(null, "profile-change-teardown", null);
+  do_print("shutdownPlaces: sent profile-change-teardown");
+  hs.observe(null, "test-simulate-places-shutdown", null);
+  do_print("shutdownPlaces: sent test-simulate-places-shutdown");
   return promise.then(() => {
     do_print("shutdownPlaces: complete");
   });
@@ -532,11 +535,14 @@ function check_JSON_backup(aIsAutomaticBackup) {
  */
 function frecencyForUrl(aURI)
 {
-  let url = aURI instanceof Ci.nsIURI ? aURI.spec
-                                      : aURI instanceof URL ? aURI.href
-                                                            : aURI;
+  let url = aURI;
+  if (aURI instanceof Ci.nsIURI) {
+    url = aURI.spec;
+  } else if (aURI instanceof URL) {
+    url = aURI.href;
+  }
   let stmt = DBConn().createStatement(
-    "SELECT frecency FROM moz_places WHERE url = ?1"
+    "SELECT frecency FROM moz_places WHERE url_hash = hash(?1) AND url = ?1"
   );
   stmt.bindByIndex(0, url);
   try {
@@ -560,7 +566,7 @@ function isUrlHidden(aURI)
 {
   let url = aURI instanceof Ci.nsIURI ? aURI.spec : aURI;
   let stmt = DBConn().createStatement(
-    "SELECT hidden FROM moz_places WHERE url = ?1"
+    "SELECT hidden FROM moz_places WHERE url_hash = hash(?1) AND url = ?1"
   );
   stmt.bindByIndex(0, url);
   if (!stmt.executeStep())
@@ -637,7 +643,7 @@ function do_get_guid_for_uri(aURI,
   let stmt = DBConn().createStatement(
     `SELECT guid
      FROM moz_places
-     WHERE url = :url`
+     WHERE url_hash = hash(:url) AND url = :url`
   );
   stmt.params.url = aURI.spec;
   do_check_true(stmt.executeStep(), aStack);
@@ -730,11 +736,11 @@ function do_compare_arrays(a1, a2, sorted)
     return false;
 
   if (sorted) {
-    return a1.every(function (e, i) e == a2[i]);
+    return a1.every((e, i) => e == a2[i]);
   }
   else {
-    return a1.filter(function (e) a2.indexOf(e) == -1).length == 0 &&
-           a2.filter(function (e) a1.indexOf(e) == -1).length == 0;
+    return a1.filter(e => !a2.includes(e)).length == 0 &&
+           a2.filter(e => !a1.includes(e)).length == 0;
   }
 }
 
@@ -836,7 +842,8 @@ function promiseSetIconForPage(aPageURI, aIconURI) {
   PlacesUtils.favicons.setAndFetchFaviconForPage(
     aPageURI, aIconURI, true,
     PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE,
-    () => { deferred.resolve(); });
+    () => { deferred.resolve(); },
+    Services.scriptSecurityManager.getSystemPrincipal());
   return deferred.promise;
 }
 
@@ -859,7 +866,7 @@ function* foreign_count(url) {
   let db = yield PlacesUtils.promiseDBConnection();
   let rows = yield db.executeCached(
     `SELECT foreign_count FROM moz_places
-     WHERE url = :url
+     WHERE url_hash = hash(:url) AND url = :url
     `, { url });
   return rows.length == 0 ? 0 : rows[0].getResultByName("foreign_count");
 }

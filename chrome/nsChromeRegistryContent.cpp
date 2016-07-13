@@ -104,17 +104,17 @@ nsChromeRegistryContent::RegisterSubstitution(const SubstitutionMapping& aSubsti
   nsresult rv = io->GetProtocolHandler(aSubstitution.scheme.get(), getter_AddRefs(ph));
   if (NS_FAILED(rv))
     return;
-  
+
   nsCOMPtr<nsISubstitutingProtocolHandler> sph (do_QueryInterface(ph));
   if (!sph)
     return;
 
   nsCOMPtr<nsIURI> resolvedURI;
   if (aSubstitution.resolvedURI.spec.Length()) {
-    nsresult rv = NS_NewURI(getter_AddRefs(resolvedURI),
-                            aSubstitution.resolvedURI.spec,
-                            aSubstitution.resolvedURI.charset.get(),
-                            nullptr, io);
+    rv = NS_NewURI(getter_AddRefs(resolvedURI),
+                   aSubstitution.resolvedURI.spec,
+                   aSubstitution.resolvedURI.charset.get(),
+                   nullptr, io);
     if (NS_FAILED(rv))
       return;
   }
@@ -210,10 +210,15 @@ nsChromeRegistryContent::CheckForNewChrome()
 }
 
 NS_IMETHODIMP
-nsChromeRegistryContent::IsLocaleRTL(const nsACString& package,
+nsChromeRegistryContent::IsLocaleRTL(const nsACString& aPackage,
                                      bool *aResult)
 {
-  CONTENT_NOT_IMPLEMENTED();
+  if (aPackage != nsDependentCString("global")) {
+    NS_ERROR("Packages other than global unavailable");
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  *aResult = GetDirectionForLocale(mLocale);
+  return NS_OK;
 }
 
 NS_IMETHODIMP

@@ -7,7 +7,6 @@
 #define AVCBox_h_
 
 #include "nsTArray.h"
-#include "nsAutoPtr.h"
 #include "ISOMediaBoxes.h"
 
 namespace mozilla {
@@ -44,7 +43,7 @@ public:
 class AVCSampleEntry : public VisualSampleEntry {
 public:
   // ISO BMFF members
-  nsRefPtr<AVCConfigurationBox> avcConfigBox;
+  RefPtr<AVCConfigurationBox> avcConfigBox;
 
   // MuxerOperation methods
   nsresult Generate(uint32_t* aBoxSize) override;

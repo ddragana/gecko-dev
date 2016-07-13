@@ -8,6 +8,7 @@
 
 #include "mozilla/layers/BasicCompositor.h"
 #include "mozilla/layers/TextureHostBasic.h"
+#include "mozilla/layers/X11TextureHost.h"
 #include "mozilla/gfx/2D.h"
 
 namespace mozilla {
@@ -18,10 +19,12 @@ class BasicCompositor;
 // TextureSource for Xlib-backed surfaces.
 class X11TextureSourceBasic
   : public TextureSourceBasic
-  , public TextureSource
+  , public X11TextureSource
 {
 public:
   X11TextureSourceBasic(BasicCompositor* aCompositor, gfxXlibSurface* aSurface);
+
+  virtual const char* Name() const override { return "X11TextureSourceBasic"; }
 
   virtual X11TextureSourceBasic* AsSourceBasic() override { return this; }
 
@@ -34,6 +37,8 @@ public:
   virtual void DeallocateDeviceData() override { }
 
   virtual void SetCompositor(Compositor* aCompositor) override;
+
+  virtual void Updated() override { }
 
   static gfx::SurfaceFormat ContentTypeToSurfaceFormat(gfxContentType aType);
 

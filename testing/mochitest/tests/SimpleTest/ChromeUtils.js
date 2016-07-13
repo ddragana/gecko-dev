@@ -13,28 +13,6 @@ const scriptLoader = Components.classes["@mozilla.org/moz/jssubscript-loader;1"]
 scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/EventUtils.js", EventUtils);
 
 /**
- * Synthesize a query text content event.
- *
- * @param aOffset  The character offset.  0 means the first character in the
- *                 selection root.
- * @param aLength  The length of getting text.  If the length is too long,
- *                 the extra length is ignored.
- * @param aWindow  Optional (If null, current |window| will be used)
- * @return         An nsIQueryContentEventResult object.  If this failed,
- *                 the result might be null.
- */
-function synthesizeQueryTextContent(aOffset, aLength, aWindow)
-{
-  var utils = _getDOMWindowUtils(aWindow);
-  if (!utils) {
-    return nullptr;
-  }
-  return utils.sendQueryContentEvent(utils.QUERY_TEXT_CONTENT,
-                                     aOffset, aLength, 0, 0,
-                                     QUERY_CONTENT_FLAG_USE_NATIVE_LINE_BREAK);
-}
-
-/**
  * Synthesize a query text rect event.
  *
  * @param aOffset  The character offset.  0 means the first character in the
@@ -114,53 +92,8 @@ function synthesizeCharAtPoint(aX, aY, aWindow)
  */
 function synthesizeDragStart(element, expectedDragData, aWindow, x, y)
 {
-  if (!aWindow)
-    aWindow = window;
-  x = x || 2;
-  y = y || 2;
-  const step = 9;
-
-  var result = "trapDrag was not called";
-  var trapDrag = function(event) {
-    try {
-      var dataTransfer = event.dataTransfer;
-      result = null;
-      if (!dataTransfer)
-        throw "no dataTransfer";
-      if (expectedDragData == null ||
-          dataTransfer.mozItemCount != expectedDragData.length)
-        throw dataTransfer;
-      for (var i = 0; i < dataTransfer.mozItemCount; i++) {
-        var dtTypes = dataTransfer.mozTypesAt(i);
-        if (dtTypes.length != expectedDragData[i].length)
-          throw dataTransfer;
-        for (var j = 0; j < dtTypes.length; j++) {
-          if (dtTypes[j] != expectedDragData[i][j].type)
-            throw dataTransfer;
-          var dtData = dataTransfer.mozGetDataAt(dtTypes[j],i);
-          if (expectedDragData[i][j].eqTest) {
-            if (!expectedDragData[i][j].eqTest(dtData, expectedDragData[i][j].data))
-              throw dataTransfer;
-          }
-          else if (expectedDragData[i][j].data != dtData)
-            throw dataTransfer;
-        }
-      }
-    } catch(ex) {
-      result = ex;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-  }
-  aWindow.addEventListener("dragstart", trapDrag, false);
-  EventUtils.synthesizeMouse(element, x, y, { type: "mousedown" }, aWindow);
-  x += step; y += step;
-  EventUtils.synthesizeMouse(element, x, y, { type: "mousemove" }, aWindow);
-  x += step; y += step;
-  EventUtils.synthesizeMouse(element, x, y, { type: "mousemove" }, aWindow);
-  aWindow.removeEventListener("dragstart", trapDrag, false);
-  EventUtils.synthesizeMouse(element, x, y, { type: "mouseup" }, aWindow);
-  return result;
+  return EventUtils.synthesizeDragStart(element, expectedDragData,
+                                        aWindow, x, y);
 }
 
 /**

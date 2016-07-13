@@ -203,7 +203,6 @@ nsIAtom** const kAttributesHTML[] = {
   &nsGkAtoms::media,
   &nsGkAtoms::method,
   &nsGkAtoms::min,
-  &nsGkAtoms::mozdonotsend,
   &nsGkAtoms::multiple,
   &nsGkAtoms::muted,
   &nsGkAtoms::name,
@@ -281,13 +280,6 @@ nsIAtom** const kURLAttributesHTML[] = {
 
 nsIAtom** const kElementsSVG[] = {
   &nsGkAtoms::a, // a
-  &nsGkAtoms::altGlyph, // altGlyph
-  &nsGkAtoms::altGlyphDef, // altGlyphDef
-  &nsGkAtoms::altGlyphItem, // altGlyphItem
-  &nsGkAtoms::animate, // animate
-  &nsGkAtoms::animateColor, // animateColor
-  &nsGkAtoms::animateMotion, // animateMotion
-  &nsGkAtoms::animateTransform, // animateTransform
   &nsGkAtoms::circle, // circle
   &nsGkAtoms::clipPath, // clipPath
   &nsGkAtoms::colorProfile, // color-profile
@@ -334,9 +326,9 @@ nsIAtom** const kElementsSVG[] = {
   &nsGkAtoms::font_face_uri, // font-face-uri
   &nsGkAtoms::foreignObject, // foreignObject
   &nsGkAtoms::g, // g
-  &nsGkAtoms::glyph, // glyph
+  // glyph
   &nsGkAtoms::glyphRef, // glyphRef
-  &nsGkAtoms::hkern, // hkern
+  // hkern
   &nsGkAtoms::image, // image
   &nsGkAtoms::line, // line
   &nsGkAtoms::linearGradient, // linearGradient
@@ -351,7 +343,6 @@ nsIAtom** const kElementsSVG[] = {
   &nsGkAtoms::polyline, // polyline
   &nsGkAtoms::radialGradient, // radialGradient
   &nsGkAtoms::rect, // rect
-  &nsGkAtoms::set, // set
   &nsGkAtoms::stop, // stop
   &nsGkAtoms::svg, // svg
   &nsGkAtoms::svgSwitch, // switch
@@ -363,7 +354,7 @@ nsIAtom** const kElementsSVG[] = {
   &nsGkAtoms::tspan, // tspan
   &nsGkAtoms::use, // use
   &nsGkAtoms::view, // view
-  &nsGkAtoms::vkern, // vkern
+  // vkern
   nullptr
 };
 
@@ -436,8 +427,8 @@ nsIAtom** const kAttributesSVG[] = {
   // g2
   // glyph-name
   // glyphRef
-  &nsGkAtoms::glyph_orientation_horizontal, // glyph-orientation-horizontal
-  &nsGkAtoms::glyph_orientation_vertical, // glyph-orientation-vertical
+  // glyph-orientation-horizontal
+  // glyph-orientation-vertical
   &nsGkAtoms::gradientTransform, // gradientTransform
   &nsGkAtoms::gradientUnits, // gradientUnits
   &nsGkAtoms::height, // height
@@ -455,7 +446,7 @@ nsIAtom** const kAttributesSVG[] = {
   &nsGkAtoms::k2, // k2
   &nsGkAtoms::k3, // k3
   &nsGkAtoms::k4, // k4
-  &nsGkAtoms::kerning, // kerning
+  // kerning
   &nsGkAtoms::kernelMatrix, // kernelMatrix
   &nsGkAtoms::kernelUnitLength, // kernelUnitLength
   &nsGkAtoms::keyPoints, // keyPoints
@@ -585,7 +576,7 @@ nsIAtom** const kAttributesSVG[] = {
   &nsGkAtoms::width, // width
   // widths
   &nsGkAtoms::word_spacing, // word-spacing
-  // writing-mode
+  &nsGkAtoms::writing_mode, // writing-mode
   &nsGkAtoms::x, // x
   // x-height
   &nsGkAtoms::x1, // x1
@@ -1071,17 +1062,12 @@ nsTreeSanitizer::MustPrune(int32_t aNamespace,
 }
 
 bool
-nsTreeSanitizer::SanitizeStyleRule(mozilla::css::StyleRule *aRule,
-                                   nsAutoString &aRuleText)
+nsTreeSanitizer::SanitizeStyleDeclaration(mozilla::css::Declaration* aDeclaration,
+                                          nsAutoString& aRuleText)
 {
-  bool didSanitize = false;
-  aRuleText.Truncate();
-  mozilla::css::Declaration* style = aRule->GetDeclaration();
-  if (style) {
-    didSanitize = style->HasProperty(eCSSProperty_binding);
-    style->RemoveProperty(eCSSProperty_binding);
-    style->ToString(aRuleText);
-  }
+  bool didSanitize = aDeclaration->HasProperty(eCSSProperty_binding);
+  aDeclaration->RemoveProperty(eCSSProperty_binding);
+  aDeclaration->ToString(aRuleText);
   return didSanitize;
 }
 
@@ -1097,13 +1083,14 @@ nsTreeSanitizer::SanitizeStyleSheet(const nsAString& aOriginal,
   // -moz-binding is blacklisted.
   bool didSanitize = false;
   // Create a sheet to hold the parsed CSS
-  nsRefPtr<CSSStyleSheet> sheet = new CSSStyleSheet(CORS_NONE, aDocument->GetReferrerPolicy());
+  RefPtr<CSSStyleSheet> sheet = new CSSStyleSheet(CORS_NONE, aDocument->GetReferrerPolicy());
   sheet->SetURIs(aDocument->GetDocumentURI(), nullptr, aBaseURI);
   sheet->SetPrincipal(aDocument->NodePrincipal());
   // Create the CSS parser, and parse the CSS text.
   nsCSSParser parser(nullptr, sheet);
   rv = parser.ParseSheet(aOriginal, aDocument->GetDocumentURI(), aBaseURI,
-                         aDocument->NodePrincipal(), 0, false);
+                         aDocument->NodePrincipal(), 0,
+                         mozilla::css::eAuthorSheetFeatures);
   NS_ENSURE_SUCCESS(rv, true);
   // Mark the sheet as complete.
   MOZ_ASSERT(!sheet->IsModified(),
@@ -1136,10 +1123,11 @@ nsTreeSanitizer::SanitizeStyleSheet(const nsAString& aOriginal,
       case mozilla::css::Rule::STYLE_RULE: {
         // For style rules, we will just look for and remove the
         // -moz-binding properties.
-        nsRefPtr<mozilla::css::StyleRule> styleRule = do_QueryObject(rule);
+        RefPtr<mozilla::css::StyleRule> styleRule = do_QueryObject(rule);
         NS_ASSERTION(styleRule, "Must be a style rule");
         nsAutoString decl;
-        bool sanitized = SanitizeStyleRule(styleRule, decl);
+        bool sanitized =
+          SanitizeStyleDeclaration(styleRule->GetDeclaration(), decl);
         didSanitize = sanitized || didSanitize;
         if (!sanitized) {
           styleRule->GetCssText(decl);
@@ -1161,10 +1149,7 @@ nsTreeSanitizer::SanitizeAttributes(mozilla::dom::Element* aElement,
 {
   uint32_t ac = aElement->GetAttrCount();
 
-  nsresult rv;
-
   for (int32_t i = ac - 1; i >= 0; --i) {
-    rv = NS_OK;
     const nsAttrName* attrName = aElement->GetAttrNameAt(i);
     int32_t attrNs = attrName->NamespaceID();
     nsCOMPtr<nsIAtom> attrLocal = attrName->LocalName();
@@ -1176,17 +1161,14 @@ nsTreeSanitizer::SanitizeAttributes(mozilla::dom::Element* aElement,
         // Pass the CSS Loader object to the parser, to allow parser error
         // reports to include the outer window ID.
         nsCSSParser parser(document->CSSLoader());
-        nsRefPtr<mozilla::css::StyleRule> rule;
         nsAutoString value;
         aElement->GetAttr(attrNs, attrLocal, value);
-        rv = parser.ParseStyleAttribute(value,
-                                        document->GetDocumentURI(),
-                                        baseURI,
-                                        document->NodePrincipal(),
-                                        getter_AddRefs(rule));
-        if (NS_SUCCEEDED(rv)) {
+        RefPtr<mozilla::css::Declaration> decl =
+          parser.ParseStyleAttribute(value, document->GetDocumentURI(),
+                                     baseURI, document->NodePrincipal());
+        if (decl) {
           nsAutoString cleanValue;
-          if (SanitizeStyleRule(rule, cleanValue)) {
+          if (SanitizeStyleDeclaration(decl, cleanValue)) {
             aElement->SetAttr(kNameSpaceID_None,
                               nsGkAtoms::style,
                               cleanValue,
@@ -1345,7 +1327,7 @@ nsTreeSanitizer::Sanitize(nsIContent* aFragment)
   // in tree.
   NS_PRECONDITION(aFragment->IsNodeOfType(nsINode::eDOCUMENT_FRAGMENT),
       "Argument was not DOM fragment.");
-  NS_PRECONDITION(!aFragment->IsInDoc(), "The fragment is in doc?");
+  NS_PRECONDITION(!aFragment->IsInUncomposedDoc(), "The fragment is in doc?");
 
   mFullDocument = false;
   SanitizeChildren(aFragment);
@@ -1359,7 +1341,7 @@ nsTreeSanitizer::Sanitize(nsIDocument* aDocument)
   // in tree.
 #ifdef DEBUG
   NS_PRECONDITION(!aDocument->GetContainer(), "The document is in a shell.");
-  nsRefPtr<mozilla::dom::Element> root = aDocument->GetRootElement();
+  RefPtr<mozilla::dom::Element> root = aDocument->GetRootElement();
   NS_PRECONDITION(root->IsHTMLElement(nsGkAtoms::html), "Not HTML root.");
 #endif
 
@@ -1429,8 +1411,8 @@ nsTreeSanitizer::SanitizeChildren(nsINode* aRoot)
       }
       if (MustFlatten(ns, localName)) {
         RemoveAllAttributes(node);
-        nsIContent* next = node->GetNextNode(aRoot);
-        nsIContent* parent = node->GetParent();
+        nsCOMPtr<nsIContent> next = node->GetNextNode(aRoot);
+        nsCOMPtr<nsIContent> parent = node->GetParent();
         nsCOMPtr<nsIContent> child; // Must keep the child alive during move
         ErrorResult rv;
         while ((child = node->GetFirstChild())) {
@@ -1532,8 +1514,7 @@ nsTreeSanitizer::InitializeStatics()
     sAttributesMathML->PutEntry(*kAttributesMathML[i]);
   }
 
-  nsCOMPtr<nsIPrincipal> principal =
-      do_CreateInstance(NS_NULLPRINCIPAL_CONTRACTID);
+  nsCOMPtr<nsIPrincipal> principal = nsNullPrincipal::Create();
   principal.forget(&sNullPrincipal);
 }
 

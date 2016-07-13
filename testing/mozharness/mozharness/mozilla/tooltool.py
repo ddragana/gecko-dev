@@ -6,8 +6,6 @@ from mozharness.base.errors import PythonErrorList
 from mozharness.base.log import ERROR, FATAL
 from mozharness.mozilla.proxxy import Proxxy
 
-from mozharness.lib.python.authentication import get_credentials_path
-
 TooltoolErrorList = PythonErrorList + [{
     'substr': 'ERROR - ', 'level': ERROR
 }]
@@ -46,19 +44,14 @@ class TooltoolMixin(object):
         if os.path.exists(fn):
             return fn
 
-    def tooltool_fetch(self, manifest, bootstrap_cmd=None,
+    def tooltool_fetch(self, manifest,
                        output_dir=None, privileged=False, cache=None):
         """docstring for tooltool_fetch"""
-        tooltool = self.query_exe('tooltool.py', return_type='list')
 
-        if self.config.get("developer_mode"):
-            tooltool = [bin for bin in tooltool if os.path.exists(bin)]
-            if tooltool:
-                cmd = [tooltool[0]]
-            else:
-                cmd = [self._fetch_tooltool_py()]
+        if self.config.get("download_tooltool"):
+            cmd = [sys.executable, self._fetch_tooltool_py()]
         else:
-            cmd = tooltool
+            cmd = self.query_exe('tooltool.py', return_type='list')
 
         # get the tooltool servers from configuration
         default_urls = self.config.get('tooltool_servers', TOOLTOOL_SERVERS)
@@ -85,30 +78,28 @@ class TooltoolMixin(object):
         if cache:
             cmd.extend(['-c', cache])
 
+        # when mock is enabled run tooltool in mock. We can't use
+        # run_command_m in all cases because it won't exist unless
+        # MockMixin is used on the parent class
+        if self.config.get('mock_target'):
+            cmd_runner = self.run_command_m
+        else:
+            cmd_runner = self.run_command
+
+        timeout = self.config.get('tooltool_timeout', 10 * 60)
+
         self.retry(
-            self.run_command,
+            cmd_runner,
             args=(cmd, ),
             kwargs={'cwd': output_dir,
                     'error_list': TooltoolErrorList,
                     'privileged': privileged,
+                    'output_timeout': timeout,
                     },
             good_statuses=(0, ),
             error_message="Tooltool %s fetch failed!" % manifest,
             error_level=FATAL,
         )
-        if bootstrap_cmd is not None:
-            error_message = "Tooltool bootstrap %s failed!" % str(bootstrap_cmd)
-            self.retry(
-                self.run_command,
-                args=(bootstrap_cmd, ),
-                kwargs={'cwd': output_dir,
-                        'error_list': TooltoolErrorList,
-                        'privileged': privileged,
-                        },
-                good_statuses=(0, ),
-                error_message=error_message,
-                error_level=FATAL,
-            )
 
     def _fetch_tooltool_py(self):
         """ Retrieve tooltool.py

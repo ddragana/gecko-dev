@@ -22,7 +22,7 @@ public:
                     GLContext* aContext,
                     Flags aFlags = TextureImage::NoFlags,
                     TextureState aTextureState = Created,
-                    TextureImage::ImageFormat aImageFormat = gfxImageFormat::Unknown);
+                    TextureImage::ImageFormat aImageFormat = SurfaceFormat::UNKNOWN);
 
     virtual ~TextureImageEGL();
 
@@ -78,7 +78,7 @@ protected:
 };
 
 already_AddRefed<TextureImage>
-CreateTextureImageEGL(GLContext *gl,
+CreateTextureImageEGL(GLContext* gl,
                       const gfx::IntSize& aSize,
                       TextureImage::ContentType aContentType,
                       GLenum aWrapMode,
@@ -86,7 +86,7 @@ CreateTextureImageEGL(GLContext *gl,
                       TextureImage::ImageFormat aImageFormat);
 
 already_AddRefed<TextureImage>
-TileGenFuncEGL(GLContext *gl,
+TileGenFuncEGL(GLContext* gl,
                const gfx::IntSize& aSize,
                TextureImage::ContentType aContentType,
                TextureImage::Flags aFlags,

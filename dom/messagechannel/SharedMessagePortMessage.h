@@ -6,7 +6,7 @@
 #ifndef mozilla_dom_SharedMessagePortMessage_h
 #define mozilla_dom_SharedMessagePortMessage_h
 
-#include "MessagePortUtils.h"
+#include "mozilla/dom/StructuredCloneHolder.h"
 
 namespace mozilla {
 namespace dom {
@@ -15,38 +15,51 @@ class MessagePortChild;
 class MessagePortMessage;
 class MessagePortParent;
 
-class SharedMessagePortMessage final
+class SharedMessagePortMessage final : public StructuredCloneHolder
 {
 public:
   NS_INLINE_DECL_REFCOUNTING(SharedMessagePortMessage)
 
   nsTArray<uint8_t> mData;
-  messageport::StructuredCloneClosure mClosure;
 
   SharedMessagePortMessage()
+    : StructuredCloneHolder(CloningSupported, TransferringSupported,
+                            DifferentProcess)
   {}
+
+  void Read(nsISupports* aParent,
+            JSContext* aCx,
+            JS::MutableHandle<JS::Value> aValue,
+            ErrorResult& aRv);
+
+  void Write(JSContext* aCx,
+             JS::Handle<JS::Value> aValue,
+             JS::Handle<JS::Value> aTransfer,
+             ErrorResult& aRv);
+
+  void Free();
 
   static void
   FromSharedToMessagesChild(
                       MessagePortChild* aActor,
-                      const nsTArray<nsRefPtr<SharedMessagePortMessage>>& aData,
+                      const nsTArray<RefPtr<SharedMessagePortMessage>>& aData,
                       nsTArray<MessagePortMessage>& aArray);
 
   static bool
   FromMessagesToSharedChild(
                      nsTArray<MessagePortMessage>& aArray,
-                     FallibleTArray<nsRefPtr<SharedMessagePortMessage>>& aData);
+                     FallibleTArray<RefPtr<SharedMessagePortMessage>>& aData);
 
   static bool
   FromSharedToMessagesParent(
                       MessagePortParent* aActor,
-                      const nsTArray<nsRefPtr<SharedMessagePortMessage>>& aData,
+                      const nsTArray<RefPtr<SharedMessagePortMessage>>& aData,
                       FallibleTArray<MessagePortMessage>& aArray);
 
   static bool
   FromMessagesToSharedParent(
                      nsTArray<MessagePortMessage>& aArray,
-                     FallibleTArray<nsRefPtr<SharedMessagePortMessage>>& aData);
+                     FallibleTArray<RefPtr<SharedMessagePortMessage>>& aData);
 
 private:
   ~SharedMessagePortMessage();

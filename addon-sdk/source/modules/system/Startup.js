@@ -5,7 +5,7 @@
 
 var EXPORTED_SYMBOLS = ["Startup"];
 
-const { utils: Cu, interfaces: Ci, classes: Cc } = Components;
+var { utils: Cu, interfaces: Ci, classes: Cc } = Components;
 const { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
 const { defer } = Cu.import("resource://gre/modules/Promise.jsm", {}).Promise;
 
@@ -18,7 +18,8 @@ const NAME2TOPIC = {
   'Firefox': 'sessionstore-windows-restored',
   'Fennec': 'sessionstore-windows-restored',
   'SeaMonkey': 'sessionstore-windows-restored',
-  'Thunderbird': 'mail-startup-done'
+  'Thunderbird': 'mail-startup-done',
+  'Instantbird': 'xul-window-visible'
 };
 
 var Startup = {
@@ -26,11 +27,11 @@ var Startup = {
 };
 var exports = Startup;
 
-let gOnceInitializedDeferred = defer();
+var gOnceInitializedDeferred = defer();
 exports.onceInitialized = gOnceInitializedDeferred.promise;
 
 // Set 'final-ui-startup' as default topic for unknown applications
-let appStartup = 'final-ui-startup';
+var appStartup = 'final-ui-startup';
 
 if (Startup.initialized) {
   gOnceInitializedDeferred.resolve()

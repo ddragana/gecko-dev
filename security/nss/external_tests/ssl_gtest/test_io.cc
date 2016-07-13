@@ -27,7 +27,7 @@ static PRDescIdentity test_fd_identity = PR_INVALID_IO_LAYER;
   PR_ASSERT(PR_FALSE);                           \
   PR_SetError(PR_NOT_IMPLEMENTED_ERROR, 0)
 
-#define LOG(a) std::cerr << name_ << ": " << a << std::endl;
+#define LOG(a) std::cerr << name_ << ": " << a << std::endl
 
 class Packet : public DataBuffer {
  public:
@@ -47,7 +47,10 @@ class Packet : public DataBuffer {
 
 // Implementation of NSPR methods
 static PRStatus DummyClose(PRFileDesc *f) {
+  DummyPrSocket *io = reinterpret_cast<DummyPrSocket *>(f->secret);
   f->secret = nullptr;
+  f->dtor(f);
+  delete io;
   return PR_SUCCESS;
 }
 
@@ -125,8 +128,9 @@ static PRStatus DummyListen(PRFileDesc *f, int32_t depth) {
 }
 
 static PRStatus DummyShutdown(PRFileDesc *f, int32_t how) {
-  UNIMPLEMENTED();
-  return PR_FAILURE;
+  DummyPrSocket *io = reinterpret_cast<DummyPrSocket *>(f->secret);
+  io->Reset();
+  return PR_SUCCESS;
 }
 
 // This function does not support peek.
@@ -250,7 +254,15 @@ static int32_t DummyReserved(PRFileDesc *f) {
 }
 
 DummyPrSocket::~DummyPrSocket() {
+  Reset();
+}
+
+void DummyPrSocket::Reset() {
   delete filter_;
+  if (peer_) {
+    peer_->SetPeer(nullptr);
+    peer_ = nullptr;
+  }
   while (!input_.empty())
   {
     Packet* front = input_.front();
@@ -352,11 +364,22 @@ int32_t DummyPrSocket::Write(const void *buf, int32_t length) {
   DataBuffer packet(static_cast<const uint8_t*>(buf),
                     static_cast<size_t>(length));
   DataBuffer filtered;
-  if (filter_ && filter_->Filter(packet, &filtered)) {
-    LOG("Filtered packet: " << filtered);
-    peer_->PacketReceived(filtered);
-  } else {
-    peer_->PacketReceived(packet);
+  PacketFilter::Action action = PacketFilter::KEEP;
+  if (filter_) {
+    action = filter_->Filter(packet, &filtered);
+  }
+  switch (action) {
+    case PacketFilter::CHANGE:
+      LOG("Original packet: " << packet);
+      LOG("Filtered packet: " << filtered);
+      peer_->PacketReceived(filtered);
+      break;
+    case PacketFilter::DROP:
+      LOG("Droppped packet: " << packet);
+      break;
+    case PacketFilter::KEEP:
+      peer_->PacketReceived(packet);
+      break;
   }
   // libssl can't handle it if this reports something other than the length
   // of what was passed in (or less, but we're not doing partial writes).
@@ -374,6 +397,15 @@ Poller *Poller::Instance() {
 void Poller::Shutdown() {
   delete instance;
   instance = nullptr;
+}
+
+Poller::~Poller()
+{
+  while (!timers_.empty()) {
+    Timer *timer = timers_.top();
+    timers_.pop();
+    delete timer;
+  }
 }
 
 void Poller::Wait(Event event, DummyPrSocket *adapter, PollTarget *target,
@@ -395,6 +427,29 @@ void Poller::Wait(Event event, DummyPrSocket *adapter, PollTarget *target,
   waiters_[adapter] = waiter;
 }
 
+void Poller::Cancel(Event event, DummyPrSocket *adapter) {
+  auto it = waiters_.find(adapter);
+  Waiter *waiter;
+
+  if (it == waiters_.end()) {
+    return;
+  }
+
+  waiter = it->second;
+
+  waiter->targets_[event] = nullptr;
+  waiter->callbacks_[event] = nullptr;
+
+  // Clean up if there are no callbacks.
+  for (size_t i=0; i<TIMER_EVENT; ++i) {
+    if (waiter->callbacks_[i])
+      return;
+  }
+
+  delete waiter;
+  waiters_.erase(adapter);
+}
+
 void Poller::SetTimer(uint32_t timer_ms, PollTarget *target, PollCallback cb,
                       Timer **timer) {
   Timer *t = new Timer(PR_Now() + timer_ms * 1000, target, cb);
@@ -403,7 +458,8 @@ void Poller::SetTimer(uint32_t timer_ms, PollTarget *target, PollCallback cb,
 }
 
 bool Poller::Poll() {
-  std::cerr << "Poll()\n";
+  std::cerr << "Poll() waiters = " << waiters_.size()
+            << " timers = " << timers_.size() << std::endl;
   PRIntervalTime timeout = PR_INTERVAL_NO_TIMEOUT;
   PRTime now = PR_Now();
   bool fired = false;

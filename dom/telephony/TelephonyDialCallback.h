@@ -13,13 +13,12 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/telephony/TelephonyCallback.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsITelephonyService.h"
 #include "nsJSUtils.h"
 #include "nsString.h"
 
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 namespace dom {
@@ -32,7 +31,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSITELEPHONYDIALCALLBACK
 
-  TelephonyDialCallback(nsPIDOMWindow* aWindow, Telephony* aTelephony,
+  TelephonyDialCallback(nsPIDOMWindowInner* aWindow, Telephony* aTelephony,
                         Promise* aPromise);
 
   NS_FORWARD_NSITELEPHONYCALLBACK(TelephonyCallback::)
@@ -44,11 +43,11 @@ private:
   NotifyDialMMISuccess(JSContext* aCx, const MozMMIResult& aResult);
 
 
-  nsCOMPtr<nsPIDOMWindow> mWindow;
-  nsRefPtr<Telephony> mTelephony;
+  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  RefPtr<Telephony> mTelephony;
 
   nsString mServiceCode;
-  nsRefPtr<MMICall> mMMICall;
+  RefPtr<MMICall> mMMICall;
 };
 
 } // namespace telephony

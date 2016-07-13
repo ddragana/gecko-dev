@@ -117,7 +117,7 @@ Prompter.prototype = {
 
 
 // Common utils not specific to a particular prompter style.
-let PromptUtilsTemp = {
+var PromptUtilsTemp = {
     __proto__ : PromptUtils,
 
     getLocalizedString : function (key, formatArgs) {
@@ -204,21 +204,11 @@ let PromptUtilsTemp = {
         authInfo.password = password;
     },
 
-    // Copied from login manager
+    /**
+     * Strip out things like userPass and path for display.
+     */
     getFormattedHostname : function (uri) {
-        let scheme = uri.scheme;
-        let hostname = scheme + "://" + uri.host;
-
-        // If the URI explicitly specified a port, only include it when
-        // it's not the default. (We never want "http://foo.com:80")
-        let port = uri.port;
-        if (port != -1) {
-            let handler = Services.io.getProtocolHandler(scheme);
-            if (port != handler.defaultPort)
-                hostname += ":" + port;
-        }
-
-        return hostname;
+        return uri.scheme + "://" + uri.hostPort;
     },
 
     // Copied from login manager
@@ -265,6 +255,8 @@ let PromptUtilsTemp = {
     makeAuthMessage : function (channel, authInfo) {
         let isProxy    = (authInfo.flags & Ci.nsIAuthInformation.AUTH_PROXY);
         let isPassOnly = (authInfo.flags & Ci.nsIAuthInformation.ONLY_PASSWORD);
+        let isCrossOrig = (authInfo.flags &
+                           Ci.nsIAuthInformation.CROSS_ORIGIN_SUB_RESOURCE);
 
         let username = authInfo.username;
         let [displayHost, realm] = this.getAuthTarget(channel, authInfo);
@@ -281,14 +273,17 @@ let PromptUtilsTemp = {
         }
 
         let text;
-        if (isProxy)
-            text = PromptUtils.getLocalizedString("EnterLoginForProxy", [realm, displayHost]);
-        else if (isPassOnly)
+        if (isProxy) {
+            text = PromptUtils.getLocalizedString("EnterLoginForProxy2", [realm, displayHost]);
+        } else if (isPassOnly) {
             text = PromptUtils.getLocalizedString("EnterPasswordFor", [username, displayHost]);
-        else if (!realm)
-            text = PromptUtils.getLocalizedString("EnterUserPasswordFor", [displayHost]);
-        else
-            text = PromptUtils.getLocalizedString("EnterLoginForRealm", [realm, displayHost]);
+        } else if (isCrossOrig) {
+            text = PromptUtils.getLocalizedString("EnterUserPasswordForCrossOrigin", [displayHost]);
+        } else if (!realm) {
+            text = PromptUtils.getLocalizedString("EnterUserPasswordFor2", [displayHost]);
+        } else {
+            text = PromptUtils.getLocalizedString("EnterLoginForRealm2", [realm, displayHost]);
+        }
 
         return text;
     },
@@ -371,7 +366,11 @@ function openModalWindow(domWin, uri, args) {
 }
 
 function openTabPrompt(domWin, tabPrompt, args) {
-    PromptUtils.fireDialogEvent(domWin, "DOMWillOpenModalDialog");
+    let docShell = domWin.QueryInterface(Ci.nsIInterfaceRequestor)
+                         .getInterface(Ci.nsIDocShell);
+    let inPermitUnload = docShell.contentViewer && docShell.contentViewer.inPermitUnload;
+    let eventDetail = Cu.cloneInto({tabPrompt: true, inPermitUnload}, domWin);
+    PromptUtils.fireDialogEvent(domWin, "DOMWillOpenModalDialog", null, eventDetail);
 
     let winUtils = domWin.QueryInterface(Ci.nsIInterfaceRequestor)
                          .getInterface(Ci.nsIDOMWindowUtils);
@@ -433,14 +432,15 @@ function openTabPrompt(domWin, tabPrompt, args) {
 }
 
 function openRemotePrompt(domWin, args, tabPrompt) {
-    let messageManager = domWin.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIWebNavigation)
-                         .QueryInterface(Ci.nsIDocShell)
-                         .QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsITabChild)
-                         .messageManager;
+    let docShell = domWin.QueryInterface(Ci.nsIInterfaceRequestor)
+                         .getInterface(Ci.nsIDocShell);
+    let messageManager = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+                                 .getInterface(Ci.nsITabChild)
+                                 .messageManager;
 
-    PromptUtils.fireDialogEvent(domWin, "DOMWillOpenModalDialog");
+    let inPermitUnload = docShell.contentViewer && docShell.contentViewer.inPermitUnload;
+    let eventDetail = Cu.cloneInto({tabPrompt, inPermitUnload}, domWin);
+    PromptUtils.fireDialogEvent(domWin, "DOMWillOpenModalDialog", null, eventDetail);
 
     let winUtils = domWin.QueryInterface(Ci.nsIInterfaceRequestor)
                          .getInterface(Ci.nsIDOMWindowUtils);
@@ -483,7 +483,9 @@ function openRemotePrompt(domWin, args, tabPrompt) {
 
     let topPrincipal = domWin.top.document.nodePrincipal;
     let promptPrincipal = domWin.document.nodePrincipal;
+    args.promptPrincipal = promptPrincipal;
     args.showAlertOrigin = topPrincipal.equals(promptPrincipal);
+    args.inPermitUnload = inPermitUnload;
 
     args._remoteId = id;
 

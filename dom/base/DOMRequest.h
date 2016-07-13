@@ -29,8 +29,8 @@ class DOMRequest : public DOMEventTargetHelper,
 {
 protected:
   JS::Heap<JS::Value> mResult;
-  nsRefPtr<DOMError> mError;
-  nsRefPtr<Promise> mPromise;
+  RefPtr<DOMError> mError;
+  RefPtr<Promise> mPromise;
   bool mDone;
 
 public:
@@ -42,7 +42,7 @@ public:
                                                          DOMEventTargetHelper)
 
   // WrapperCache
-  nsPIDOMWindow* GetParentObject() const
+  nsPIDOMWindowInner* GetParentObject() const
   {
     return GetOwner();
   }
@@ -74,16 +74,18 @@ public:
   IMPL_EVENT_HANDLER(success)
   IMPL_EVENT_HANDLER(error)
 
-  already_AddRefed<mozilla::dom::Promise>
+  void
   Then(JSContext* aCx, AnyCallback* aResolveCallback,
-       AnyCallback* aRejectCallback, mozilla::ErrorResult& aRv);
+       AnyCallback* aRejectCallback,
+       JS::MutableHandle<JS::Value> aRetval,
+       mozilla::ErrorResult& aRv);
 
   void FireSuccess(JS::Handle<JS::Value> aResult);
   void FireError(const nsAString& aError);
   void FireError(nsresult aError);
   void FireDetailedError(DOMError* aError);
 
-  explicit DOMRequest(nsPIDOMWindow* aWindow);
+  explicit DOMRequest(nsPIDOMWindowInner* aWindow);
   explicit DOMRequest(nsIGlobalObject* aGlobal);
 
 protected:

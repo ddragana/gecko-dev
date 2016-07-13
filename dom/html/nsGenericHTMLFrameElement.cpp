@@ -8,6 +8,7 @@
 
 #include "mozilla/dom/BrowserElementAudioChannel.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/HTMLIFrameElement.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ErrorResult.h"
 #include "GeckoProfiler.h"
@@ -25,6 +26,7 @@
 #include "nsPresContext.h"
 #include "nsServiceManagerUtils.h"
 #include "nsSubDocumentFrame.h"
+#include "nsXULElement.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -85,12 +87,15 @@ nsGenericHTMLFrameElement::GetContentDocument(nsIDOMDocument** aContentDocument)
 nsIDocument*
 nsGenericHTMLFrameElement::GetContentDocument()
 {
-  nsCOMPtr<nsPIDOMWindow> win = GetContentWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> win = GetContentWindow();
   if (!win) {
     return nullptr;
   }
 
   nsIDocument *doc = win->GetDoc();
+  if (!doc) {
+    return nullptr;
+  }
 
   // Return null for cross-origin contentDocument.
   if (!nsContentUtils::SubjectPrincipal()->
@@ -100,16 +105,7 @@ nsGenericHTMLFrameElement::GetContentDocument()
   return doc;
 }
 
-nsresult
-nsGenericHTMLFrameElement::GetContentWindow(nsIDOMWindow** aContentWindow)
-{
-  NS_PRECONDITION(aContentWindow, "Null out param");
-  nsCOMPtr<nsPIDOMWindow> window = GetContentWindow();
-  window.forget(aContentWindow);
-  return NS_OK;
-}
-
-already_AddRefed<nsPIDOMWindow>
+already_AddRefed<nsPIDOMWindowOuter>
 nsGenericHTMLFrameElement::GetContentWindow()
 {
   EnsureFrameLoader();
@@ -127,8 +123,11 @@ nsGenericHTMLFrameElement::GetContentWindow()
 
   nsCOMPtr<nsIDocShell> doc_shell;
   mFrameLoader->GetDocShell(getter_AddRefs(doc_shell));
+  if (!doc_shell) {
+    return nullptr;
+  }
 
-  nsCOMPtr<nsPIDOMWindow> win = do_GetInterface(doc_shell);
+  nsCOMPtr<nsPIDOMWindowOuter> win = doc_shell->GetWindow();
 
   if (!win) {
     return nullptr;
@@ -184,15 +183,70 @@ nsGenericHTMLFrameElement::GetFrameLoader(nsIFrameLoader **aFrameLoader)
 NS_IMETHODIMP_(already_AddRefed<nsFrameLoader>)
 nsGenericHTMLFrameElement::GetFrameLoader()
 {
-  nsRefPtr<nsFrameLoader> loader = mFrameLoader;
+  RefPtr<nsFrameLoader> loader = mFrameLoader;
   return loader.forget();
 }
 
 NS_IMETHODIMP
-nsGenericHTMLFrameElement::SwapFrameLoaders(nsIFrameLoaderOwner* aOtherOwner)
+nsGenericHTMLFrameElement::GetParentApplication(mozIApplication** aApplication)
 {
-  // We don't support this yet
-  return NS_ERROR_NOT_IMPLEMENTED;
+  if (!aApplication) {
+    return NS_ERROR_FAILURE;
+  }
+
+  *aApplication = nullptr;
+
+  uint32_t appId;
+  nsIPrincipal *principal = NodePrincipal();
+  nsresult rv = principal->GetAppId(&appId);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIAppsService> appsService = do_GetService(APPS_SERVICE_CONTRACTID);
+  if (NS_WARN_IF(!appsService)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  rv = appsService->GetAppByLocalId(appId, aApplication);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+void
+nsGenericHTMLFrameElement::SwapFrameLoaders(HTMLIFrameElement& aOtherLoaderOwner,
+                                            ErrorResult& rv)
+{
+  if (&aOtherLoaderOwner == this) {
+    // nothing to do
+    return;
+  }
+
+  SwapFrameLoaders(aOtherLoaderOwner.mFrameLoader, rv);
+}
+
+void
+nsGenericHTMLFrameElement::SwapFrameLoaders(nsXULElement& aOtherLoaderOwner,
+                                            ErrorResult& rv)
+{
+  aOtherLoaderOwner.SwapFrameLoaders(mFrameLoader, rv);
+}
+
+void
+nsGenericHTMLFrameElement::SwapFrameLoaders(RefPtr<nsFrameLoader>& aOtherLoader,
+                                            mozilla::ErrorResult& rv)
+{
+  if (!mFrameLoader || !aOtherLoader) {
+    rv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+    return;
+  }
+
+  rv = mFrameLoader->SwapWithOtherLoader(aOtherLoader,
+                                         mFrameLoader,
+                                         aOtherLoader);
 }
 
 NS_IMETHODIMP
@@ -348,7 +402,7 @@ nsGenericHTMLFrameElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
         if (cur != val) {
           scrollable->SetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_X, val);
           scrollable->SetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_Y, val);
-          nsRefPtr<nsPresContext> presContext;
+          RefPtr<nsPresContext> presContext;
           docshell->GetPresContext(getter_AddRefs(presContext));
           nsIPresShell* shell = presContext ? presContext->GetPresShell() : nullptr;
           nsIFrame* rootScroll = shell ? shell->GetRootScrollFrame() : nullptr;
@@ -528,15 +582,16 @@ nsGenericHTMLFrameElement::GetReallyIsWidget(bool *aOut)
 }
 
 /* [infallible] */ NS_IMETHODIMP
-nsGenericHTMLFrameElement::GetIsExpectingSystemMessage(bool *aOut)
+nsGenericHTMLFrameElement::GetIsolated(bool *aOut)
 {
-  *aOut = false;
+  *aOut = true;
 
-  if (!nsIMozBrowserFrame::GetReallyIsApp()) {
+  if (!nsContentUtils::IsSystemPrincipal(NodePrincipal())) {
     return NS_OK;
   }
 
-  *aOut = HasAttr(kNameSpaceID_None, nsGkAtoms::expectingSystemMessage);
+  // Isolation is only disabled if the attribute is present
+  *aOut = !HasAttr(kNameSpaceID_None, nsGkAtoms::noisolation);
   return NS_OK;
 }
 
@@ -675,11 +730,3 @@ nsGenericHTMLFrameElement::InitializeBrowserAPI()
   InitBrowserElementAPI();
   return NS_OK;
 }
-
-void
-nsGenericHTMLFrameElement::SwapFrameLoaders(nsXULElement& aOtherOwner,
-                                            ErrorResult& aError)
-{
-  aError.Throw(NS_ERROR_NOT_IMPLEMENTED);
-}
-

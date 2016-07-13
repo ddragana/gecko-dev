@@ -14,10 +14,18 @@ EXPORTS += [
 
 EXPORTS.mozilla.widget += [
     'AudioSession.h',
+    'CompositorWidgetChild.h',
+    'CompositorWidgetParent.h',
+    'WinCompositorWidget.h',
+    'WinMessages.h',
+    'WinModifierKeyState.h',
+    'WinNativeEventData.h',
 ]
 
 UNIFIED_SOURCES += [
     'AudioSession.cpp',
+    'CompositorWidgetChild.cpp',
+    'CompositorWidgetParent.cpp',
     'GfxInfo.cpp',
     'IEnumFE.cpp',
     'IMMHandler.cpp',
@@ -51,9 +59,11 @@ UNIFIED_SOURCES += [
     'TaskbarTabPreview.cpp',
     'TaskbarWindowPreview.cpp',
     'WidgetTraceEvent.cpp',
+    'WinCompositorWidget.cpp',
     'WindowHook.cpp',
     'WinIMEHandler.cpp',
     'WinTaskbar.cpp',
+    'WinTextEventDispatcherListener.cpp',
     'WinUtils.cpp',
 ]
 
@@ -81,10 +91,8 @@ if CONFIG['NS_PRINTING']:
 
 if CONFIG['NS_ENABLE_TSF']:
     SOURCES += [
-        'nsTextStore.cpp',
+        'TSFTextStore.cpp',
     ]
-
-FAIL_ON_WARNINGS = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -107,3 +115,7 @@ for var in ('MOZ_ENABLE_D3D10_LAYER'):
 RESFILE = 'widget.res'
 
 CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
+
+OS_LIBS += [
+    'rpcrt4',
+]

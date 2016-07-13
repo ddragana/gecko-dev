@@ -7,11 +7,23 @@
  * http://dev.w3.org/2011/webrtc/editor/webrtc.html#idl-def-RTCConfiguration
  */
 
+enum RTCIceCredentialType {
+    "password",
+    "token"
+};
+
 dictionary RTCIceServer {
     (DOMString or sequence<DOMString>) urls;
     DOMString  url; //deprecated
-    DOMString? credential = null;
-    DOMString? username = null;
+    DOMString username;
+    DOMString credential;
+    RTCIceCredentialType credentialType = "password";
+};
+
+enum RTCIceTransportPolicy {
+    "none",
+    "relay",
+    "all"
 };
 
 enum RTCBundlePolicy {
@@ -22,6 +34,7 @@ enum RTCBundlePolicy {
 
 dictionary RTCConfiguration {
     sequence<RTCIceServer> iceServers;
+    RTCIceTransportPolicy  iceTransportPolicy = "all";
     RTCBundlePolicy bundlePolicy = "balanced";
     DOMString? peerIdentity = null;
     sequence<RTCCertificate> certificates;

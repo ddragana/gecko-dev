@@ -51,18 +51,17 @@ BEGIN_TEST(test_cloneScript)
 }
 END_TEST(test_cloneScript)
 
-static void
-DestroyPrincipals(JSPrincipals* principals)
-{
-    delete principals;
-}
-
-struct Principals : public JSPrincipals
+struct Principals final : public JSPrincipals
 {
   public:
     Principals()
     {
         refcount = 0;
+    }
+
+    bool write(JSContext* cx, JSStructuredCloneWriter* writer) override {
+        MOZ_ASSERT(false, "not imlemented");
+        return false;
     }
 };
 
@@ -80,13 +79,20 @@ class AutoDropPrincipals
 
     ~AutoDropPrincipals()
     {
-        JS_DropPrincipals(rt, principals);
+        JS_DropPrincipals(JS_GetContext(rt), principals);
     }
 };
 
+static void
+DestroyPrincipals(JSPrincipals* principals)
+{
+    auto p = static_cast<Principals*>(principals);
+    delete p;
+}
+
 BEGIN_TEST(test_cloneScriptWithPrincipals)
 {
-    JS_InitDestroyPrincipalsCallback(rt, DestroyPrincipals);
+    JS_InitDestroyPrincipalsCallback(cx, DestroyPrincipals);
 
     JSPrincipals* principalsA = new Principals();
     AutoDropPrincipals dropA(rt, principalsA);

@@ -12,9 +12,10 @@ dictionary IDBObjectStoreParameters {
     boolean                             autoIncrement = false;
 };
 
-[Exposed=(Window,Worker)]
+[Exposed=(Window,Worker,System)]
 interface IDBObjectStore {
-    readonly    attribute DOMString      name;
+    [SetterThrows]
+    attribute DOMString name;
 
     [Throws]
     readonly    attribute any            keyPath;
@@ -41,14 +42,8 @@ interface IDBObjectStore {
     [Throws]
     IDBRequest openCursor (optional any range, optional IDBCursorDirection direction = "next");
 
-    // Bug 899972
-    // IDBIndex   createIndex (DOMString name, (DOMString or sequence<DOMString>) keyPath, optional IDBIndexParameters optionalParameters);
-
     [Throws]
-    IDBIndex   createIndex (DOMString name, DOMString keyPath, optional IDBIndexParameters optionalParameters);
-
-    [Throws]
-    IDBIndex   createIndex (DOMString name, sequence<DOMString> keyPath, optional IDBIndexParameters optionalParameters);
+    IDBIndex   createIndex (DOMString name, (DOMString or sequence<DOMString>) keyPath, optional IDBIndexParameters optionalParameters);
 
     [Throws]
     IDBIndex   index (DOMString name);
@@ -63,17 +58,14 @@ interface IDBObjectStore {
 partial interface IDBObjectStore {
     // Success fires IDBTransactionEvent, result == array of values for given keys
     [Throws]
-    IDBRequest mozGetAll (optional any key, optional unsigned long limit);
+    IDBRequest mozGetAll (optional any key, [EnforceRange] optional unsigned long limit);
 
-    [Throws,
-     Func="mozilla::dom::indexedDB::IndexedDatabaseManager::ExperimentalFeaturesEnabled"]
-    IDBRequest getAll (optional any key, optional unsigned long limit);
+    [Throws]
+    IDBRequest getAll (optional any key, [EnforceRange] optional unsigned long limit);
 
-    [Throws,
-     Func="mozilla::dom::indexedDB::IndexedDatabaseManager::ExperimentalFeaturesEnabled"]
-    IDBRequest getAllKeys (optional any key, optional unsigned long limit);
+    [Throws]
+    IDBRequest getAllKeys (optional any key, [EnforceRange] optional unsigned long limit);
 
-    [Throws,
-     Func="mozilla::dom::indexedDB::IndexedDatabaseManager::ExperimentalFeaturesEnabled"]
+    [Throws]
     IDBRequest openKeyCursor (optional any range, optional IDBCursorDirection direction = "next");
 };

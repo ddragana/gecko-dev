@@ -24,7 +24,7 @@ nsresult RtspOmxReader::InitOmxDecoder()
     NS_ASSERTION(mDecoder->GetResource(),
                  "RtspOmxReader mDecoder->GetResource() is null.");
     mExtractor = new RtspExtractor(mRtspResource);
-    mOmxDecoder = new OmxDecoder(mDecoder);
+    mOmxDecoder = new OmxDecoder(mDecoder, OwnerThread());
     if (!mOmxDecoder->Init(mExtractor)) {
       return NS_ERROR_FAILURE;
     }
@@ -32,15 +32,15 @@ nsresult RtspOmxReader::InitOmxDecoder()
   return NS_OK;
 }
 
-nsRefPtr<MediaDecoderReader::SeekPromise>
-RtspOmxReader::Seek(int64_t aTime, int64_t aEndTime)
+RefPtr<MediaDecoderReader::SeekPromise>
+RtspOmxReader::Seek(SeekTarget aTarget, int64_t aEndTime)
 {
   // The seek function of Rtsp is time-based, we call the SeekTime function in
   // RtspMediaResource. The SeekTime function finally send a seek command to
   // Rtsp stream server through network and also clear the buffer data in
   // RtspMediaResource.
   if (mRtspResource) {
-    mRtspResource->SeekTime(aTime);
+    mRtspResource->SeekTime(aTarget.GetTime().ToMicroseconds());
     mRtspResource->EnablePlayoutDelay();
   }
 
@@ -49,7 +49,7 @@ RtspOmxReader::Seek(int64_t aTime, int64_t aEndTime)
   // that store the decoded data and also call the |DecodeToTarget| to pass
   // the seek time to OMX a/v decoders.
   mEnsureActiveFromSeek = true;
-  return MediaOmxReader::Seek(aTime, aEndTime);
+  return MediaOmxReader::Seek(aTarget, aEndTime);
 }
 
 void RtspOmxReader::SetIdle() {
@@ -86,14 +86,14 @@ void RtspOmxReader::EnsureActive() {
   MediaOmxReader::EnsureActive();
 }
 
-nsRefPtr<MediaDecoderReader::MetadataPromise>
+RefPtr<MediaDecoderReader::MetadataPromise>
 RtspOmxReader::AsyncReadMetadata()
 {
   // Send a PLAY command to the RTSP server before reading metadata.
   // Because we might need some decoded samples to ensure we have configuration.
   mRtspResource->DisablePlayoutDelay();
 
-  nsRefPtr<MediaDecoderReader::MetadataPromise> p =
+  RefPtr<MediaDecoderReader::MetadataPromise> p =
     MediaOmxReader::AsyncReadMetadata();
 
   // Send a PAUSE to the RTSP server because the underlying media resource is

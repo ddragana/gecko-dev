@@ -8,15 +8,16 @@
 #define jit_JitCompartment_h
 
 #include "mozilla/Array.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/MemoryReporting.h"
 
-#include "jsweakcache.h"
-
-#include "builtin/TypedObject.h"
+#include "builtin/SIMD.h"
 #include "jit/CompileInfo.h"
+#include "jit/ICStubSpace.h"
 #include "jit/IonCode.h"
 #include "jit/JitFrames.h"
 #include "jit/shared/Assembler-shared.h"
+#include "js/GCHashTable.h"
 #include "js/Value.h"
 #include "vm/Stack.h"
 
@@ -59,66 +60,6 @@ typedef void (*EnterJitCode)(void* code, unsigned argc, Value* argv, Interpreter
 
 class JitcodeGlobalTable;
 
-// ICStubSpace is an abstraction for allocation policy and storage for stub data.
-// There are two kinds of stubs: optimized stubs and fallback stubs (the latter
-// also includes stubs that can make non-tail calls that can GC).
-//
-// Optimized stubs are allocated per-compartment and are always purged when
-// JIT-code is discarded. Fallback stubs are allocated per BaselineScript and
-// are only destroyed when the BaselineScript is destroyed.
-class ICStubSpace
-{
-  protected:
-    LifoAlloc allocator_;
-
-    explicit ICStubSpace(size_t chunkSize)
-      : allocator_(chunkSize)
-    {}
-
-  public:
-    inline void* alloc(size_t size) {
-        return allocator_.alloc(size);
-    }
-
-    JS_DECLARE_NEW_METHODS(allocate, alloc, inline)
-
-    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
-        return allocator_.sizeOfExcludingThis(mallocSizeOf);
-    }
-};
-
-// Space for optimized stubs. Every JitCompartment has a single
-// OptimizedICStubSpace.
-struct OptimizedICStubSpace : public ICStubSpace
-{
-    static const size_t STUB_DEFAULT_CHUNK_SIZE = 4 * 1024;
-
-  public:
-    OptimizedICStubSpace()
-      : ICStubSpace(STUB_DEFAULT_CHUNK_SIZE)
-    {}
-
-    void free() {
-        allocator_.freeAll();
-    }
-};
-
-// Space for fallback stubs. Every BaselineScript has a
-// FallbackICStubSpace.
-struct FallbackICStubSpace : public ICStubSpace
-{
-    static const size_t STUB_DEFAULT_CHUNK_SIZE = 256;
-
-  public:
-    FallbackICStubSpace()
-      : ICStubSpace(STUB_DEFAULT_CHUNK_SIZE)
-    {}
-
-    inline void adoptFrom(FallbackICStubSpace* other) {
-        allocator_.steal(&(other->allocator_));
-    }
-};
-
 // Information about a loop backedge in the runtime, which can be set to
 // point to either the loop header or to an OOL interrupt checking stub,
 // if signal handlers are being used to implement interrupts.
@@ -140,10 +81,21 @@ class PatchableBackedge : public InlineListNode<PatchableBackedge>
 
 class JitRuntime
 {
+  public:
+    enum BackedgeTarget {
+        BackedgeLoopHeader,
+        BackedgeInterruptCheck
+    };
+
+  private:
     friend class JitCompartment;
 
-    // Executable allocator for all code except asm.js code.
+    // Executable allocator for all code except asm.js code and Ion code with
+    // patchable backedges (see below).
     ExecutableAllocator execAlloc_;
+
+    // Executable allocator for Ion scripts with patchable backedges.
+    ExecutableAllocator backedgeExecAlloc_;
 
     // Shared exception-handler tail.
     JitCode* exceptionTail_;
@@ -196,7 +148,7 @@ class JitRuntime
     void* baselineDebugModeOSRHandlerNoFrameRegPopAddr_;
 
     // Map VMFunction addresses to the JitCode of the wrapper.
-    typedef WeakCache<const VMFunction*, JitCode*> VMWrapperMap;
+    typedef GCRekeyableHashMap<const VMFunction*, JitCode*> VMWrapperMap;
     VMWrapperMap* functionWrappers_;
 
     // Buffer for OSR from baseline to Ion. To avoid holding on to this for
@@ -204,11 +156,18 @@ class JitRuntime
     // (after returning from JIT code).
     uint8_t* osrTempData_;
 
+    // If true, the signal handler to interrupt Ion code should not attempt to
+    // patch backedges, as we're busy modifying data structures.
+    mozilla::Atomic<bool> preventBackedgePatching_;
+
+    // Whether patchable backedges currently jump to the loop header or the
+    // interrupt check.
+    BackedgeTarget backedgeTarget_;
+
     // List of all backedges in all Ion code. The backedge edge list is accessed
-    // asynchronously when the main thread is paused and mutatingBackedgeList_
-    // is false. Thus, the list must only be mutated while mutatingBackedgeList_
+    // asynchronously when the main thread is paused and preventBackedgePatching_
+    // is false. Thus, the list must only be mutated while preventBackedgePatching_
     // is true.
-    volatile bool mutatingBackedgeList_;
     InlineList<PatchableBackedge> backedgeList_;
 
     // In certain cases, we want to optimize certain opcodes to typed instructions,
@@ -246,52 +205,71 @@ class JitRuntime
     JitCode* generateVMWrapper(JSContext* cx, const VMFunction& f);
 
   public:
-    JitRuntime();
+    explicit JitRuntime(JSRuntime* rt);
     ~JitRuntime();
-    bool initialize(JSContext* cx);
+    MOZ_MUST_USE bool initialize(JSContext* cx, js::AutoLockForExclusiveAccess& lock);
 
     uint8_t* allocateOsrTempData(size_t size);
     void freeOsrTempData();
 
-    static void Mark(JSTracer* trc);
+    static void Mark(JSTracer* trc, js::AutoLockForExclusiveAccess& lock);
     static void MarkJitcodeGlobalTableUnconditionally(JSTracer* trc);
-    static bool MarkJitcodeGlobalTableIteratively(JSTracer* trc);
+    static MOZ_MUST_USE bool MarkJitcodeGlobalTableIteratively(JSTracer* trc);
     static void SweepJitcodeGlobalTable(JSRuntime* rt);
 
     ExecutableAllocator& execAlloc() {
         return execAlloc_;
     }
+    ExecutableAllocator& backedgeExecAlloc() {
+        return backedgeExecAlloc_;
+    }
 
-    class AutoMutateBackedges
+    class AutoPreventBackedgePatching
     {
+        mozilla::DebugOnly<JSRuntime*> rt_;
         JitRuntime* jrt_;
+        bool prev_;
+
       public:
-        explicit AutoMutateBackedges(JitRuntime* jrt) : jrt_(jrt) {
-            MOZ_ASSERT(!jrt->mutatingBackedgeList_);
-            jrt->mutatingBackedgeList_ = true;
+        // This two-arg constructor is provided for JSRuntime::createJitRuntime,
+        // where we have a JitRuntime but didn't set rt->jitRuntime_ yet.
+        AutoPreventBackedgePatching(JSRuntime* rt, JitRuntime* jrt)
+          : rt_(rt),
+            jrt_(jrt),
+            prev_(false)  // silence GCC warning
+        {
+            MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
+            if (jrt_) {
+                prev_ = jrt_->preventBackedgePatching_;
+                jrt_->preventBackedgePatching_ = true;
+            }
         }
-        ~AutoMutateBackedges() {
-            MOZ_ASSERT(jrt_->mutatingBackedgeList_);
-            jrt_->mutatingBackedgeList_ = false;
+        explicit AutoPreventBackedgePatching(JSRuntime* rt)
+          : AutoPreventBackedgePatching(rt, rt->jitRuntime())
+        {}
+        ~AutoPreventBackedgePatching() {
+            MOZ_ASSERT(jrt_ == rt_->jitRuntime());
+            if (jrt_) {
+                MOZ_ASSERT(jrt_->preventBackedgePatching_);
+                jrt_->preventBackedgePatching_ = prev_;
+            }
         }
     };
 
-    bool mutatingBackedgeList() const {
-        return mutatingBackedgeList_;
+    bool preventBackedgePatching() const {
+        return preventBackedgePatching_;
+    }
+    BackedgeTarget backedgeTarget() const {
+        return backedgeTarget_;
     }
     void addPatchableBackedge(PatchableBackedge* backedge) {
-        MOZ_ASSERT(mutatingBackedgeList_);
+        MOZ_ASSERT(preventBackedgePatching_);
         backedgeList_.pushFront(backedge);
     }
     void removePatchableBackedge(PatchableBackedge* backedge) {
-        MOZ_ASSERT(mutatingBackedgeList_);
+        MOZ_ASSERT(preventBackedgePatching_);
         backedgeList_.remove(backedge);
     }
-
-    enum BackedgeTarget {
-        BackedgeLoopHeader,
-        BackedgeInterruptCheck
-    };
 
     void patchIonBackedges(JSRuntime* rt, BackedgeTarget target);
 
@@ -340,11 +318,11 @@ class JitRuntime
 
     JitCode* preBarrier(MIRType type) const {
         switch (type) {
-          case MIRType_Value: return valuePreBarrier_;
-          case MIRType_String: return stringPreBarrier_;
-          case MIRType_Object: return objectPreBarrier_;
-          case MIRType_Shape: return shapePreBarrier_;
-          case MIRType_ObjectGroup: return objectGroupPreBarrier_;
+          case MIRType::Value: return valuePreBarrier_;
+          case MIRType::String: return stringPreBarrier_;
+          case MIRType::Object: return objectPreBarrier_;
+          case MIRType::Shape: return shapePreBarrier_;
+          case MIRType::ObjectGroup: return objectGroupPreBarrier_;
           default: MOZ_CRASH();
         }
     }
@@ -404,13 +382,59 @@ class JitZone
     }
 };
 
+enum class CacheKind;
+class CacheIRStubInfo;
+
+struct CacheIRStubKey : public DefaultHasher<CacheIRStubKey> {
+    struct Lookup {
+        CacheKind kind;
+        const uint8_t* code;
+        uint32_t length;
+
+        Lookup(CacheKind kind, const uint8_t* code, uint32_t length)
+          : kind(kind), code(code), length(length)
+        {}
+    };
+
+    static HashNumber hash(const Lookup& l);
+    static bool match(const CacheIRStubKey& entry, const Lookup& l);
+
+    UniquePtr<CacheIRStubInfo, JS::FreePolicy> stubInfo;
+
+    explicit CacheIRStubKey(CacheIRStubInfo* info) : stubInfo(info) {}
+    CacheIRStubKey(CacheIRStubKey&& other) : stubInfo(Move(other.stubInfo)) { }
+
+    void operator=(CacheIRStubKey&& other) {
+        stubInfo = Move(other.stubInfo);
+    }
+};
+
 class JitCompartment
 {
     friend class JitActivation;
 
+    template<typename Key>
+    struct IcStubCodeMapGCPolicy {
+        static bool needsSweep(Key*, ReadBarrieredJitCode* value) {
+            return IsAboutToBeFinalized(value);
+        }
+    };
+
     // Map ICStub keys to ICStub shared code objects.
-    typedef WeakValueCache<uint32_t, ReadBarrieredJitCode> ICStubCodeMap;
+    using ICStubCodeMap = GCHashMap<uint32_t,
+                                    ReadBarrieredJitCode,
+                                    DefaultHasher<uint32_t>,
+                                    RuntimeAllocPolicy,
+                                    IcStubCodeMapGCPolicy<uint32_t>>;
     ICStubCodeMap* stubCodes_;
+
+    // Map ICStub keys to ICStub shared code objects.
+    using CacheIRStubCodeMap = GCHashMap<CacheIRStubKey,
+                                         ReadBarrieredJitCode,
+                                         CacheIRStubKey,
+                                         RuntimeAllocPolicy,
+                                         IcStubCodeMapGCPolicy<CacheIRStubKey>>;
+    CacheIRStubCodeMap* cacheIRStubCodes_;
 
     // Keep track of offset into various baseline stubs' code at return
     // point from called script.
@@ -425,14 +449,16 @@ class JitCompartment
     // which may occur off thread and whose barriers are captured during
     // CodeGenerator::link.
     JitCode* stringConcatStub_;
-    JitCode* regExpExecStub_;
-    JitCode* regExpTestStub_;
+    JitCode* regExpMatcherStub_;
+    JitCode* regExpSearcherStub_;
+    JitCode* regExpTesterStub_;
 
-    mozilla::Array<ReadBarrieredObject, SimdTypeDescr::LAST_TYPE + 1> simdTemplateObjects_;
+    mozilla::EnumeratedArray<SimdType, SimdType::Count, ReadBarrieredObject> simdTemplateObjects_;
 
     JitCode* generateStringConcatStub(JSContext* cx);
-    JitCode* generateRegExpExecStub(JSContext* cx);
-    JitCode* generateRegExpTestStub(JSContext* cx);
+    JitCode* generateRegExpMatcherStub(JSContext* cx);
+    JitCode* generateRegExpSearcherStub(JSContext* cx);
+    JitCode* generateRegExpTesterStub(JSContext* cx);
 
   public:
     JSObject* getSimdTemplateObjectFor(JSContext* cx, Handle<SimdTypeDescr*> descr) {
@@ -442,7 +468,7 @@ class JitCompartment
         return tpl.get();
     }
 
-    JSObject* maybeGetSimdTemplateObjectFor(SimdTypeDescr::Type type) const {
+    JSObject* maybeGetSimdTemplateObjectFor(SimdType type) const {
         const ReadBarrieredObject& tpl = simdTemplateObjects_[type];
 
         // This function is used by Eager Simd Unbox phase, so we cannot use the
@@ -453,7 +479,7 @@ class JitCompartment
 
     // This function is used to call the read barrier, to mark the SIMD template
     // type as used. This function can only be called from the main thread.
-    void registerSimdTemplateObjectFor(SimdTypeDescr::Type type) {
+    void registerSimdTemplateObjectFor(SimdType type) {
         ReadBarrieredObject& tpl = simdTemplateObjects_[type];
         MOZ_ASSERT(tpl.unbarrieredGet());
         tpl.get();
@@ -465,13 +491,29 @@ class JitCompartment
             return p->value();
         return nullptr;
     }
-    bool putStubCode(uint32_t key, Handle<JitCode*> stubCode) {
-        // Make sure to do a lookupForAdd(key) and then insert into that slot, because
-        // that way if stubCode gets moved due to a GC caused by lookupForAdd, then
-        // we still write the correct pointer.
-        MOZ_ASSERT(!stubCodes_->has(key));
-        ICStubCodeMap::AddPtr p = stubCodes_->lookupForAdd(key);
-        return stubCodes_->add(p, key, stubCode.get());
+    MOZ_MUST_USE bool putStubCode(JSContext* cx, uint32_t key, Handle<JitCode*> stubCode) {
+        MOZ_ASSERT(stubCode);
+        if (!stubCodes_->putNew(key, stubCode.get())) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+        return true;
+    }
+    JitCode* getCacheIRStubCode(const CacheIRStubKey::Lookup& key, CacheIRStubInfo** stubInfo) {
+        CacheIRStubCodeMap::Ptr p = cacheIRStubCodes_->lookup(key);
+        if (p) {
+            *stubInfo = p->key().stubInfo.get();
+            return p->value();
+        }
+        *stubInfo = nullptr;
+        return nullptr;
+    }
+    MOZ_MUST_USE bool putCacheIRStubCode(const CacheIRStubKey::Lookup& lookup, CacheIRStubKey& key,
+                                         JitCode* stubCode)
+    {
+        CacheIRStubCodeMap::AddPtr p = cacheIRStubCodes_->lookupForAdd(lookup);
+        MOZ_ASSERT(!p);
+        return cacheIRStubCodes_->add(p, Move(key), stubCode);
     }
     void initBaselineCallReturnAddr(void* addr, bool constructing) {
         MOZ_ASSERT(baselineCallReturnAddrs_[constructing] == nullptr);
@@ -504,10 +546,10 @@ class JitCompartment
     JitCompartment();
     ~JitCompartment();
 
-    bool initialize(JSContext* cx);
+    MOZ_MUST_USE bool initialize(JSContext* cx);
 
     // Initialize code stubs only used by Ion, not Baseline.
-    bool ensureIonStubsExist(JSContext* cx);
+    MOZ_MUST_USE bool ensureIonStubsExist(JSContext* cx);
 
     void mark(JSTracer* trc, JSCompartment* compartment);
     void sweep(FreeOp* fop, JSCompartment* compartment);
@@ -516,27 +558,40 @@ class JitCompartment
         return stringConcatStub_;
     }
 
-    JitCode* regExpExecStubNoBarrier() const {
-        return regExpExecStub_;
+    JitCode* regExpMatcherStubNoBarrier() const {
+        return regExpMatcherStub_;
     }
 
-    bool ensureRegExpExecStubExists(JSContext* cx) {
-        if (regExpExecStub_)
+    MOZ_MUST_USE bool ensureRegExpMatcherStubExists(JSContext* cx) {
+        if (regExpMatcherStub_)
             return true;
-        regExpExecStub_ = generateRegExpExecStub(cx);
-        return regExpExecStub_ != nullptr;
+        regExpMatcherStub_ = generateRegExpMatcherStub(cx);
+        return regExpMatcherStub_ != nullptr;
     }
 
-    JitCode* regExpTestStubNoBarrier() const {
-        return regExpTestStub_;
+    JitCode* regExpSearcherStubNoBarrier() const {
+        return regExpSearcherStub_;
     }
 
-    bool ensureRegExpTestStubExists(JSContext* cx) {
-        if (regExpTestStub_)
+    MOZ_MUST_USE bool ensureRegExpSearcherStubExists(JSContext* cx) {
+        if (regExpSearcherStub_)
             return true;
-        regExpTestStub_ = generateRegExpTestStub(cx);
-        return regExpTestStub_ != nullptr;
+        regExpSearcherStub_ = generateRegExpSearcherStub(cx);
+        return regExpSearcherStub_ != nullptr;
     }
+
+    JitCode* regExpTesterStubNoBarrier() const {
+        return regExpTesterStub_;
+    }
+
+    MOZ_MUST_USE bool ensureRegExpTesterStubExists(JSContext* cx) {
+        if (regExpTesterStub_)
+            return true;
+        regExpTesterStub_ = generateRegExpTesterStub(cx);
+        return regExpTesterStub_ != nullptr;
+    }
+
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 };
 
 // Called from JSCompartment::discardJitCode().
@@ -549,21 +604,25 @@ void FinishInvalidation(FreeOp* fop, JSScript* script);
 const unsigned WINDOWS_BIG_FRAME_TOUCH_INCREMENT = 4096 - 1;
 #endif
 
-// If ExecutableAllocator::nonWritableJitCode is |true|, this class will ensure
-// JIT code is writable (has RW permissions) in its scope. If nonWritableJitCode
-// is |false|, it's a no-op.
+// If NON_WRITABLE_JIT_CODE is enabled, this class will ensure
+// JIT code is writable (has RW permissions) in its scope.
+// Otherwise it's a no-op.
 class MOZ_STACK_CLASS AutoWritableJitCode
 {
+    // Backedge patching from the signal handler will change memory protection
+    // flags, so don't allow it in a AutoWritableJitCode scope.
+    JitRuntime::AutoPreventBackedgePatching preventPatching_;
     JSRuntime* rt_;
     void* addr_;
     size_t size_;
 
   public:
     AutoWritableJitCode(JSRuntime* rt, void* addr, size_t size)
-      : rt_(rt), addr_(addr), size_(size)
+      : preventPatching_(rt), rt_(rt), addr_(addr), size_(size)
     {
         rt_->toggleAutoWritableJitCodeActive(true);
-        ExecutableAllocator::makeWritable(addr_, size_);
+        if (!ExecutableAllocator::makeWritable(addr_, size_))
+            MOZ_CRASH();
     }
     AutoWritableJitCode(void* addr, size_t size)
       : AutoWritableJitCode(TlsPerThreadData.get()->runtimeFromMainThread(), addr, size)
@@ -572,12 +631,11 @@ class MOZ_STACK_CLASS AutoWritableJitCode
       : AutoWritableJitCode(code->runtimeFromMainThread(), code->raw(), code->bufferSize())
     {}
     ~AutoWritableJitCode() {
-        ExecutableAllocator::makeExecutable(addr_, size_);
+        if (!ExecutableAllocator::makeExecutable(addr_, size_))
+            MOZ_CRASH();
         rt_->toggleAutoWritableJitCodeActive(false);
     }
 };
-
-enum ReprotectCode { Reprotect = true, DontReprotect = false };
 
 class MOZ_STACK_CLASS MaybeAutoWritableJitCode
 {

@@ -4,12 +4,12 @@ Cu.import("resource://gre/modules/FormHistory.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://testing-common/ContentTaskUtils.jsm");
 
-let gAutocompletePopup = Services.ww.activeWindow.
+var gAutocompletePopup = Services.ww.activeWindow.
                                    document.
                                    getElementById("PopupAutoComplete");
 assert.ok(gAutocompletePopup, "Got autocomplete popup");
 
-let ParentUtils = {
+var ParentUtils = {
   getMenuEntries() {
     let entries = [];
     let column = gAutocompletePopup.tree.columns[0];
@@ -72,11 +72,28 @@ let ParentUtils = {
       return gAutocompletePopup.tree.view.rowCount === expectedCount &&
         (!expectedFirstValue ||
           expectedCount <= 1 ||
-          gAutocompletePopup.tree.view.getValueAt(0, gAutocompletePopup.tree.columns[0]) ===
+          gAutocompletePopup.tree.view.getCellText(0, gAutocompletePopup.tree.columns[0]) ===
           expectedFirstValue);
     }).then(() => {
       let results = this.getMenuEntries();
       sendAsyncMessage("gotMenuChange", { results });
+    });
+  },
+
+  checkSelectedIndex(expectedIndex) {
+    ContentTaskUtils.waitForCondition(() => {
+      return gAutocompletePopup.popupOpen &&
+             gAutocompletePopup.selectedIndex === expectedIndex;
+    }).then(() => {
+      sendAsyncMessage("gotSelectedIndex");
+    });
+  },
+
+  getPopupState() {
+    sendAsyncMessage("gotPopupState", {
+      open: gAutocompletePopup.popupOpen,
+      selectedIndex: gAutocompletePopup.selectedIndex,
+      direction: gAutocompletePopup.style.direction,
     });
   },
 
@@ -106,6 +123,14 @@ addMessageListener("countEntries", ({ name, value }) => {
 
 addMessageListener("waitForMenuChange", ({ expectedCount, expectedFirstValue }) => {
   ParentUtils.checkRowCount(expectedCount, expectedFirstValue);
+});
+
+addMessageListener("waitForSelectedIndex", ({ expectedIndex }) => {
+  ParentUtils.checkSelectedIndex(expectedIndex);
+});
+
+addMessageListener("getPopupState", () => {
+  ParentUtils.getPopupState();
 });
 
 addMessageListener("addObserver", () => {

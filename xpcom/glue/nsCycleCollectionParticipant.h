@@ -64,6 +64,8 @@ struct TraceCallbacks
                      void* aClosure) const = 0;
   virtual void Trace(JS::Heap<JSObject*>* aPtr, const char* aName,
                      void* aClosure) const = 0;
+  virtual void Trace(JSObject** aPtr, const char* aName,
+                     void* aClosure) const = 0;
   virtual void Trace(JS::TenuredHeap<JSObject*>* aPtr, const char* aName,
                      void* aClosure) const = 0;
   virtual void Trace(JS::Heap<JSString*>* aPtr, const char* aName,
@@ -76,7 +78,7 @@ struct TraceCallbacks
 
 /*
  * An implementation of TraceCallbacks that calls a single function for all JS
- * GC thing types encountered.
+ * GC thing types encountered. Implemented in nsCycleCollectorTraceJSHelpers.cpp.
  */
 struct TraceCallbackFunc : public TraceCallbacks
 {
@@ -89,6 +91,8 @@ struct TraceCallbackFunc : public TraceCallbacks
   virtual void Trace(JS::Heap<jsid>* aPtr, const char* aName,
                      void* aClosure) const override;
   virtual void Trace(JS::Heap<JSObject*>* aPtr, const char* aName,
+                     void* aClosure) const override;
+  virtual void Trace(JSObject** aPtr, const char* aName,
                      void* aClosure) const override;
   virtual void Trace(JS::TenuredHeap<JSObject*>* aPtr, const char* aName,
                      void* aClosure) const override;
@@ -117,6 +121,7 @@ public:
   NS_IMETHOD_(void) Root(void* aPtr) = 0;
   NS_IMETHOD_(void) Unlink(void* aPtr) = 0;
   NS_IMETHOD_(void) Unroot(void* aPtr) = 0;
+  NS_IMETHOD_(const char*) ClassName() = 0;
 
   NS_IMETHOD_(void) Trace(void* aPtr, const TraceCallbacks& aCb,
                           void* aClosure) {}
@@ -184,6 +189,7 @@ public:
   NS_IMETHOD_(void) Trace(void* aPtr, const TraceCallbacks& aCb,
                           void* aClosure) override = 0;
 
+  // Implemented in nsCycleCollectorTraceJSHelpers.cpp.
   static void NoteJSChild(JS::GCCellPtr aGCThing, const char* aName,
                           void* aClosure);
 };
@@ -463,10 +469,6 @@ DowncastCCParticipant(void* aPtr)
     NS_CYCLE_COLLECTION_CLASSNAME(_base_class)::Trace(s, aCallbacks, aClosure);
 
 #define NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(_field)              \
-  if (tmp->_field)                                                             \
-    aCallbacks.Trace(&tmp->_field, #_field, aClosure);
-
-#define NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(_field)           \
   aCallbacks.Trace(&tmp->_field, #_field, aClosure);
 
 // NB: The (void)tmp; hack in the TRACE_END macro exists to support
@@ -505,10 +507,15 @@ DowncastCCParticipant(void* aPtr)
 #define NS_CHECK_FOR_RIGHT_PARTICIPANT_IMPL_INHERITED(_class)
 #endif
 
+#define NS_DECL_CYCLE_COLLECTION_CLASS_NAME_METHOD(_class) \
+  NS_IMETHOD_(const char*) ClassName() override { return #_class; };
+
+
 #define NS_DECL_CYCLE_COLLECTION_CLASS_BODY_NO_UNLINK(_class, _base)           \
 public:                                                                        \
   NS_IMETHOD Traverse(void *p, nsCycleCollectionTraversalCallback &cb)         \
     override;                                                                  \
+  NS_DECL_CYCLE_COLLECTION_CLASS_NAME_METHOD(_class)                           \
   NS_IMETHOD_(void) DeleteCycleCollectable(void *p) override                   \
   {                                                                            \
     DowncastCCParticipant<_class>(p)->DeleteCycleCollectable();                \
@@ -643,6 +650,7 @@ static NS_CYCLE_COLLECTION_INNERCLASS NS_CYCLE_COLLECTION_INNERNAME;
 public:                                                                        \
   NS_IMETHOD Traverse(void *p, nsCycleCollectionTraversalCallback &cb)         \
     override;                                                                  \
+  NS_DECL_CYCLE_COLLECTION_CLASS_NAME_METHOD(_class)                           \
   static _class* Downcast(nsISupports* s)                                      \
   {                                                                            \
     return static_cast<_class*>(static_cast<_base_class*>(                     \
@@ -697,7 +705,8 @@ static NS_CYCLE_COLLECTION_INNERCLASS NS_CYCLE_COLLECTION_INNERNAME;
     NS_IMETHOD_(void) Unlink(void *n) override;                                \
     NS_IMETHOD_(void) Unroot(void *n) override;                                \
     NS_IMETHOD Traverse(void *n, nsCycleCollectionTraversalCallback &cb)       \
-  override;                                                                    \
+      override;                                                                \
+    NS_DECL_CYCLE_COLLECTION_CLASS_NAME_METHOD(_class)                         \
     NS_IMETHOD_(void) DeleteCycleCollectable(void *n) override                 \
     {                                                                          \
       DowncastCCParticipant<_class>(n)->DeleteCycleCollectable();              \

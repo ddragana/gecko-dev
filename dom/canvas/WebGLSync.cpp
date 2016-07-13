@@ -14,6 +14,7 @@ namespace mozilla {
 WebGLSync::WebGLSync(WebGLContext* webgl, GLenum condition, GLbitfield flags)
     : WebGLContextBoundObject(webgl)
 {
+   mContext->mSyncs.insertBack(this);
    mGLName = mContext->gl->fFenceSync(condition, flags);
 }
 
@@ -28,13 +29,13 @@ WebGLSync::Delete()
     mContext->MakeContextCurrent();
     mContext->gl->fDeleteSync(mGLName);
     mGLName = 0;
-    LinkedListElement<WebGLSync>::remove();
+    LinkedListElement<WebGLSync>::removeFrom(mContext->mSyncs);
 }
 
 WebGLContext*
 WebGLSync::GetParentObject() const
 {
-    return Context();
+    return mContext;
 }
 
 // -------------------------------------------------------------------------

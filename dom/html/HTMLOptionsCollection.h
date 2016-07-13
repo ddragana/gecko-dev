@@ -43,6 +43,7 @@ public:
 
   // nsWrapperCache
   using nsWrapperCache::GetWrapperPreserveColor;
+  using nsWrapperCache::GetWrapper;
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 protected:
   virtual ~HTMLOptionsCollection();
@@ -153,13 +154,12 @@ public:
   {
     aError = SetOption(aIndex, aOption);
   }
-  virtual void GetSupportedNames(unsigned aFlags,
-                                 nsTArray<nsString>& aNames) override;
+  virtual void GetSupportedNames(nsTArray<nsString>& aNames) override;
 
 private:
   /** The list of options (holds strong references).  This is infallible, so
    * various members such as InsertOptionAt are also infallible. */
-  nsTArray<nsRefPtr<mozilla::dom::HTMLOptionElement> > mElements;
+  nsTArray<RefPtr<mozilla::dom::HTMLOptionElement> > mElements;
   /** The select element that contains this array */
   HTMLSelectElement* mSelect;
 };

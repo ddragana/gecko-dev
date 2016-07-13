@@ -54,7 +54,7 @@ dictionary MozXMLHttpRequestParameters
  //   c = new(window.ActiveXObject || XMLHttpRequest)("Microsoft.XMLHTTP")
  // To handle that, we need a constructor that takes a string.
  Constructor(DOMString ignored),
- Exposed=(Window,Worker)]
+ Exposed=(Window,DedicatedWorker,SharedWorker)]
 interface XMLHttpRequest : XMLHttpRequestEventTarget {
   // event handler
   attribute EventHandler onreadystatechange;
@@ -83,7 +83,7 @@ interface XMLHttpRequest : XMLHttpRequestEventTarget {
   [SetterThrows]
   attribute boolean withCredentials;
 
-  [Throws=Workers]
+  [Throws]
   readonly attribute XMLHttpRequestUpload upload;
 
   [Throws]
@@ -103,23 +103,25 @@ interface XMLHttpRequest : XMLHttpRequestEventTarget {
   [Throws]
   void send(InputStream data);
 
-  [Throws=Workers]
+  [Throws]
   void abort();
 
   // response
   readonly attribute DOMString responseURL;
 
-  [Throws=Workers]
+  [Throws]
   readonly attribute unsigned short status;
 
+  [Throws]
   readonly attribute ByteString statusText;
+
   [Throws]
   ByteString? getResponseHeader(ByteString header);
 
-  [Throws=Workers]
+  [Throws]
   ByteString getAllResponseHeaders();
 
-  [Throws=Workers]
+  [Throws]
   void overrideMimeType(DOMString mime);
 
   [SetterThrows]
@@ -134,7 +136,7 @@ interface XMLHttpRequest : XMLHttpRequestEventTarget {
 
   // Mozilla-specific stuff
 
-  [ChromeOnly, SetterThrows=Workers]
+  [ChromeOnly, SetterThrows]
   attribute boolean mozBackgroundRequest;
 
   [ChromeOnly, Exposed=Window]

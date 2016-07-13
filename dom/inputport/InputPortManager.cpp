@@ -30,7 +30,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(InputPortManager)
   NS_INTERFACE_MAP_ENTRY(nsIInputPortServiceCallback)
 NS_INTERFACE_MAP_END
 
-InputPortManager::InputPortManager(nsPIDOMWindow* aWindow)
+InputPortManager::InputPortManager(nsPIDOMWindowInner* aWindow)
   : mParent(aWindow)
   , mIsReady(false)
 {
@@ -41,9 +41,9 @@ InputPortManager::~InputPortManager()
 }
 
 /* static */ already_AddRefed<InputPortManager>
-InputPortManager::Create(nsPIDOMWindow* aWindow, ErrorResult& aRv)
+InputPortManager::Create(nsPIDOMWindowInner* aWindow, ErrorResult& aRv)
 {
-  nsRefPtr<InputPortManager> manager = new InputPortManager(aWindow);
+  RefPtr<InputPortManager> manager = new InputPortManager(aWindow);
   manager->Init(aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
@@ -66,7 +66,7 @@ InputPortManager::Init(ErrorResult& aRv)
   }
 }
 
-nsPIDOMWindow*
+nsPIDOMWindowInner*
 InputPortManager::GetParentObject() const
 {
   return mParent;
@@ -90,7 +90,7 @@ InputPortManager::RejectPendingGetInputPortsPromises(nsresult aRv)
 }
 
 nsresult
-InputPortManager::SetInputPorts(const nsTArray<nsRefPtr<InputPort>>& aPorts)
+InputPortManager::SetInputPorts(const nsTArray<RefPtr<InputPort>>& aPorts)
 {
   MOZ_ASSERT(!mIsReady);
   // Should be called only when InputPortManager hasn't been ready yet.
@@ -116,7 +116,7 @@ InputPortManager::GetInputPorts(ErrorResult& aRv)
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(GetParentObject());
   MOZ_ASSERT(global);
 
-  nsRefPtr<Promise> promise = Promise::Create(global, aRv);
+  RefPtr<Promise> promise = Promise::Create(global, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
@@ -154,7 +154,7 @@ InputPortManager::NotifySuccess(nsIArray* aDataList)
   }
 
   ErrorResult erv;
-  nsTArray<nsRefPtr<InputPort>> ports(length);
+  nsTArray<RefPtr<InputPort>> ports(length);
   for (uint32_t i = 0; i < length; i++) {
     nsCOMPtr<nsIInputPortData> portData = do_QueryElementAt(aDataList, i);
     if (NS_WARN_IF(!portData)) {
@@ -162,7 +162,7 @@ InputPortManager::NotifySuccess(nsIArray* aDataList)
     }
 
     InputPortData* data = static_cast<InputPortData*>(portData.get());
-    nsRefPtr<InputPort> port;
+    RefPtr<InputPort> port;
     switch (data->GetType()) {
     case InputPortType::Av:
       port = AVInputPort::Create(GetParentObject(), portListener,

@@ -32,7 +32,6 @@ EXPORTS += [
     'nsPluginLogging.h',
     'nsPluginNativeWindow.h',
     'nsPluginNativeWindowGtk.h',
-    'nsPluginPlayPreviewInfo.h',
     'nsPluginsCID.h',
     'nsPluginsDir.h',
     'nsPluginTags.h',
@@ -48,7 +47,6 @@ UNIFIED_SOURCES += [
     'nsNPAPIPluginStreamListener.cpp',
     'nsPluginInstanceOwner.cpp',
     'nsPluginModule.cpp',
-    'nsPluginPlayPreviewInfo.cpp',
     'nsPluginStreamListenerPeer.cpp',
     'nsPluginTags.cpp',
     'PluginPRLibrary.cpp',
@@ -74,7 +72,7 @@ else:
     UNIFIED_SOURCES += [
         'nsPluginsDirUnix.cpp',
     ]
-    if CONFIG['MOZ_ENABLE_GTK']:
+    if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
         # This file cannot be built in unified mode because of name clashes in X11 headers.
         SOURCES += [
             'nsPluginNativeWindowGtk.cpp',
@@ -87,8 +85,6 @@ else:
         UNIFIED_SOURCES += [
             'nsPluginNativeWindow.cpp',
         ]
-
-FAIL_ON_WARNINGS = True
 
 LOCAL_INCLUDES += [
     '/dom/base',
@@ -120,3 +116,6 @@ FINAL_LIBRARY = 'xul'
 
 CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 CXXFLAGS += CONFIG['TK_CFLAGS']
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']

@@ -7,19 +7,20 @@
 #include "nsSVGContainerFrame.h"
 
 // Keep others in (case-insensitive) order:
+#include "mozilla/RestyleManagerHandle.h"
+#include "mozilla/RestyleManagerHandleInlines.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsSVGEffects.h"
 #include "nsSVGElement.h"
 #include "nsSVGUtils.h"
 #include "nsSVGAnimatedTransformList.h"
 #include "SVGTextFrame.h"
-#include "RestyleManager.h"
 
 using namespace mozilla;
 
 NS_QUERYFRAME_HEAD(nsSVGContainerFrame)
   NS_QUERYFRAME_ENTRY(nsSVGContainerFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsSVGContainerFrameBase)
+NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 NS_QUERYFRAME_HEAD(nsSVGDisplayContainerFrame)
   NS_QUERYFRAME_ENTRY(nsSVGDisplayContainerFrame)
@@ -70,14 +71,14 @@ nsSVGContainerFrame::RemoveFrame(ChildListID aListID,
 }
 
 bool
-nsSVGContainerFrame::UpdateOverflow()
+nsSVGContainerFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
 {
   if (mState & NS_FRAME_IS_NONDISPLAY) {
     // We don't maintain overflow rects.
     // XXX It would have be better if the restyle request hadn't even happened.
     return false;
   }
-  return nsSVGContainerFrameBase::UpdateOverflow();
+  return nsContainerFrame::ComputeCustomOverflow(aOverflowAreas);
 }
 
 /**
@@ -112,8 +113,7 @@ nsSVGContainerFrame::ReflowSVGNonDisplayText(nsIFrame* aContainer)
                !aContainer->IsFrameOfType(nsIFrame::eSVG),
                "it is wasteful to call ReflowSVGNonDisplayText on a container "
                "frame that is not NS_FRAME_IS_NONDISPLAY");
-  for (nsIFrame* kid = aContainer->GetFirstPrincipalChild(); kid;
-       kid = kid->GetNextSibling()) {
+  for (nsIFrame* kid : aContainer->PrincipalChildList()) {
     nsIAtom* type = kid->GetType();
     if (type == nsGkAtoms::svgTextFrame) {
       static_cast<SVGTextFrame*>(kid)->ReflowSVGNonDisplayText();
@@ -235,8 +235,9 @@ nsSVGDisplayContainerFrame::IsSVGTransformed(gfx::Matrix *aOwnTransform,
     if ((transformList && transformList->HasTransform()) ||
         content->GetAnimateMotionTransform()) {
       if (aOwnTransform) {
-        *aOwnTransform = gfx::ToMatrix(content->PrependLocalTransformsTo(gfxMatrix(),
-                                    nsSVGElement::eUserSpaceToParent));
+        *aOwnTransform = gfx::ToMatrix(
+                           content->PrependLocalTransformsTo(
+                             gfxMatrix(), eUserSpaceToParent));
       }
       foundTransform = true;
     }
@@ -258,16 +259,14 @@ nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
                "If display lists are enabled, only painting of non-display "
                "SVG should take this code path");
 
-  const nsStyleDisplay *display = StyleDisplay();
-  if (display->mOpacity == 0.0) {
+  if (StyleEffects()->mOpacity == 0.0) {
     return NS_OK;
   }
 
   gfxMatrix matrix = aTransform;
   if (GetContent()->IsSVGElement()) { // must check before cast
     matrix = static_cast<const nsSVGElement*>(GetContent())->
-               PrependLocalTransformsTo(matrix,
-                                        nsSVGElement::eChildToUserSpace);
+               PrependLocalTransformsTo(matrix, eChildToUserSpace);
     if (matrix.IsSingular()) {
       return NS_OK;
     }
@@ -284,8 +283,7 @@ nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
       if (!element->HasValidDimensions()) {
         continue; // nothing to paint for kid
       }
-      m = element->
-            PrependLocalTransformsTo(m, nsSVGElement::eUserSpaceToParent);
+      m = element->PrependLocalTransformsTo(m, eUserSpaceToParent);
       if (m.IsSingular()) {
         continue;
       }

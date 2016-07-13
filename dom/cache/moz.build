@@ -14,18 +14,16 @@ EXPORTS.mozilla.dom.cache += [
     'CacheOpChild.h',
     'CacheOpParent.h',
     'CacheParent.h',
-    'CachePushStreamChild.h',
-    'CachePushStreamParent.h',
     'CacheStorage.h',
     'CacheStorageChild.h',
     'CacheStorageParent.h',
     'CacheStreamControlChild.h',
     'CacheStreamControlParent.h',
+    'CacheWorkerHolder.h',
     'Connection.h',
     'Context.h',
     'DBAction.h',
     'DBSchema.h',
-    'Feature.h',
     'FileUtils.h',
     'IPCUtils.h',
     'Manager.h',
@@ -49,18 +47,16 @@ UNIFIED_SOURCES += [
     'CacheOpChild.cpp',
     'CacheOpParent.cpp',
     'CacheParent.cpp',
-    'CachePushStreamChild.cpp',
-    'CachePushStreamParent.cpp',
     'CacheStorage.cpp',
     'CacheStorageChild.cpp',
     'CacheStorageParent.cpp',
     'CacheStreamControlChild.cpp',
     'CacheStreamControlParent.cpp',
+    'CacheWorkerHolder.cpp',
     'Connection.cpp',
     'Context.cpp',
     'DBAction.cpp',
     'DBSchema.cpp',
-    'Feature.cpp',
     'FileUtils.cpp',
     'Manager.cpp',
     'ManagerId.cpp',
@@ -76,7 +72,6 @@ IPDL_SOURCES += [
     'CacheTypes.ipdlh',
     'PCache.ipdl',
     'PCacheOp.ipdl',
-    'PCachePushStream.ipdl',
     'PCacheStorage.ipdl',
     'PCacheStreamControl.ipdl',
 ]
@@ -87,18 +82,19 @@ LOCAL_INCLUDES += [
     '../workers',
 ]
 
-FAIL_ON_WARNINGS = True
-
 FINAL_LIBRARY = 'xul'
 
 MOCHITEST_MANIFESTS += [
     'test/mochitest/mochitest.ini',
 ]
 
-MOCHITEST_CHROME_MANIFESTS += [
-    'test/mochitest/chrome.ini',
-]
-
 BROWSER_CHROME_MANIFESTS += [
     'test/mochitest/browser.ini',
 ]
+
+XPCSHELL_TESTS_MANIFESTS += [
+    'test/xpcshell/xpcshell.ini',
+]
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']

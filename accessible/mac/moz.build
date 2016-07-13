@@ -21,6 +21,7 @@ UNIFIED_SOURCES += [
     'mozActionElements.mm',
     'mozDocAccessible.mm',
     'mozHTMLAccessible.mm',
+    'mozTableAccessible.mm',
     'mozTextAccessible.mm',
     'Platform.mm',
     'RootAccessibleWrap.mm',
@@ -41,5 +42,3 @@ LOCAL_INCLUDES += [
 FINAL_LIBRARY = 'xul'
 
 include('/ipc/chromium/chromium-config.mozbuild')
-
-FAIL_ON_WARNINGS = True

@@ -26,7 +26,7 @@
 #include "nsXULAppAPI.h"
 #include "nsContentUtils.h"
 
-extern PRLogModuleInfo *MCD;
+extern mozilla::LazyLogModule MCD;
 
 extern nsresult EvaluateAdminConfigScript(const char *js_buffer, size_t length,
                                           const char *filename, 
@@ -75,8 +75,6 @@ NS_IMPL_ISUPPORTS(nsReadConfig, nsIReadConfig, nsIObserver)
 nsReadConfig::nsReadConfig() :
     mRead(false)
 {
-    if (!MCD)
-      MCD = PR_NewLogModule("MCD");
 }
 
 nsresult nsReadConfig::Init()
@@ -260,11 +258,11 @@ nsresult nsReadConfig::openAndEvaluateJSFile(const char *aFileName, int32_t obsc
         rv = NS_NewChannel(getter_AddRefs(channel),
                            uri,
                            nsContentUtils::GetSystemPrincipal(),
-                           nsILoadInfo::SEC_NORMAL,
+                           nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                            nsIContentPolicy::TYPE_OTHER);
         NS_ENSURE_SUCCESS(rv, rv);
 
-        rv = channel->Open(getter_AddRefs(inStr));
+        rv = channel->Open2(getter_AddRefs(inStr));
         NS_ENSURE_SUCCESS(rv, rv);
     }
 

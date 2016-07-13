@@ -51,7 +51,19 @@ const WorkerChild = Class({
 
     this.sandbox = WorkerSandbox(this, this.window);
 
-    this.frozen = false;
+    // If the document has an unexpected readyState, its worker-child instance is initialized
+    // as frozen until one of the known readyState is reached.
+    let initialDocumentReadyState = this.window.document.readyState;
+    this.frozen = [
+      "loading", "interactive", "complete"
+    ].includes(initialDocumentReadyState) ? false : true;
+
+    if (this.frozen) {
+      console.warn("SDK worker-child started as frozen on unexpected initial document.readyState", {
+        initialDocumentReadyState, windowLocation: this.window.location.href,
+      });
+    }
+
     this.frozenMessages = [];
     this.on('pageshow', () => {
       this.frozen = false;
@@ -130,14 +142,14 @@ function exceptions(key, value) {
 }
 
 // workers for windows in this tab
-let keepAlive = new Map();
+var keepAlive = new Map();
 
-process.port.on('sdk/worker/create', (process, options) => {
-  options.window = getByInnerId(options.windowId);
-  if (!options.window)
-    return;
-
+process.port.on('sdk/worker/create', (process, options, cpows) => {
+  options.window = cpows.window;
   let worker = new WorkerChild(options);
+
+  let frame = frames.getFrameForWindow(options.window.top);
+  frame.port.emit('sdk/worker/connect', options.id, options.window.location.href);
 });
 
 when(reason => {

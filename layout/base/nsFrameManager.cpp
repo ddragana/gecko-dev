@@ -57,8 +57,7 @@ struct PlaceholderMapEntry : public PLDHashEntryHdr {
 };
 
 static bool
-PlaceholderMapMatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
-                         const void *key)
+PlaceholderMapMatchEntry(const PLDHashEntryHdr *hdr, const void *key)
 {
   const PlaceholderMapEntry *entry =
     static_cast<const PlaceholderMapEntry*>(hdr);
@@ -69,16 +68,15 @@ PlaceholderMapMatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
 }
 
 static const PLDHashTableOps PlaceholderMapOps = {
-  PL_DHashVoidPtrKeyStub,
+  PLDHashTable::HashVoidPtrKeyStub,
   PlaceholderMapMatchEntry,
-  PL_DHashMoveEntryStub,
-  PL_DHashClearEntryStub,
+  PLDHashTable::MoveEntryStub,
+  PLDHashTable::ClearEntryStub,
   nullptr
 };
 
 nsFrameManagerBase::nsFrameManagerBase()
   : mPresShell(nullptr)
-  , mStyleSet(nullptr)
   , mRootFrame(nullptr)
   , mPlaceholderMap(&PlaceholderMapOps, sizeof(PlaceholderMapEntry))
   , mUndisplayedMap(nullptr)
@@ -90,7 +88,7 @@ nsFrameManagerBase::nsFrameManagerBase()
 //----------------------------------------------------------------------
 
 // XXXldb This seems too complicated for what I think it's doing, and it
-// should also be using pldhash rather than plhash to use less memory.
+// should also be using PLDHashTable rather than plhash to use less memory.
 
 class nsFrameManagerBase::UndisplayedMap {
 public:
@@ -164,9 +162,8 @@ nsFrameManager::GetPlaceholderFrameFor(const nsIFrame* aFrame)
 {
   NS_PRECONDITION(aFrame, "null param unexpected");
 
-  PlaceholderMapEntry *entry = static_cast<PlaceholderMapEntry*>
-                                          (PL_DHashTableSearch(const_cast<PLDHashTable*>(&mPlaceholderMap),
-                              aFrame));
+  auto entry = static_cast<PlaceholderMapEntry*>
+    (const_cast<PLDHashTable*>(&mPlaceholderMap)->Search(aFrame));
   if (entry) {
     return entry->placeholderFrame;
   }
@@ -180,9 +177,8 @@ nsFrameManager::RegisterPlaceholderFrame(nsPlaceholderFrame* aPlaceholderFrame)
   NS_PRECONDITION(aPlaceholderFrame, "null param unexpected");
   NS_PRECONDITION(nsGkAtoms::placeholderFrame == aPlaceholderFrame->GetType(),
                   "unexpected frame type");
-  PlaceholderMapEntry *entry = static_cast<PlaceholderMapEntry*>
-    (PL_DHashTableAdd(&mPlaceholderMap,
-                      aPlaceholderFrame->GetOutOfFlowFrame(), fallible));
+  auto entry = static_cast<PlaceholderMapEntry*>
+    (mPlaceholderMap.Add(aPlaceholderFrame->GetOutOfFlowFrame(), fallible));
   if (!entry)
     return NS_ERROR_OUT_OF_MEMORY;
 
@@ -199,8 +195,7 @@ nsFrameManager::UnregisterPlaceholderFrame(nsPlaceholderFrame* aPlaceholderFrame
   NS_PRECONDITION(nsGkAtoms::placeholderFrame == aPlaceholderFrame->GetType(),
                   "unexpected frame type");
 
-  PL_DHashTableRemove(&mPlaceholderMap,
-                      aPlaceholderFrame->GetOutOfFlowFrame());
+  mPlaceholderMap.Remove(aPlaceholderFrame->GetOutOfFlowFrame());
 }
 
 void
@@ -221,7 +216,8 @@ nsFrameManager::GetStyleContextInMap(UndisplayedMap* aMap, nsIContent* aContent)
   if (!aContent) {
     return nullptr;
   }
-  nsIContent* parent = aContent->GetParent();
+  nsIContent* parent = aContent->GetParentElementCrossingShadowRoot();
+  MOZ_ASSERT(parent || !aContent->GetParent(), "no non-elements");
   for (UndisplayedNode* node = aMap->GetFirstNode(parent);
          node; node = node->mNext) {
     if (node->mContent == aContent)
@@ -260,7 +256,8 @@ nsFrameManager::SetStyleContextInMap(UndisplayedMap* aMap,
   NS_ASSERTION(!GetStyleContextInMap(aMap, aContent),
                "Already have an entry for aContent");
 
-  nsIContent* parent = aContent->GetParent();
+  nsIContent* parent = aContent->GetParentElementCrossingShadowRoot();
+  MOZ_ASSERT(parent || !aContent->GetParent(), "no non-elements");
 #ifdef DEBUG
   nsIPresShell* shell = aStyleContext->PresContext()->PresShell();
   NS_ASSERTION(parent || (shell && shell->GetDocument() &&
@@ -556,8 +553,8 @@ nsFrameManager::CaptureFrameStateFor(nsIFrame* aFrame,
   // Exit early if we get empty key
   nsAutoCString stateKey;
   nsIContent* content = aFrame->GetContent();
-  nsIDocument* doc = content ? content->GetCurrentDoc() : nullptr;
-  rv = nsContentUtils::GenerateStateKey(content, doc, stateKey);
+  nsIDocument* doc = content ? content->GetUncomposedDoc() : nullptr;
+  rv = statefulFrame->GenerateStateKey(content, doc, stateKey);
   if(NS_FAILED(rv) || stateKey.IsEmpty()) {
     return;
   }
@@ -619,8 +616,8 @@ nsFrameManager::RestoreFrameStateFor(nsIFrame* aFrame,
   }
 
   nsAutoCString stateKey;
-  nsIDocument* doc = content->GetCurrentDoc();
-  nsresult rv = nsContentUtils::GenerateStateKey(content, doc, stateKey);
+  nsIDocument* doc = content->GetUncomposedDoc();
+  nsresult rv = statefulFrame->GenerateStateKey(content, doc, stateKey);
   if (NS_FAILED(rv) || stateKey.IsEmpty()) {
     return;
   }

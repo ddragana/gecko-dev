@@ -25,7 +25,6 @@
 class nsIAsyncInputStream;
 class nsIThread;
 class nsIX509CertList;
-struct PRLogModuleInfo;
 
 namespace mozilla {
 namespace net {
@@ -73,8 +72,6 @@ public:
 
 protected:
   virtual ~BackgroundFileSaver();
-
-  static PRLogModuleInfo *prlog;
 
   /**
    * Helper function for managing NSS objects (mDigestContext).
@@ -208,7 +205,7 @@ private:
    * The SHA 256 hash in raw bytes of the downloaded file. This is written
    * by the worker thread but can be read on the main thread.
    */
-  nsAutoCString mSha256;
+  nsCString mSha256;
 
   /**
    * Whether or not to compute the hash. Must be set on the main thread before
@@ -245,7 +242,7 @@ private:
    * Used to calculate the file hash. This keeps state across file renames and
    * is lazily initialized in ProcessStateChange.
    */
-  ScopedPK11Context mDigestContext;
+  UniquePK11Context mDigestContext;
 
   //////////////////////////////////////////////////////////////////////////////
   //// Private methods

@@ -7,7 +7,6 @@
 #define IMETextTxn_h__
 
 #include "EditTxn.h"                      // base class
-#include "nsAutoPtr.h"                    // mTextNode, mRanges
 #include "nsCycleCollectionParticipant.h" // various macros
 #include "nsString.h"                     // mStringToInsert
 
@@ -66,7 +65,7 @@ private:
   nsresult SetSelectionForRanges();
 
   /** The text element to operate upon */
-  nsRefPtr<Text> mTextNode;
+  RefPtr<Text> mTextNode;
 
   /** The offsets into mTextNode where the insertion should be placed */
   uint32_t mOffset;
@@ -74,7 +73,7 @@ private:
   uint32_t mReplaceLength;
 
   /** The range list **/
-  nsRefPtr<TextRangeArray> mRanges;
+  RefPtr<TextRangeArray> mRanges;
 
   /** The text to insert into mTextNode at mOffset */
   nsString mStringToInsert;

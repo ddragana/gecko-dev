@@ -5,14 +5,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/cache/ManagerId.h"
+#include "mozilla/dom/quota/QuotaManager.h"
 #include "nsIPrincipal.h"
 #include "nsProxyRelease.h"
-#include "nsRefPtr.h"
+#include "mozilla/RefPtr.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla {
 namespace dom {
 namespace cache {
+
+using mozilla::dom::quota::QuotaManager;
 
 // static
 nsresult
@@ -21,26 +24,17 @@ ManagerId::Create(nsIPrincipal* aPrincipal, ManagerId** aManagerIdOut)
   MOZ_ASSERT(NS_IsMainThread());
 
   // The QuotaManager::GetInfoFromPrincipal() has special logic for system
-  // and about: principals.  We currently don't need the system principal logic
-  // because ManagerId only uses the origin for in memory comparisons.  We
-  // also don't do any special logic to host the same Cache for different about:
-  // pages, so we don't need those checks either.
-  //
-  // But, if we get the same QuotaManager directory for different about:
-  // origins, we probably only want one Manager instance.  So, we might
-  // want to start using the QM's concept of origin uniqueness here.
-  //
-  // TODO: consider using QuotaManager's modified origin here (bug 1112071)
-
-  nsCString origin;
-  nsresult rv = aPrincipal->GetOriginNoSuffix(origin);
+  // and about: principals.  We need to use the same modified origin in
+  // order to interpret calls from QM correctly.
+  nsCString quotaOrigin;
+  nsresult rv = QuotaManager::GetInfoFromPrincipal(aPrincipal,
+                                                   nullptr,   // suffix
+                                                   nullptr,   // group
+                                                   &quotaOrigin,
+                                                   nullptr);  // is app
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
-  nsCString jarPrefix;
-  rv = aPrincipal->GetJarPrefix(jarPrefix);
-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-
-  nsRefPtr<ManagerId> ref = new ManagerId(aPrincipal, origin, jarPrefix);
+  RefPtr<ManagerId> ref = new ManagerId(aPrincipal, quotaOrigin);
   ref.forget(aManagerIdOut);
 
   return NS_OK;
@@ -54,10 +48,9 @@ ManagerId::Principal() const
   return ref.forget();
 }
 
-ManagerId::ManagerId(nsIPrincipal* aPrincipal, const nsACString& aOrigin,
-                     const nsACString& aJarPrefix)
+ManagerId::ManagerId(nsIPrincipal* aPrincipal, const nsACString& aQuotaOrigin)
     : mPrincipal(aPrincipal)
-    , mExtendedOrigin(aJarPrefix + aOrigin)
+    , mQuotaOrigin(aQuotaOrigin)
 {
   MOZ_ASSERT(mPrincipal);
 }
@@ -73,10 +66,7 @@ ManagerId::~ManagerId()
 
   // The PBackground worker thread shouldn't be running after the main thread
   // is stopped.  So main thread is guaranteed to exist here.
-  nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
-  MOZ_ASSERT(mainThread);
-
-  NS_ProxyRelease(mainThread, mPrincipal.forget().take());
+  NS_ReleaseOnMainThread(mPrincipal.forget());
 }
 
 } // namespace cache

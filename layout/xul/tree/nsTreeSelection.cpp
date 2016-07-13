@@ -15,7 +15,6 @@
 #include "nsIContent.h"
 #include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
-#include "nsAutoPtr.h"
 #include "nsComponentManagerUtils.h"
 
 using namespace mozilla;
@@ -648,7 +647,7 @@ NS_IMETHODIMP nsTreeSelection::SetCurrentIndex(int32_t aIndex)
   NS_NAMED_LITERAL_STRING(DOMMenuItemActive, "DOMMenuItemActive");
   NS_NAMED_LITERAL_STRING(DOMMenuItemInactive, "DOMMenuItemInactive");
 
-  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+  RefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(treeDOMNode,
                              (aIndex != -1 ? DOMMenuItemActive :
                                              DOMMenuItemInactive),
@@ -837,7 +836,7 @@ nsTreeSelection::FireOnSelectHandler()
   nsCOMPtr<nsINode> node(do_QueryInterface(elt));
   NS_ENSURE_STATE(node);
 
-  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+  RefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(node, NS_LITERAL_STRING("select"), true, false);
   asyncDispatcher->RunDOMEventWhenSafe();
   return NS_OK;
@@ -846,7 +845,7 @@ nsTreeSelection::FireOnSelectHandler()
 void
 nsTreeSelection::SelectCallback(nsITimer *aTimer, void *aClosure)
 {
-  nsRefPtr<nsTreeSelection> self = static_cast<nsTreeSelection*>(aClosure);
+  RefPtr<nsTreeSelection> self = static_cast<nsTreeSelection*>(aClosure);
   if (self) {
     self->FireOnSelectHandler();
     aTimer->Cancel();

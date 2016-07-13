@@ -99,7 +99,7 @@ public:
    * new images from feImage filter primitive elements to the aInputImages list.
    */
   nsresult BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
-                           nsTArray<mozilla::RefPtr<SourceSurface>>& aInputImages);
+                           nsTArray<RefPtr<SourceSurface>>& aInputImages);
 
   /**
    * Returns the user specified "filter region", in the filtered element's user
@@ -155,6 +155,7 @@ private:
    */
   void GetInputsAreTainted(const nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
                            const nsTArray<int32_t>& aInputIndices,
+                           bool aFilterInputIsTainted,
                            nsTArray<bool>& aOutInputsAreTainted);
 
   /**

@@ -8,7 +8,7 @@
 #define nsPersistentProperties_h___
 
 #include "nsIPersistentProperties2.h"
-#include "pldhash.h"
+#include "PLDHashTable.h"
 #include "plarena.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
@@ -25,7 +25,8 @@ public:
   NS_DECL_NSIPROPERTIES
   NS_DECL_NSIPERSISTENTPROPERTIES
 
-  static nsresult Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
+  static MOZ_MUST_USE nsresult
+  Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
 
 private:
   ~nsPersistentProperties();

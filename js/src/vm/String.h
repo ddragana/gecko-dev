@@ -316,6 +316,8 @@ class JSString : public js::gc::TenuredCell
     /* Avoid lame compile errors in JSRope::flatten */
     friend class JSRope;
 
+    friend class js::gc::RelocationOverlay;
+
   protected:
     template <typename CharT>
     MOZ_ALWAYS_INLINE
@@ -492,11 +494,13 @@ class JSString : public js::gc::TenuredCell
         return offsetof(JSString, d.s.u2.nonInlineCharsTwoByte);
     }
 
-    static inline js::ThingRootKind rootKind() { return js::THING_ROOT_STRING; }
+    static const JS::TraceKind TraceKind = JS::TraceKind::String;
 
 #ifdef DEBUG
+    void dump(FILE* fp);
+    void dumpCharsNoNewline(FILE* fp);
     void dump();
-    void dumpCharsNoNewline(FILE* fp=stderr);
+    void dumpCharsNoNewline();
     void dumpRepresentation(FILE* fp, int indent) const;
     void dumpRepresentationHeader(FILE* fp, int indent, const char* subclass) const;
 
@@ -985,6 +989,7 @@ class JSAtom : public JSFlatString
     }
 
 #ifdef DEBUG
+    void dump(FILE* fp);
     void dump();
 #endif
 };
@@ -1121,7 +1126,11 @@ class StaticStrings
  *     private names).
  */
 class PropertyName : public JSAtom
-{};
+{
+  private:
+    /* Vacuous and therefore unimplemented. */
+    PropertyName* asPropertyName() = delete;
+};
 
 static_assert(sizeof(PropertyName) == sizeof(JSString),
               "string subclasses must be binary-compatible with JSString");
@@ -1132,27 +1141,25 @@ NameToId(PropertyName* name)
     return NON_INTEGER_ATOM_TO_JSID(name);
 }
 
-class AutoNameVector : public JS::AutoVectorRooterBase<PropertyName*>
-{
-    typedef AutoVectorRooterBase<PropertyName*> BaseType;
-  public:
-    explicit AutoNameVector(JSContext* cx
-                            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-        : AutoVectorRooterBase<PropertyName*>(cx, NAMEVECTOR)
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    }
-
-    HandlePropertyName operator[](size_t i) const {
-        return HandlePropertyName::fromMarkedLocation(&begin()[i]);
-    }
-
-    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-};
+using PropertyNameVector = JS::GCVector<PropertyName*>;
 
 template <typename CharT>
 void
 CopyChars(CharT* dest, const JSLinearString& str);
+
+static inline UniqueChars
+StringToNewUTF8CharsZ(ExclusiveContext* maybecx, JSString& str)
+{
+    JS::AutoCheckCannotGC nogc;
+
+    JSLinearString* linear = str.ensureLinear(maybecx);
+    if (!linear)
+        return nullptr;
+
+    return UniqueChars(linear->hasLatin1Chars()
+                       ? JS::CharsToNewUTF8CharsZ(maybecx, linear->latin1Range(nogc)).c_str()
+                       : JS::CharsToNewUTF8CharsZ(maybecx, linear->twoByteRange(nogc)).c_str());
+}
 
 /* GC-allocate a string descriptor for the given malloc-allocated chars. */
 template <js::AllowGC allowGC, typename CharT>

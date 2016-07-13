@@ -24,6 +24,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 XPCOMUtils.defineLazyModuleGetter(this, "CommonUtils", "resource://services-common/utils.js");
+XPCOMUtils.defineLazyModuleGetter(this, "Messaging", "resource://gre/modules/Messaging.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ReaderWorker", "resource://gre/modules/reader/ReaderWorker.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
@@ -84,6 +85,48 @@ this.ReaderMode = {
         }
         break;
     }
+  },
+
+  /**
+   * Enter the reader mode by going forward one step in history if applicable,
+   * if not, append the about:reader page in the history instead.
+   */
+  enterReaderMode: function(docShell, win) {
+    let url = win.document.location.href;
+    let readerURL = "about:reader?url=" + encodeURIComponent(url);
+    let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
+    let sh = webNav.sessionHistory;
+    if (webNav.canGoForward) {
+      let forwardEntry = sh.getEntryAtIndex(sh.index + 1, false);
+      let forwardURL = forwardEntry.URI.spec;
+      if (forwardURL && (forwardURL == readerURL || !readerURL)) {
+        webNav.goForward();
+        return;
+      }
+    }
+
+    win.document.location = readerURL;
+  },
+
+  /**
+   * Exit the reader mode by going back one step in history if applicable,
+   * if not, append the original page in the history instead.
+   */
+  leaveReaderMode: function(docShell, win) {
+    let url = win.document.location.href;
+    let originalURL = this.getOriginalUrl(url);
+    let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
+    let sh = webNav.sessionHistory;
+    if (webNav.canGoBack) {
+      let prevEntry = sh.getEntryAtIndex(sh.index - 1, false);
+      let prevURL = prevEntry.URI.spec;
+      if (prevURL && (prevURL == originalURL || !originalURL)) {
+        webNav.goBack();
+        return;
+      }
+    }
+
+    win.document.location = originalURL;
   },
 
   /**
@@ -208,11 +251,46 @@ this.ReaderMode = {
           if (content) {
             let urlIndex = content.toUpperCase().indexOf("URL=");
             if (urlIndex > -1) {
-              let url = content.substring(urlIndex + 4);
-              this._downloadDocument(url).then((doc) => resolve(doc));
-              return;
+              let baseURI = Services.io.newURI(url, null, null);
+              let newURI = Services.io.newURI(content.substring(urlIndex + 4), null, baseURI);
+              let newURL = newURI.spec;
+              let ssm = Services.scriptSecurityManager;
+              let flags = ssm.LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT |
+                          ssm.DISALLOW_INHERIT_PRINCIPAL;
+              try {
+                ssm.checkLoadURIStrWithPrincipal(doc.nodePrincipal, newURL, flags);
+              } catch (ex) {
+                let errorMsg = "Reader mode disallowed meta refresh (reason: " + ex + ").";
+
+                if (Services.prefs.getBoolPref("reader.errors.includeURLs"))
+                  errorMsg += " Refresh target URI: '" + newURL + "'.";
+                reject(errorMsg);
+                return;
+              }
+              // Otherwise, pass an object indicating our new URL:
+              if (!baseURI.equalsExceptRef(newURI)) {
+                reject({newURL});
+                return;
+              }
             }
           }
+        }
+        let responseURL = xhr.responseURL;
+        let givenURL = url;
+        // Convert these to real URIs to make sure the escaping (or lack
+        // thereof) is identical:
+        try {
+          responseURL = Services.io.newURI(responseURL, null, null).specIgnoringRef;
+        } catch (ex) { /* Ignore errors - we'll use what we had before */ }
+        try {
+          givenURL = Services.io.newURI(givenURL, null, null).specIgnoringRef;
+        } catch (ex) { /* Ignore errors - we'll use what we had before */ }
+
+        if (responseURL != givenURL) {
+          // We were redirected without a meta refresh tag.
+          // Force redirect to the correct place:
+          reject({newURL: xhr.responseURL});
+          return;
         }
         resolve(doc);
         histogram.add(DOWNLOAD_SUCCESS);
@@ -235,7 +313,9 @@ this.ReaderMode = {
     try {
       let array = yield OS.File.read(path);
       return JSON.parse(new TextDecoder().decode(array));
-    } catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
+    } catch (e) {
+      if (!(e instanceof OS.File.Error) || !e.becauseNoSuchFile)
+        throw e;
       return null;
     }
   }),
@@ -252,7 +332,17 @@ this.ReaderMode = {
     let array = new TextEncoder().encode(JSON.stringify(article));
     let path = this._toHashedPath(article.url);
     yield this._ensureCacheDir();
-    yield OS.File.writeAtomic(path, array, { tmpPath: path + ".tmp" });
+    return OS.File.writeAtomic(path, array, { tmpPath: path + ".tmp" })
+      .then(success => {
+        OS.File.stat(path).then(info => {
+          return Messaging.sendRequest({
+            type: "Reader:AddedToCache",
+            url: article.url,
+            size: info.size,
+            path: path,
+          });
+        });
+      });
   }),
 
   /**
@@ -274,10 +364,12 @@ this.ReaderMode = {
   },
 
   _blockedHosts: [
-    "twitter.com",
     "mail.google.com",
     "github.com",
+    "pinterest.com",
     "reddit.com",
+    "twitter.com",
+    "youtube.com",
   ],
 
   _shouldCheckUri: function (uri) {
@@ -410,6 +502,7 @@ this.ReaderMode = {
       if (!exists) {
         return OS.File.makeDir(dir);
       }
+      return undefined;
     });
   }
 };

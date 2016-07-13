@@ -4,6 +4,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// The test js is shared between sandboxed (which has no SpecialPowers object)
+// and content mochitests (where the |Components| object is accessible only as
+// SpecialPowers.Components). Expose Components if necessary here to make things
+// work everywhere.
+//
+// Even if the real |Components| doesn't exist, we might shim in a simple JS
+// placebo for compat. An easy way to differentiate this from the real thing
+// is whether the property is read-only or not.
+{
+  let c = Object.getOwnPropertyDescriptor(this, 'Components');
+  if ((!c.value || c.writable) && typeof SpecialPowers === 'object')
+    Components = SpecialPowers.wrap(SpecialPowers.Components);
+}
+
 /*
  * This file contains common code that is loaded before each test file(s).
  * See http://developer.mozilla.org/en/docs/Writing_xpcshell-based_unit_tests
@@ -30,7 +44,7 @@ function _dump(str) {
 }
 
 // Determine if we're running on parent or child
-let runningInParent = true;
+var runningInParent = true;
 try {
   runningInParent = Components.classes["@mozilla.org/xre/runtime;1"].
                     getService(Components.interfaces.nsIXULRuntime).processType
@@ -434,9 +448,9 @@ function todo_check_null(condition, stack=Components.stack.caller) {
  * do_check_matches([3,4,5], [3,4,5,6])   // fail; length doesn't match
  *
  * // functions in patterns get applied.
- * do_check_matches({foo:function (v) v.length == 2}, {foo:"hi"}) // pass
- * do_check_matches({foo:function (v) v.length == 2}, {bar:"hi"}) // fail
- * do_check_matches({foo:function (v) v.length == 2}, {foo:"hello"}) // fail
+ * do_check_matches({foo:v => v.length == 2}, {foo:"hi"}) // pass
+ * do_check_matches({foo:v => v.length == 2}, {bar:"hi"}) // fail
+ * do_check_matches({foo:v => v.length == 2}, {foo:"hello"}) // fail
  *
  * // We don't check constructors, prototypes, or classes. However, if
  * // pattern has a 'length' property, we require values to match that as
@@ -498,7 +512,10 @@ function pattern_matcher(pattern) {
   if (typeof pattern == "function") {
     return pattern;
   } else if (typeof pattern == "object" && pattern) {
-    var matchers = [[p, pattern_matcher(pattern[p])] for (p in pattern)];
+    var matchers = [];
+    for (let p in pattern) {
+      matchers.push([p, pattern_matcher(pattern[p])]);
+    }
     // Kludge: include 'length', if not enumerable. (If it is enumerable,
     // we picked it up in the array comprehension, above.
     ld = Object.getOwnPropertyDescriptor(pattern, 'length');
@@ -679,14 +696,14 @@ function _do_execute_cleanup() {
  *
  * @return the test function that was passed in.
  */
-let _gTests = [];
+var _gTests = [];
 function add_test(func) {
   _gTests.push([false, func]);
   return func;
 }
 
 // We lazy import Task.jsm so we don't incur a run-time penalty for all tests.
-let _Task;
+var _Task;
 
 /**
  * Add a test function which is a Task function.
@@ -737,8 +754,8 @@ function add_task(func) {
 /**
  * Runs the next test function from the list of async tests.
  */
-let _gRunningTest = null;
-let _gTestIndex = 0; // The index of the currently running test.
+var _gRunningTest = null;
+var _gTestIndex = 0; // The index of the currently running test.
 function run_next_test()
 {
   function _run_next_test()

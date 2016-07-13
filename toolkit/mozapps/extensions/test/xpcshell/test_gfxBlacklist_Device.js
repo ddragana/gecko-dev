@@ -3,7 +3,7 @@
  */
 
 // This should eventually be moved to head_addons.js
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 // Test whether a machine which differs only on device ID, but otherwise
 // exactly matches the blacklist entry, is not blocked.
@@ -58,7 +58,7 @@ function run_test() {
     case "Darwin":
       gfxInfo.spoofVendorID("0xabcd");
       gfxInfo.spoofDeviceID("0x9876");
-      gfxInfo.spoofOSVersion(0x1060);
+      gfxInfo.spoofOSVersion(0x1090);
       break;
     case "Android":
       gfxInfo.spoofVendorID("abcd");
@@ -78,6 +78,9 @@ function run_test() {
     do_check_eq(status, Ci.nsIGfxInfo.FEATURE_STATUS_OK);
 
     status = gfxInfo.getFeatureStatus(Ci.nsIGfxInfo.FEATURE_DIRECT3D_9_LAYERS);
+    do_check_eq(status, Ci.nsIGfxInfo.FEATURE_STATUS_OK);
+
+    status = gfxInfo.getFeatureStatus(Ci.nsIGfxInfo.FEATURE_CANVAS2D_ACCELERATION);
     do_check_eq(status, Ci.nsIGfxInfo.FEATURE_STATUS_OK);
 
     gTestserver.stop(do_test_finished);

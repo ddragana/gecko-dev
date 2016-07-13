@@ -120,7 +120,7 @@ public:
   NS_IMETHOD EndOperation() override;
 
   /** make the given selection span the entire document */
-  virtual nsresult SelectEntireDocument(mozilla::dom::Selection* aSelection) override;
+  virtual nsresult SelectEntireDocument(Selection* aSelection) override;
 
   virtual nsresult HandleKeyPressEvent(nsIDOMKeyEvent* aKeyEvent) override;
 
@@ -153,7 +153,7 @@ public:
    * If done, also update aAction to what's actually left to do after the
    * extension.
    */
-  nsresult ExtendSelectionForDelete(mozilla::dom::Selection* aSelection,
+  nsresult ExtendSelectionForDelete(Selection* aSelection,
                                     nsIEditor::EDirection *aAction);
 
   // Return true if the data is safe to insert as the source and destination
@@ -180,9 +180,8 @@ protected:
   // key event helpers
   NS_IMETHOD CreateBR(nsIDOMNode *aNode, int32_t aOffset,
                       nsCOMPtr<nsIDOMNode> *outBRNode, EDirection aSelect = eNone);
-  already_AddRefed<mozilla::dom::Element>
-      CreateBRImpl(nsCOMPtr<nsINode>* aInOutParent, int32_t* aInOutOffset,
-                   EDirection aSelect);
+  Element* CreateBRImpl(nsCOMPtr<nsINode>* aInOutParent, int32_t* aInOutOffset,
+                        EDirection aSelect);
   nsresult CreateBRImpl(nsCOMPtr<nsIDOMNode>* aInOutParent,
                         int32_t* aInOutOffset,
                         nsCOMPtr<nsIDOMNode>* outBRNode,
@@ -207,7 +206,9 @@ protected:
     ePasswordFieldNotAllowed
   };
   bool CanCutOrCopy(PasswordFieldAllowed aPasswordFieldAllowed);
-  bool FireClipboardEvent(int32_t aType, int32_t aSelectionType, bool* aActionTaken = nullptr);
+  bool FireClipboardEvent(mozilla::EventMessage aEventMessage,
+                          int32_t aSelectionType,
+                          bool* aActionTaken = nullptr);
 
   bool UpdateMetaCharset(nsIDOMDocument* aDocument,
                          const nsACString& aCharacterSet);
@@ -216,7 +217,6 @@ protected:
 protected:
 
   nsCOMPtr<nsIEditRules>        mRules;
-  bool    mWrapToWindow;
   int32_t mWrapColumn;
   int32_t mMaxTextLength;
   int32_t mInitTriggerCounter;

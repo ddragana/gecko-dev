@@ -10,24 +10,39 @@
 #include "mozilla/TimeStamp.h"
 #include "AnimationTimeline.h"
 #include "nsIDocument.h"
+#include "nsDOMNavigationTiming.h" // for DOMHighResTimeStamp
 #include "nsRefreshDriver.h"
 
 struct JSContext;
 
+// GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
+// GetTickCount().
+#ifdef GetCurrentTime
+#undef GetCurrentTime
+#endif
+
 namespace mozilla {
 namespace dom {
 
-class DocumentTimeline final : public AnimationTimeline
+class DocumentTimeline final
+  : public AnimationTimeline
+  , public nsARefreshObserver
 {
 public:
-  explicit DocumentTimeline(nsIDocument* aDocument)
+  DocumentTimeline(nsIDocument* aDocument, const TimeDuration& aOriginTime)
     : AnimationTimeline(aDocument->GetParentObject())
     , mDocument(aDocument)
+    , mIsObservingRefreshDriver(false)
+    , mOriginTime(aOriginTime)
   {
   }
 
 protected:
-  virtual ~DocumentTimeline() { }
+  virtual ~DocumentTimeline()
+  {
+    MOZ_ASSERT(!mIsObservingRefreshDriver, "Timeline should have disassociated"
+               " from the refresh driver before being destroyed");
+  }
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -36,6 +51,11 @@ public:
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
+
+  static already_AddRefed<DocumentTimeline>
+  Constructor(const GlobalObject& aGlobal,
+              const DOMHighResTimeStamp& aOriginTime,
+              ErrorResult& aRv);
 
   // AnimationTimeline methods
   virtual Nullable<TimeDuration> GetCurrentTime() const override;
@@ -50,6 +70,16 @@ public:
                                                                      override;
   TimeStamp ToTimeStamp(const TimeDuration& aTimelineTime) const override;
 
+  void NotifyAnimationUpdated(Animation& aAnimation) override;
+
+  void RemoveAnimation(Animation* aAnimation) override;
+
+  // nsARefreshObserver methods
+  void WillRefresh(TimeStamp aTime) override;
+
+  void NotifyRefreshDriverCreated(nsRefreshDriver* aDriver);
+  void NotifyRefreshDriverDestroying(nsRefreshDriver* aDriver);
+
 protected:
   TimeStamp GetCurrentTimeStamp() const;
   nsRefreshDriver* GetRefreshDriver() const;
@@ -60,6 +90,9 @@ protected:
   // we don't have a refresh driver (e.g. because we are in a display:none
   // iframe).
   mutable TimeStamp mLastRefreshDriverTime;
+  bool mIsObservingRefreshDriver;
+
+  TimeDuration mOriginTime;
 };
 
 } // namespace dom

@@ -7,7 +7,6 @@
 #define NS_SVGUTILS_H
 
 // include math.h to pick up definition of M_ maths defines e.g. M_PI
-#define _USE_MATH_DEFINES
 #include <math.h>
 
 #include "DrawMode.h"
@@ -25,7 +24,6 @@
 #include "nsISupportsBase.h"
 #include "nsMathUtils.h"
 #include "nsStyleStruct.h"
-#include "mozilla/Constants.h"
 #include <algorithm>
 
 class gfxContext;
@@ -49,6 +47,7 @@ struct nsStyleSVGPaint;
 struct nsRect;
 
 namespace mozilla {
+struct SVGTextContextPaint;
 namespace dom {
 class Element;
 class UserSpaceMetrics;
@@ -61,7 +60,7 @@ class GeneralPattern;
 
 // maximum dimension of an offscreen surface - choose so that
 // the surface size doesn't overflow a 32-bit signed int using
-// 4 bytes per pixel; in line with gfxASurface::CheckSurfaceSize
+// 4 bytes per pixel; in line with Factory::CheckSurfaceSize
 // In fact Macs can't even manage that
 #define NS_SVG_OFFSCREEN_MAX_DIMENSION 4096
 
@@ -137,7 +136,7 @@ private:
 // GRRR WINDOWS HATE HATE HATE
 #undef CLIP_MASK
 
-class MOZ_STACK_CLASS SVGAutoRenderState
+class MOZ_RAII SVGAutoRenderState
 {
   typedef mozilla::gfx::DrawTarget DrawTarget;
 
@@ -180,20 +179,16 @@ class nsSVGUtils
 {
 public:
   typedef mozilla::dom::Element Element;
-  typedef mozilla::FramePropertyDescriptor FramePropertyDescriptor;
   typedef mozilla::gfx::AntialiasMode AntialiasMode;
+  typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef mozilla::gfx::FillRule FillRule;
   typedef mozilla::gfx::GeneralPattern GeneralPattern;
   typedef mozilla::gfx::Size Size;
+  typedef mozilla::SVGTextContextPaint SVGTextContextPaint;
 
   static void Init();
 
-  static void DestroyObjectBoundingBoxProperty(void* aPropertyValue) {
-    delete static_cast<gfxRect*>(aPropertyValue);
-  }
-
-  NS_DECLARE_FRAME_PROPERTY(ObjectBoundingBoxProperty,
-                            DestroyObjectBoundingBoxProperty);
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(ObjectBoundingBoxProperty, gfxRect)
 
   /**
    * Gets the nearest nsSVGInnerSVGFrame or nsSVGOuterSVGFrame frame. aFrame
@@ -351,8 +346,8 @@ public:
    * @param aResultOverflows true if the desired surface size is too big
    * @return the surface size to use
    */
-  static gfxIntSize ConvertToSurfaceSize(const gfxSize& aSize,
-                                         bool *aResultOverflows);
+  static mozilla::gfx::IntSize ConvertToSurfaceSize(const gfxSize& aSize,
+                                                    bool *aResultOverflows);
 
   /*
    * Hit test a given rectangle/matrix.
@@ -501,6 +496,13 @@ public:
   static nscolor GetFallbackOrPaintColor(nsStyleContext *aStyleContext,
                                          nsStyleSVGPaint nsStyleSVG::*aFillOrStroke);
 
+  static DrawMode
+  SetupContextPaint(const DrawTarget* aDrawTarget,
+                    const gfxMatrix& aContextMatrix,
+                    nsIFrame* aFrame,
+                    gfxTextContextPaint* aOuterContextPaint,
+                    SVGTextContextPaint* aThisContextPaint);
+
   static void
   MakeFillPatternFor(nsIFrame *aFrame,
                      gfxContext* aContext,
@@ -555,11 +557,9 @@ public:
    * Render a SVG glyph.
    * @param aElement the SVG glyph element to render
    * @param aContext the thebes aContext to draw to
-   * @param aDrawMode fill or stroke or both (see DrawMode)
    * @return true if rendering succeeded
    */
   static bool PaintSVGGlyph(Element* aElement, gfxContext* aContext,
-                            DrawMode aDrawMode,
                             gfxTextContextPaint* aContextPaint);
   /**
    * Get the extents of a SVG glyph.

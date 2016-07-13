@@ -21,7 +21,7 @@ class CustomEvent final : public Event,
 private:
   virtual ~CustomEvent();
 
-  nsCOMPtr<nsIVariant> mDetail;
+  JS::Heap<JS::Value> mDetail;
 
 public:
   explicit CustomEvent(mozilla::dom::EventTarget* aOwner,
@@ -29,7 +29,7 @@ public:
                        mozilla::WidgetEvent* aEvent = nullptr);
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(CustomEvent, Event)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(CustomEvent, Event)
   NS_FORWARD_TO_EVENT
   NS_DECL_NSIDOMCUSTOMEVENT
 
@@ -57,5 +57,10 @@ public:
 
 } // namespace dom
 } // namespace mozilla
+
+already_AddRefed<mozilla::dom::CustomEvent>
+NS_NewDOMCustomEvent(mozilla::dom::EventTarget* aOwner,
+                     nsPresContext* aPresContext,
+                     mozilla::WidgetEvent* aEvent);
 
 #endif // CustomEvent_h__

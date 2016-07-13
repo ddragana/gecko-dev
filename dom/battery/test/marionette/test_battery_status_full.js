@@ -1,19 +1,24 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 MARIONETTE_TIMEOUT = 10000;
 
-let battery = window.navigator.battery;
-let fromStatus = "full";
-let fromCharging = true;
+var battery;
+var fromStatus = "full";
+var fromCharging = true;
 
 function verifyInitialState() {
-  ok(battery, "battery");
-  ok(battery.charging, "battery.charging");
-  runEmulatorCmd("power display", function (result) {
-    is(result.pop(), "OK", "power display successful");
-    ok(result.indexOf("status: Charging") !== -1, "power status charging");
-    setUp();
+  window.navigator.getBattery().then(function (b) {
+    battery = b;
+    ok(battery, "battery");
+    ok(battery.charging, "battery.charging");
+    runEmulatorCmd("power display", function (result) {
+      is(result.pop(), "OK", "power display successful");
+      ok(result.indexOf("status: Charging") !== -1, "power status charging");
+      setUp();
+    });
   });
 }
 

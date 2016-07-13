@@ -1,6 +1,5 @@
 env:
     browser: true
-    es6: true
 
 globals:
     Components: false
@@ -28,7 +27,6 @@ globals:
     TelemetryStopwatch: false
     UITelemetry: false
     UserAgentOverrides: 0
-    WebappManager: false
     XPCOMUtils: false
     ctypes: false
     dump: false

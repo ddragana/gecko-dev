@@ -5,6 +5,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Move.h"
+#include "mozilla/UniquePtr.h"
 
 #include "txStylesheetCompiler.h"
 #include "txStylesheetCompileHandlers.h"
@@ -85,8 +86,6 @@ txStylesheetCompiler::startElement(int32_t aNamespaceID, nsIAtom* aLocalName,
             if (!hasOwnNamespaceMap) {
                 mElementContext->mMappings =
                     new txNamespaceMap(*mElementContext->mMappings);
-                NS_ENSURE_TRUE(mElementContext->mMappings,
-                               NS_ERROR_OUT_OF_MEMORY);
                 hasOwnNamespaceMap = true;
             }
 
@@ -118,10 +117,9 @@ txStylesheetCompiler::startElement(const char16_t *aName,
     nsresult rv = flushCharacters();
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsAutoArrayPtr<txStylesheetAttr> atts;
+    UniquePtr<txStylesheetAttr[]> atts;
     if (aAttrCount > 0) {
-        atts = new txStylesheetAttr[aAttrCount];
-        NS_ENSURE_TRUE(atts, NS_ERROR_OUT_OF_MEMORY);
+        atts = MakeUnique<txStylesheetAttr[]>(aAttrCount);
     }
 
     bool hasOwnNamespaceMap = false;
@@ -149,8 +147,6 @@ txStylesheetCompiler::startElement(const char16_t *aName,
             if (!hasOwnNamespaceMap) {
                 mElementContext->mMappings =
                     new txNamespaceMap(*mElementContext->mMappings);
-                NS_ENSURE_TRUE(mElementContext->mMappings,
-                               NS_ERROR_OUT_OF_MEMORY);
                 hasOwnNamespaceMap = true;
             }
 
@@ -166,7 +162,7 @@ txStylesheetCompiler::startElement(const char16_t *aName,
                                   getter_AddRefs(localname), &namespaceID);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    return startElementInternal(namespaceID, localname, prefix, atts,
+    return startElementInternal(namespaceID, localname, prefix, atts.get(),
                                 aAttrCount);
 }
 
@@ -336,8 +332,6 @@ txStylesheetCompiler::endElement()
         txInScopeVariable* var = mInScopeVariables[i];
         if (!--(var->mLevel)) {
             nsAutoPtr<txInstruction> instr(new txRemoveVariable(var->mName));
-            NS_ENSURE_TRUE(instr, NS_ERROR_OUT_OF_MEMORY);
-
             rv = addInstruction(Move(instr));
             NS_ENSURE_SUCCESS(rv, rv);
             
@@ -482,8 +476,6 @@ txStylesheetCompiler::ensureNewElementContext()
     
     nsAutoPtr<txElementContext>
         context(new txElementContext(*mElementContext));
-    NS_ENSURE_TRUE(context, NS_ERROR_OUT_OF_MEMORY);
-
     nsresult rv = pushObject(mElementContext);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -528,6 +520,7 @@ txStylesheetCompilerState::txStylesheetCompilerState(txACompileObserver* aObserv
       mSorter(nullptr),
       mDOE(false),
       mSearchingForFallback(false),
+      mDisAllowed(0),
       mObserver(aObserver),
       mEmbedStatus(eNoEmbed),
       mDoneWithThisStylesheet(false),
@@ -571,8 +564,6 @@ txStylesheetCompilerState::init(const nsAString& aStylesheetURI,
     }
     else {
         mStylesheet = new txStylesheet;
-        NS_ENSURE_TRUE(mStylesheet, NS_ERROR_OUT_OF_MEMORY);
-        
         rv = mStylesheet->init();
         NS_ENSURE_SUCCESS(rv, rv);
         
@@ -583,8 +574,7 @@ txStylesheetCompilerState::init(const nsAString& aStylesheetURI,
     }
    
     mElementContext = new txElementContext(aStylesheetURI);
-    NS_ENSURE_TRUE(mElementContext && mElementContext->mMappings,
-                   NS_ERROR_OUT_OF_MEMORY);
+    NS_ENSURE_TRUE(mElementContext->mMappings, NS_ERROR_OUT_OF_MEMORY);
 
     // Push the "old" txElementContext
     rv = pushObject(0);
@@ -648,7 +638,6 @@ txStylesheetCompilerState::pushChooseGotoList()
 
     mChooseGotoList.forget();
     mChooseGotoList = new txList;
-    NS_ENSURE_TRUE(mChooseGotoList, NS_ERROR_OUT_OF_MEMORY);
 
     return NS_OK;
 }
@@ -771,7 +760,7 @@ txStylesheetCompilerState::loadIncludedStylesheet(const nsAString& aURI)
     
     txACompileObserver* observer = static_cast<txStylesheetCompiler*>(this);
 
-    nsRefPtr<txStylesheetCompiler> compiler =
+    RefPtr<txStylesheetCompiler> compiler =
         new txStylesheetCompiler(aURI, mStylesheet, &mToplevelIterator,
                                  mReferrerPolicy, observer);
     NS_ENSURE_TRUE(compiler, NS_ERROR_OUT_OF_MEMORY);
@@ -808,7 +797,7 @@ txStylesheetCompilerState::loadImportedStylesheet(const nsAString& aURI,
 
     txACompileObserver* observer = static_cast<txStylesheetCompiler*>(this);
 
-    nsRefPtr<txStylesheetCompiler> compiler =
+    RefPtr<txStylesheetCompiler> compiler =
         new txStylesheetCompiler(aURI, mStylesheet, &iter, mReferrerPolicy,
                                  observer);
     NS_ENSURE_TRUE(compiler, NS_ERROR_OUT_OF_MEMORY);
@@ -840,8 +829,6 @@ nsresult
 txStylesheetCompilerState::addVariable(const txExpandedName& aName)
 {
     txInScopeVariable* var = new txInScopeVariable(aName);
-    NS_ENSURE_TRUE(var, NS_ERROR_OUT_OF_MEMORY);
-
     if (!mInScopeVariables.AppendElement(var)) {
         delete var;
         return NS_ERROR_OUT_OF_MEMORY;
@@ -923,6 +910,9 @@ TX_ConstructXSLTFunction(nsIAtom* aName, int32_t aNamespaceID,
             new DocumentFunctionCall(aState->mElementContext->mBaseURI);
     }
     else if (aName == nsGkAtoms::key) {
+        if (!aState->allowed(txIParseContext::KEY_FUNCTION)) {
+            return NS_ERROR_XSLT_CALL_TO_KEY_NOT_ALLOWED;
+        }
         *aFunction =
             new txKeyFunctionCall(aState->mElementContext->mMappings);
     }
@@ -959,7 +949,8 @@ TX_ConstructXSLTFunction(nsIAtom* aName, int32_t aNamespaceID,
         return NS_ERROR_XPATH_UNKNOWN_FUNCTION;
     }
 
-    return *aFunction ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+    MOZ_ASSERT(*aFunction);
+    return NS_OK;
 }
 
 typedef nsresult (*txFunctionFactory)(nsIAtom* aName,
@@ -1030,9 +1021,6 @@ findFunction(nsIAtom* aName, int32_t aNamespaceID,
 
     if (!sXPCOMFunctionMappings) {
         sXPCOMFunctionMappings = new nsTArray<txXPCOMFunctionMapping>;
-        if (!sXPCOMFunctionMappings) {
-            return NS_ERROR_OUT_OF_MEMORY;
-        }
     }
 
     txXPCOMFunctionMapping *map = nullptr;
@@ -1079,7 +1067,7 @@ findFunction(nsIAtom* aName, int32_t aNamespaceID,
 extern bool
 TX_XSLTFunctionAvailable(nsIAtom* aName, int32_t aNameSpaceID)
 {
-    nsRefPtr<txStylesheetCompiler> compiler =
+    RefPtr<txStylesheetCompiler> compiler =
         new txStylesheetCompiler(EmptyString(),
                                  mozilla::net::RP_Default, nullptr);
     NS_ENSURE_TRUE(compiler, false);
@@ -1100,7 +1088,7 @@ txStylesheetCompilerState::resolveFunctionCall(nsIAtom* aName, int32_t aID,
     if (rv == NS_ERROR_XPATH_UNKNOWN_FUNCTION &&
         (aID != kNameSpaceID_None || fcp())) {
         *aFunction = new txErrorFunctionCall(aName);
-        rv = *aFunction ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+        rv = NS_OK;
     }
 
     return rv;

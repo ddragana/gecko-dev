@@ -8,7 +8,6 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/Mutex.h"
-#include "nsAutoPtr.h"
 #include "SharedSurface.h"
 
 namespace mozilla {
@@ -46,7 +45,7 @@ public:
 protected:
     GLContext* mCurConsGL;
     GLuint mConsTex;
-    nsRefPtr<TextureGarbageBin> mGarbageBin;
+    RefPtr<TextureGarbageBin> mGarbageBin;
     EGLSync mSync;
 
     SharedSurface_EGLImage(GLContext* gl,
@@ -63,12 +62,16 @@ protected:
 public:
     virtual ~SharedSurface_EGLImage();
 
+    virtual layers::TextureFlags GetTextureFlags() const override;
+
     virtual void LockProdImpl() override {}
     virtual void UnlockProdImpl() override {}
 
-    virtual void Fence() override;
-    virtual bool WaitSync() override;
-    virtual bool PollSync() override;
+    virtual void ProducerAcquireImpl() override {}
+    virtual void ProducerReleaseImpl() override;
+
+    virtual void ProducerReadAcquireImpl() override;
+    virtual void ProducerReadReleaseImpl() override {};
 
     virtual GLuint ProdTexture() override {
       return mProdTex;
@@ -79,6 +82,8 @@ public:
     void AcquireConsumerTexture(GLContext* consGL, GLuint* out_texture, GLuint* out_target);
 
     virtual bool ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor) override;
+
+    virtual bool ReadbackBySharedHandle(gfx::DataSourceSurface* out_surface) override;
 };
 
 
@@ -90,14 +95,14 @@ public:
     // Fallible:
     static UniquePtr<SurfaceFactory_EGLImage> Create(GLContext* prodGL,
                                                      const SurfaceCaps& caps,
-                                                     const RefPtr<layers::ISurfaceAllocator>& allocator,
+                                                     const RefPtr<layers::ClientIPCAllocator>& allocator,
                                                      const layers::TextureFlags& flags);
 
 protected:
     const EGLContext mContext;
 
     SurfaceFactory_EGLImage(GLContext* prodGL, const SurfaceCaps& caps,
-                            const RefPtr<layers::ISurfaceAllocator>& allocator,
+                            const RefPtr<layers::ClientIPCAllocator>& allocator,
                             const layers::TextureFlags& flags,
                             EGLContext context)
         : SurfaceFactory(SharedSurfaceType::EGLImageShare, prodGL, caps, allocator, flags)

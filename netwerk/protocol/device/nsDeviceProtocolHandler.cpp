@@ -8,8 +8,10 @@
 #include "nsAutoPtr.h"
 #include "nsSimpleURI.h"
 
-//-----------------------------------------------------------------------------
+namespace mozilla {
+namespace net {
 
+//-----------------------------------------------------------------------------
 NS_IMPL_ISUPPORTS(nsDeviceProtocolHandler,
                   nsIProtocolHandler)
 
@@ -45,7 +47,7 @@ nsDeviceProtocolHandler::NewURI(const nsACString &spec,
                                 nsIURI *baseURI,
                                 nsIURI **result)
 {
-  nsRefPtr<nsSimpleURI> uri = new nsSimpleURI();
+  RefPtr<nsSimpleURI> uri = new nsSimpleURI();
 
   nsresult rv = uri->SetSpec(spec);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -59,7 +61,7 @@ nsDeviceProtocolHandler::NewChannel2(nsIURI* aURI,
                                      nsILoadInfo* aLoadInfo,
                                      nsIChannel** aResult)
 {
-  nsRefPtr<nsDeviceChannel> channel = new nsDeviceChannel();
+  RefPtr<nsDeviceChannel> channel = new nsDeviceChannel();
   nsresult rv = channel->Init(aURI);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -86,3 +88,6 @@ nsDeviceProtocolHandler::AllowPort(int32_t port,
   *aResult = false;
   return NS_OK;
 }
+
+} // namespace net
+} // namespace mozilla

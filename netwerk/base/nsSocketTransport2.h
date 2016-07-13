@@ -28,13 +28,9 @@
 #include "prerror.h"
 #include "nsAutoPtr.h"
 
-class nsSocketTransport;
 class nsICancelable;
 class nsIDNSRecord;
 class nsIInterfaceRequestor;
-
-nsresult
-ErrorAccordingToNSPR(PRErrorCode errorCode);
 
 //-----------------------------------------------------------------------------
 
@@ -42,6 +38,14 @@ ErrorAccordingToNSPR(PRErrorCode errorCode);
 #define NS_SOCKET_CONNECT_TIMEOUT PR_MillisecondsToInterval(20)
 
 //-----------------------------------------------------------------------------
+
+namespace mozilla {
+namespace net {
+
+nsresult
+ErrorAccordingToNSPR(PRErrorCode errorCode);
+
+class nsSocketTransport;
 
 class nsSocketInputStream : public nsIAsyncInputStream
 {
@@ -62,7 +66,7 @@ public:
 
 private:
     nsSocketTransport               *mTransport;
-    mozilla::ThreadSafeAutoRefCnt    mReaderRefCnt;
+    ThreadSafeAutoRefCnt             mReaderRefCnt;
 
     // access to these is protected by mTransport->mLock
     nsresult                         mCondition;
@@ -96,7 +100,7 @@ private:
                                        uint32_t count, uint32_t *countRead);
 
     nsSocketTransport                *mTransport;
-    mozilla::ThreadSafeAutoRefCnt     mWriterRefCnt;
+    ThreadSafeAutoRefCnt              mWriterRefCnt;
 
     // access to these is protected by mTransport->mLock
     nsresult                          mCondition;
@@ -113,8 +117,6 @@ class nsSocketTransport final : public nsASocketHandler
                               , public nsIClassInfo
                               , public nsIInterfaceRequestor
 {
-    typedef mozilla::Mutex Mutex;
-
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSITRANSPORT
@@ -132,15 +134,24 @@ public:
                   const nsACString &hostRoute, uint16_t portRoute,
                   nsIProxyInfo *proxyInfo);
 
+    // Alternative Init method for when the IP-address of the host
+    // has been pre-resolved using a alternative means (e.g. FlyWeb service
+    // info).
+    nsresult InitPreResolved(const char **socketTypes, uint32_t typeCount,
+                             const nsACString &host, uint16_t port,
+                             const nsACString &hostRoute, uint16_t portRoute,
+                             nsIProxyInfo *proxyInfo,
+                             const mozilla::net::NetAddr* addr);
+
     // this method instructs the socket transport to use an already connected
     // socket with the given address.
     nsresult InitWithConnectedSocket(PRFileDesc *socketFD,
-                                     const mozilla::net::NetAddr *addr);
+                                     const NetAddr *addr);
 
     // this method instructs the socket transport to use an already connected
     // socket with the given address, and additionally supplies security info.
     nsresult InitWithConnectedSocket(PRFileDesc* aSocketFD,
-                                     const mozilla::net::NetAddr* aAddr,
+                                     const NetAddr* aAddr,
                                      nsISupports* aSecInfo);
 
     // This method instructs the socket transport to open a socket
@@ -161,11 +172,11 @@ public:
     uint64_t ByteCountSent() override { return mOutput.ByteCount(); }
     static void CloseSocket(PRFileDesc *aFd, bool aTelemetryEnabled);
     static void SendPRBlockingTelemetry(PRIntervalTime aStart,
-        mozilla::Telemetry::ID aIDNormal,
-        mozilla::Telemetry::ID aIDShutdown,
-        mozilla::Telemetry::ID aIDConnectivityChange,
-        mozilla::Telemetry::ID aIDLinkChange,
-        mozilla::Telemetry::ID aIDOffline);
+        Telemetry::ID aIDNormal,
+        Telemetry::ID aIDShutdown,
+        Telemetry::ID aIDConnectivityChange,
+        Telemetry::ID aIDLinkChange,
+        Telemetry::ID aIDOffline);
 protected:
 
     virtual ~nsSocketTransport();
@@ -198,8 +209,6 @@ private:
     class MOZ_STACK_CLASS PRFileDescAutoLock
     {
     public:
-      typedef mozilla::MutexAutoLock MutexAutoLock;
-
       explicit PRFileDescAutoLock(nsSocketTransport *aSocketTransport,
                                   nsresult *aConditionWhileLocked = nullptr)
         : mSocketTransport(aSocketTransport)
@@ -287,6 +296,7 @@ private:
     nsCString    mProxyHost;
     nsCString    mOriginHost;
     uint16_t     mPort;
+    nsCOMPtr<nsIProxyInfo> mProxyInfo;
     uint16_t     mProxyPort;
     uint16_t     mOriginPort;
     bool mProxyTransparent;
@@ -319,12 +329,16 @@ private:
     nsCOMPtr<nsICancelable> mDNSRequest;
     nsCOMPtr<nsIDNSRecord>  mDNSRecord;
 
-    // mNetAddr is valid from GetPeerAddr() once we have
+    // mNetAddr/mSelfAddr is valid from GetPeerAddr()/GetSelfAddr() once we have
     // reached STATE_TRANSFERRING. It must not change after that.
-    mozilla::net::NetAddr   mNetAddr;
-    bool                    mNetAddrIsSet;
+    void                    SetSocketName(PRFileDesc *fd);
+    NetAddr                 mNetAddr;
+    NetAddr                 mSelfAddr; // getsockname()
+    Atomic<bool, Relaxed>   mNetAddrIsSet;
+    Atomic<bool, Relaxed>   mSelfAddrIsSet;
+    Atomic<bool, Relaxed>   mNetAddrPreResolved;
 
-    nsAutoPtr<mozilla::net::NetAddr> mBindAddr;
+    nsAutoPtr<NetAddr>      mBindAddr;
 
     // socket methods (these can only be called on the socket thread):
 
@@ -362,7 +376,7 @@ private:
     // A delete protector reference to gSocketTransportService held for lifetime
     // of 'this'. Sometimes used interchangably with gSocketTransportService due
     // to scoping.
-    nsRefPtr<nsSocketTransportService> mSocketTransportService;
+    RefPtr<nsSocketTransportService> mSocketTransportService;
 
     nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
     nsCOMPtr<nsITransportEventSink> mEventSink;
@@ -447,5 +461,8 @@ private:
     // it does not compile(maybe it does just I did not have time to fix it now).
     mozilla::net::SpdyInformation    mSpdyInfo;
 };
+
+} // namespace net
+} // namespace mozilla
 
 #endif // !nsSocketTransport_h__

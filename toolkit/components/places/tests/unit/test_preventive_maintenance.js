@@ -16,18 +16,18 @@ Components.utils.import("resource://gre/modules/PlacesDBUtils.jsm");
 const FINISHED_MAINTENANCE_NOTIFICATION_TOPIC = "places-maintenance-finished";
 
 // Get services and database connection
-let hs = PlacesUtils.history;
-let bs = PlacesUtils.bookmarks;
-let ts = PlacesUtils.tagging;
-let as = PlacesUtils.annotations;
-let fs = PlacesUtils.favicons;
+var hs = PlacesUtils.history;
+var bs = PlacesUtils.bookmarks;
+var ts = PlacesUtils.tagging;
+var as = PlacesUtils.annotations;
+var fs = PlacesUtils.favicons;
 
-let mDBConn = hs.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
+var mDBConn = hs.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
 
 //------------------------------------------------------------------------------
 // Helpers
 
-let defaultBookmarksMaxId = 0;
+var defaultBookmarksMaxId = 0;
 function cleanDatabase() {
   mDBConn.executeSimpleSQL("DELETE FROM moz_places");
   mDBConn.executeSimpleSQL("DELETE FROM moz_historyvisits");
@@ -42,7 +42,7 @@ function cleanDatabase() {
 
 function addPlace(aUrl, aFavicon) {
   let stmt = mDBConn.createStatement(
-    "INSERT INTO moz_places (url, favicon_id) VALUES (:url, :favicon)");
+    "INSERT INTO moz_places (url, url_hash, favicon_id) VALUES (:url, hash(:url), :favicon)");
   stmt.params["url"] = aUrl || "http://www.mozilla.org";
   stmt.params["favicon"] = aFavicon || null;
   stmt.execute();
@@ -70,7 +70,7 @@ function addBookmark(aPlaceId, aType, aParent, aKeywordId, aFolderType, aTitle) 
 //------------------------------------------------------------------------------
 // Tests
 
-let tests = [];
+var tests = [];
 
 //------------------------------------------------------------------------------
 
@@ -369,7 +369,7 @@ tests.push({
     do_check_eq(bs.getItemTitle(bs.tagsFolder),
                 PlacesUtils.getString("TagsFolderTitle"));
     do_check_eq(bs.getItemTitle(bs.unfiledBookmarksFolder),
-                PlacesUtils.getString("UnsortedBookmarksFolderTitle"));
+                PlacesUtils.getString("OtherBookmarksFolderTitle"));
     do_check_eq(bs.getItemTitle(bs.toolbarFolder),
                 PlacesUtils.getString("BookmarksToolbarFolderTitle"));
   }
@@ -1074,10 +1074,11 @@ tests.push({
   name: "L.2",
   desc: "Recalculate visit_count and last_visit_date",
 
-  setup: function() {
+  setup: function* () {
     function setVisitCount(aURL, aValue) {
       let stmt = mDBConn.createStatement(
-        "UPDATE moz_places SET visit_count = :count WHERE url = :url"
+        `UPDATE moz_places SET visit_count = :count WHERE url_hash = hash(:url)
+                                                      AND url = :url`
       );
       stmt.params.count = aValue;
       stmt.params.url = aURL;
@@ -1086,7 +1087,8 @@ tests.push({
     }
     function setLastVisitDate(aURL, aValue) {
       let stmt = mDBConn.createStatement(
-        "UPDATE moz_places SET last_visit_date = :date WHERE url = :url"
+        `UPDATE moz_places SET last_visit_date = :date WHERE url_hash = hash(:url)
+                                                         AND url = :url`
       );
       stmt.params.date = aValue;
       stmt.params.url = aURL;
@@ -1133,7 +1135,7 @@ tests.push({
   check: function() {
     let stmt = mDBConn.createStatement(
       `SELECT h.id FROM moz_places h
-       JOIN moz_historyvisits v ON v.place_id = h.id AND visit_type NOT IN (0,4,7,8)
+       JOIN moz_historyvisits v ON v.place_id = h.id AND visit_type NOT IN (0,4,7,8,9)
        GROUP BY h.id HAVING h.visit_count <> count(*)
        UNION ALL
        SELECT h.id FROM moz_places h
@@ -1151,8 +1153,8 @@ tests.push({
   name: "L.3",
   desc: "recalculate hidden for redirects.",
 
-  setup: function() {
-    PlacesTestUtils.addVisits([
+  *setup() {
+    yield PlacesTestUtils.addVisits([
       { uri: NetUtil.newURI("http://l3.moz.org/"),
         transition: TRANSITION_TYPED },
       { uri: NetUtil.newURI("http://l3.moz.org/redirecting/"),
@@ -1198,6 +1200,61 @@ tests.push({
 //------------------------------------------------------------------------------
 
 tests.push({
+  name: "L.4",
+  desc: "recalculate foreign_count.",
+
+  *setup() {
+    this._pageGuid = (yield PlacesUtils.history.insert({ url: "http://l4.moz.org/",
+                                                         visits: [{ date: new Date() }] })).guid;
+    yield PlacesUtils.bookmarks.insert({ url: "http://l4.moz.org/",
+                                         parentGuid: PlacesUtils.bookmarks.unfiledGuid});
+    yield PlacesUtils.keywords.insert({ url: "http://l4.moz.org/", keyword: "kw" });
+    Assert.equal((yield this._getForeignCount()), 2);
+  },
+
+  *_getForeignCount() {
+    let db = yield PlacesUtils.promiseDBConnection();
+    let rows = yield db.execute(`SELECT foreign_count FROM moz_places
+                                 WHERE guid = :guid`, { guid: this._pageGuid });
+    return rows[0].getResultByName("foreign_count");
+  },
+
+  *check() {
+    Assert.equal((yield this._getForeignCount()), 2);
+  }
+});
+
+//------------------------------------------------------------------------------
+
+tests.push({
+  name: "L.5",
+  desc: "recalculate hashes when missing.",
+
+  *setup() {
+    this._pageGuid = (yield PlacesUtils.history.insert({ url: "http://l5.moz.org/",
+                                                         visits: [{ date: new Date() }] })).guid;
+    Assert.ok((yield this._getHash()) > 0);
+    yield PlacesUtils.withConnectionWrapper("change url hash", Task.async(function* (db) {
+      yield db.execute(`UPDATE moz_places SET url_hash = 0`);
+    }));
+    Assert.equal((yield this._getHash()), 0);
+  },
+
+  *_getHash() {
+    let db = yield PlacesUtils.promiseDBConnection();
+    let rows = yield db.execute(`SELECT url_hash FROM moz_places
+                                 WHERE guid = :guid`, { guid: this._pageGuid });
+    return rows[0].getResultByName("url_hash");
+  },
+
+  *check() {
+    Assert.ok((yield this._getHash()) > 0);
+  }
+});
+
+//------------------------------------------------------------------------------
+
+tests.push({
   name: "Z",
   desc: "Sanity: Preventive maintenance does not touch valid items",
 
@@ -1225,7 +1282,9 @@ tests.push({
     do_check_true(this._separatorId > 0);
     ts.tagURI(this._uri1, ["testtag"]);
     fs.setAndFetchFaviconForPage(this._uri2, SMALLPNG_DATA_URI, false,
-                                 PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE);
+                                 PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE,
+                                 null,
+                                 Services.scriptSecurityManager.getSystemPrincipal());
     yield PlacesUtils.keywords.insert({ url: this._uri1.spec, keyword: "testkeyword" });
     as.setPageAnnotation(this._uri2, "anno", "anno", 0, as.EXPIRE_NEVER);
     as.setItemAnnotation(this._bookmarkId, "anno", "anno", 0, as.EXPIRE_NEVER);
@@ -1259,19 +1318,8 @@ tests.push({
 
 //------------------------------------------------------------------------------
 
-// main
-function run_test()
+add_task(function* test_preventive_maintenance()
 {
-  run_next_test();
-}
-
-add_task(function test_preventive_maintenance()
-{
-  // Force initialization of the bookmarks hash. This test could cause
-  // it to go out of sync due to direct queries on the database.
-  yield PlacesTestUtils.addVisits(uri("http://force.bookmarks.hash"));
-  do_check_false(bs.isBookmarked(uri("http://force.bookmarks.hash")));
-
   // Get current bookmarks max ID for cleanup
   let stmt = mDBConn.createStatement("SELECT MAX(id) FROM moz_bookmarks");
   stmt.executeStep();

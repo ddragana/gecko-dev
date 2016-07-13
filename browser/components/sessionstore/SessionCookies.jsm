@@ -40,7 +40,7 @@ this.SessionCookies = Object.freeze({
 /**
  * The internal API.
  */
-let SessionCookiesInternal = {
+var SessionCookiesInternal = {
   /**
    * Stores whether we're initialized, yet.
    */
@@ -117,9 +117,16 @@ let SessionCookiesInternal = {
   restore(cookies) {
     for (let cookie of cookies) {
       let expiry = "expiry" in cookie ? cookie.expiry : MAX_EXPIRY;
-      Services.cookies.add(cookie.host, cookie.path || "", cookie.name || "",
-                           cookie.value, !!cookie.secure, !!cookie.httponly,
-                           /* isSession = */ true, expiry);
+      let cookieObj = {
+        host: cookie.host,
+        path: cookie.path || "",
+        name: cookie.name || ""
+      };
+      if (!Services.cookies.cookieExists(cookieObj)) {
+        Services.cookies.add(cookie.host, cookie.path || "", cookie.name || "",
+                             cookie.value, !!cookie.secure, !!cookie.httponly,
+                             /* isSession = */ true, expiry, cookie.originAttributes || {});
+      }
     }
   },
 
@@ -241,6 +248,8 @@ let SessionCookiesInternal = {
 
     if (cookie.isSession) {
       CookieStore.set(cookie);
+    } else {
+      CookieStore.delete(cookie);
     }
   },
 
@@ -314,7 +323,7 @@ function* getPossibleSubdomainVariants(host) {
  * The internal cookie storage that keeps track of every active session cookie.
  * These are stored using maps per host, path, and cookie name.
  */
-let CookieStore = {
+var CookieStore = {
   /**
    * The internal structure holding all known cookies.
    *
@@ -360,7 +369,9 @@ let CookieStore = {
       }
 
       for (let pathToNamesMap of this._hosts.get(host).values()) {
-        cookies.push(...pathToNamesMap.values());
+        for (let nameToCookiesMap of pathToNamesMap.values()) {
+          cookies.push(...nameToCookiesMap.values());
+        }
       }
     }
 
@@ -408,6 +419,10 @@ let CookieStore = {
       jscookie.expiry = cookie.expiry;
     }
 
+    if (cookie.originAttributes) {
+      jscookie.originAttributes = cookie.originAttributes;
+    }
+
     this._ensureMap(cookie).set(cookie.name, jscookie);
   },
 
@@ -442,7 +457,14 @@ let CookieStore = {
       this._hosts.set(cookie.host, new Map());
     }
 
-    let pathToNamesMap = this._hosts.get(cookie.host);
+    let originAttributesMap = this._hosts.get(cookie.host);
+    // If cookie.originAttributes is null, originAttributes will be an empty string.
+    let originAttributes = ChromeUtils.originAttributesToSuffix(cookie.originAttributes);
+    if (!originAttributesMap.has(originAttributes)) {
+      originAttributesMap.set(originAttributes, new Map());
+    }
+
+    let pathToNamesMap = originAttributesMap.get(originAttributes);
 
     if (!pathToNamesMap.has(cookie.path)) {
       pathToNamesMap.set(cookie.path, new Map());

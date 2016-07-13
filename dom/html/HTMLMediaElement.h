@@ -6,24 +6,26 @@
 #ifndef mozilla_dom_HTMLMediaElement_h
 #define mozilla_dom_HTMLMediaElement_h
 
+#include "nsAutoPtr.h"
 #include "nsIDOMHTMLMediaElement.h"
 #include "nsGenericHTMLElement.h"
 #include "MediaDecoderOwner.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIObserver.h"
 #include "mozilla/CORSMode.h"
-#include "DOMMediaStream.h"
 #include "DecoderTraits.h"
 #include "nsIAudioChannelAgent.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/TextTrackManager.h"
+#include "mozilla/WeakPtr.h"
 #include "MediaDecoder.h"
 #ifdef MOZ_EME
 #include "mozilla/dom/MediaKeys.h"
 #endif
 #include "mozilla/StateWatching.h"
 #include "nsGkAtoms.h"
+#include "PrincipalChangeObserver.h"
 
 // X.h on Linux #defines CurrentTime as 0L, so we have to #undef it here.
 #ifdef CurrentTime
@@ -35,14 +37,14 @@
 // Define to output information on decoding and painting framerate
 /* #define DEBUG_FRAME_RATE 1 */
 
-class nsIChannel;
-class nsIHttpChannel;
-class nsILoadGroup;
-
 typedef uint16_t nsMediaNetworkState;
 typedef uint16_t nsMediaReadyState;
+typedef uint32_t SuspendTypes;
+typedef uint32_t AudibleChangedReasons;
 
 namespace mozilla {
+class DecoderDoctorDiagnostics;
+class DOMMediaStream;
 class ErrorResult;
 class MediaResource;
 class MediaDecoder;
@@ -53,12 +55,18 @@ class TextTrack;
 class TimeRanges;
 class WakeLock;
 class MediaTrack;
+class MediaStreamTrack;
+class VideoStreamTrack;
 } // namespace dom
 } // namespace mozilla
 
+class AutoNotifyAudioChannelAgent;
+class nsIChannel;
+class nsIHttpChannel;
+class nsILoadGroup;
+class nsIRunnable;
 class nsITimer;
 class nsRange;
-class nsIRunnable;
 
 namespace mozilla {
 namespace dom {
@@ -74,10 +82,13 @@ class VideoTrackList;
 
 class HTMLMediaElement : public nsGenericHTMLElement,
                          public nsIDOMHTMLMediaElement,
-                         public nsIObserver,
                          public MediaDecoderOwner,
-                         public nsIAudioChannelAgentCallback
+                         public nsIAudioChannelAgentCallback,
+                         public PrincipalChangeObserver<DOMMediaStream>,
+                         public SupportsWeakPtr<HTMLMediaElement>
 {
+  friend AutoNotifyAudioChannelAgent;
+
 public:
   typedef mozilla::TimeStamp TimeStamp;
   typedef mozilla::layers::ImageContainer ImageContainer;
@@ -86,6 +97,8 @@ public:
   typedef mozilla::MediaResource MediaResource;
   typedef mozilla::MediaDecoderOwner MediaDecoderOwner;
   typedef mozilla::MetadataTags MetadataTags;
+
+  MOZ_DECLARE_WEAKREFERENCE_TYPENAME(HTMLMediaElement)
 
   CORSMode GetCORSMode() {
     return mCORSMode;
@@ -105,8 +118,6 @@ public:
 
   // nsIDOMHTMLMediaElement
   NS_DECL_NSIDOMHTMLMEDIAELEMENT
-
-  NS_DECL_NSIOBSERVER
 
   NS_DECL_NSIAUDIOCHANNELAGENTCALLBACK
 
@@ -175,6 +186,9 @@ public:
   // resource has a decode error during metadata loading or decoding.
   virtual void DecodeError() final override;
 
+  // Return true if error attribute is not null.
+  virtual bool HasError() const final override;
+
   // Called by the video decoder object, on the main thread, when the
   // resource load has been cancelled.
   virtual void LoadAborted() final override;
@@ -212,17 +226,24 @@ public:
   // suspended the channel.
   virtual void NotifySuspendedByCache(bool aIsSuspended) final override;
 
-  virtual bool IsActive() final override;
+  virtual bool IsActive() const final override;
 
-  virtual bool IsHidden() final override;
-
-  // In order to create overlayImageContainer to support DOMHwMediaStream.
-  VideoFrameContainer* GetOverlayImageVideoFrameContainer();
+  virtual bool IsHidden() const final override;
 
   // Called by the media decoder and the video frame to get the
   // ImageContainer containing the video data.
-  B2G_ACL_EXPORT virtual VideoFrameContainer* GetVideoFrameContainer() final override;
+  virtual VideoFrameContainer* GetVideoFrameContainer() final override;
   layers::ImageContainer* GetImageContainer();
+
+  // From PrincipalChangeObserver<DOMMediaStream>.
+  void PrincipalChanged(DOMMediaStream* aStream) override;
+
+  void UpdateSrcStreamVideoPrincipal(const PrincipalHandle& aPrincipalHandle);
+
+  // Called after the MediaStream we're playing rendered a frame to aContainer
+  // with a different principalHandle than the previous frame.
+  void PrincipalHandleChangedForVideoFrameContainer(VideoFrameContainer* aContainer,
+                                                    const PrincipalHandle& aNewPrincipalHandle);
 
   // Dispatch events
   virtual nsresult DispatchAsyncEvent(const nsAString& aName) final override;
@@ -262,8 +283,41 @@ public:
   // Returns null if nothing is playing.
   already_AddRefed<nsIPrincipal> GetCurrentPrincipal();
 
+  // Principal of the currently playing video resource. Anything accessing the
+  // image container of this element must have a principal that subsumes this
+  // principal. If there are no live video tracks but content has been rendered
+  // to the image container, we return the last video principal we had. Should
+  // the image container be empty with no live video tracks, we return nullptr.
+  already_AddRefed<nsIPrincipal> GetCurrentVideoPrincipal();
+
   // called to notify that the principal of the decoder's media resource has changed.
-  virtual void NotifyDecoderPrincipalChanged() final override;
+  void NotifyDecoderPrincipalChanged() final override;
+
+  // An interface for observing principal changes on the media elements
+  // MediaDecoder. This will also be notified if the active CORSMode changes.
+  class DecoderPrincipalChangeObserver
+  {
+  public:
+    virtual void NotifyDecoderPrincipalChanged() = 0;
+  };
+
+  /**
+   * Add a DecoderPrincipalChangeObserver to this media element.
+   *
+   * Ownership of the DecoderPrincipalChangeObserver remains with the caller,
+   * and it's the caller's responsibility to remove the observer before it dies.
+   */
+  void AddDecoderPrincipalChangeObserver(DecoderPrincipalChangeObserver* aObserver);
+
+  /**
+   * Remove an added DecoderPrincipalChangeObserver from this media element.
+   *
+   * Returns true if it was successfully removed.
+   */
+  bool RemoveDecoderPrincipalChangeObserver(DecoderPrincipalChangeObserver* aObserver);
+
+  class CaptureStreamTrackSource;
+  class CaptureStreamTrackSourceGetter;
 
   // Update the visual size of the media. Called from the decoder on the
   // main thread when/if the size changes.
@@ -274,7 +328,8 @@ public:
 
   // Returns the CanPlayStatus indicating if we can handle the
   // full MIME type including the optional codecs parameter.
-  static CanPlayStatus GetCanPlay(const nsAString& aType);
+  static CanPlayStatus GetCanPlay(const nsAString& aType,
+                                  DecoderDoctorDiagnostics* aDiagnostics);
 
   /**
    * Called when a child source element is added to this media element. This
@@ -345,15 +400,12 @@ public:
    */
   virtual void FireTimeUpdate(bool aPeriodic) final override;
 
-  MediaStream* GetSrcMediaStream() const
-  {
-    NS_ASSERTION(mSrcStream, "Don't call this when not playing a stream");
-    if (!mPlaybackStream) {
-      // XXX Remove this check with CameraPreviewMediaStream per bug 1124630.
-      return mSrcStream->GetStream();
-    }
-    return mPlaybackStream->GetStream();
-  }
+  /**
+   * This will return null if mSrcStream is null, or if mSrcStream is not
+   * null but its GetPlaybackStream() returns null --- which can happen during
+   * cycle collection unlinking!
+   */
+  MediaStream* GetSrcMediaStream() const;
 
   // WebIDL
 
@@ -391,6 +443,13 @@ public:
   // when the connection between Rtsp server and client gets lost.
   virtual void ResetConnectionState() final override;
 
+  // Called by media decoder when the audible state changed or when input is
+  // a media stream.
+  virtual void SetAudibleState(bool aAudible) final override;
+
+  // Notify agent when the MediaElement changes its audible state.
+  void NotifyAudioPlaybackChanged(AudibleChangedReasons aReason);
+
   // XPCOM GetPreload() is OK
   void SetPreload(const nsAString& aValue, ErrorResult& aRv)
   {
@@ -415,6 +474,8 @@ public:
   void SetCurrentTime(double aCurrentTime, ErrorResult& aRv);
 
   void FastSeek(double aTime, ErrorResult& aRv);
+
+  already_AddRefed<Promise> SeekToNextFrame(ErrorResult& aRv);
 
   double Duration() const;
 
@@ -516,16 +577,6 @@ public:
     SetHTMLBoolAttr(nsGkAtoms::muted, aMuted, aRv);
   }
 
-  bool MozMediaStatisticsShowing() const
-  {
-    return mStatsShowing;
-  }
-
-  void SetMozMediaStatisticsShowing(bool aShow)
-  {
-    mStatsShowing = aShow;
-  }
-
   bool MozAllowCasting() const
   {
     return mAllowCasting;
@@ -547,8 +598,18 @@ public:
   }
 
   already_AddRefed<MediaSource> GetMozMediaSourceObject() const;
-  already_AddRefed<DOMMediaStream> GetMozSrcObject() const;
+  // Returns a string describing the state of the media player internal
+  // data. Used for debugging purposes.
+  void GetMozDebugReaderData(nsAString& aString);
 
+  void MozDumpDebugInfo();
+
+  already_AddRefed<DOMMediaStream> GetSrcObject() const;
+  void SetSrcObject(DOMMediaStream& aValue);
+  void SetSrcObject(DOMMediaStream* aValue);
+
+  // TODO: remove prefixed versions soon (1183495).
+  already_AddRefed<DOMMediaStream> GetMozSrcObject() const;
   void SetMozSrcObject(DOMMediaStream& aValue);
   void SetMozSrcObject(DOMMediaStream* aValue);
 
@@ -628,17 +689,35 @@ public:
     }
   }
 
-  void AddCue(TextTrackCue& aCue) {
+  void NotifyCueAdded(TextTrackCue& aCue) {
     if (mTextTrackManager) {
-      mTextTrackManager->AddCue(aCue);
+      mTextTrackManager->NotifyCueAdded(aCue);
     }
   }
+  void NotifyCueRemoved(TextTrackCue& aCue) {
+    if (mTextTrackManager) {
+      mTextTrackManager->NotifyCueRemoved(aCue);
+    }
+  }
+  void NotifyCueUpdated(TextTrackCue *aCue) {
+    if (mTextTrackManager) {
+      mTextTrackManager->NotifyCueUpdated(aCue);
+    }
+  }
+
+  bool GetHasUserInteraction()
+  {
+    return mHasUserInteraction;
+  }
+
+  // A method to check whether we are currently playing.
+  bool IsCurrentlyPlaying() const;
 
   /**
    * A public wrapper for FinishDecoderSetup()
    */
   nsresult FinishDecoderSetup(MediaDecoder* aDecoder, MediaResource* aStream) {
-    return FinishDecoderSetup(aDecoder, aStream, nullptr, nullptr);
+    return FinishDecoderSetup(aDecoder, aStream, nullptr);
   }
 
   // Returns true if the media element is being destroyed. Used in
@@ -649,26 +728,27 @@ public:
   IMPL_EVENT_HANDLER(mozinterruptbegin)
   IMPL_EVENT_HANDLER(mozinterruptend)
 
-  // This is for testing only
+  // These are used for testing only
   float ComputedVolume() const;
   bool ComputedMuted() const;
+  nsSuspendedTypes ComputedSuspended() const;
 
 protected:
   virtual ~HTMLMediaElement();
 
+  class ChannelLoader;
   class MediaLoadListener;
   class MediaStreamTracksAvailableCallback;
+  class MediaStreamTrackListener;
   class StreamListener;
   class StreamSizeListener;
+  class ShutdownObserver;
 
   MediaDecoderOwner::NextFrameStatus NextFrameStatus();
   void SetDecoder(MediaDecoder* aDecoder) {
     MOZ_ASSERT(aDecoder); // Use ShutdownDecoder() to clear.
     mDecoder = aDecoder;
   }
-
-  virtual void GetItemValueText(DOMString& text) override;
-  virtual void SetItemValueText(const nsAString& text) override;
 
   class WakeLockBoolWrapper {
   public:
@@ -697,6 +777,8 @@ protected:
     nsCOMPtr<nsITimer> mTimer;
   };
 
+  nsresult PlayInternal(bool aCallerIsChrome);
+
   /** Use this method to change the mReadyState member, so required
    * events can be fired.
    */
@@ -714,7 +796,7 @@ protected:
    */
   virtual void WakeLockCreate();
   virtual void WakeLockRelease();
-  nsRefPtr<WakeLock> mWakeLock;
+  RefPtr<WakeLock> mWakeLock;
 
   /**
    * Logs a warning message to the web console to report various failures.
@@ -741,6 +823,30 @@ protected:
    * Stop playback on mSrcStream.
    */
   void EndSrcMediaStreamPlayback();
+  /**
+   * Ensure we're playing mSrcStream if and only if we're not paused.
+   */
+  enum { REMOVING_SRC_STREAM = 0x1 };
+  void UpdateSrcMediaStreamPlaying(uint32_t aFlags = 0);
+
+  /**
+   * If loading and playing a MediaStream, for each MediaStreamTrack in the
+   * MediaStream, create a corresponding AudioTrack or VideoTrack during the
+   * phase of resource fetching.
+   */
+  void ConstructMediaTracks();
+
+  /**
+   * Called by our DOMMediaStream::TrackListener when a new MediaStreamTrack has
+   * been added to the playback stream of |mSrcStream|.
+   */
+  void NotifyMediaStreamTrackAdded(const RefPtr<MediaStreamTrack>& aTrack);
+
+  /**
+   * Called by our DOMMediaStream::TrackListener when a MediaStreamTrack in
+   * |mSrcStream|'s playback stream has ended.
+   */
+  void NotifyMediaStreamTrackRemoved(const RefPtr<MediaStreamTrack>& aTrack);
 
   /**
    * Returns an nsDOMMediaStream containing the played contents of this
@@ -773,15 +879,14 @@ protected:
    */
   nsresult FinishDecoderSetup(MediaDecoder* aDecoder,
                               MediaResource* aStream,
-                              nsIStreamListener **aListener,
-                              MediaDecoder* aCloneDonor);
+                              nsIStreamListener **aListener);
 
   /**
    * Call this after setting up mLoadingSrc and mDecoder.
    */
   void AddMediaElementToURITable();
   /**
-   * Call this before clearing mLoadingSrc.
+   * Call this before modifying mLoadingSrc.
    */
   void RemoveMediaElementFromURITable();
   /**
@@ -884,6 +989,11 @@ protected:
    * Called asynchronously to release a self-reference to this element.
    */
   void DoRemoveSelfReference();
+
+  /**
+   * Called when "xpcom-shutdown" event is received.
+   */
+  void NotifyShutdownEvent();
 
   /**
    * Possible values of the 'preload' attribute.
@@ -1014,19 +1124,19 @@ protected:
 #ifdef MOZ_EME
   void ReportEMETelemetry();
 #endif
-  void ReportMSETelemetry();
+  void ReportTelemetry();
 
   // Check the permissions for audiochannel.
   bool CheckAudioChannelPermissions(const nsAString& aType);
-
-  // This method does the check for muting/nmuting the audio channel.
-  nsresult UpdateChannelMuteState(float aVolume, bool aMuted);
 
   // Seeks to aTime seconds. aSeekType can be Exact to seek to exactly the
   // seek target, or PrevSyncPoint if a quicker but less precise seek is
   // desired, and we'll seek to the sync point (keyframe and/or start of the
   // next block of audio samples) preceeding seek target.
-  void Seek(double aTime, SeekTarget::Type aSeekType, ErrorResult& aRv);
+  already_AddRefed<Promise> Seek(double aTime, SeekTarget::Type aSeekType, ErrorResult& aRv);
+
+  // A method to check if we are playing through the AudioChannel.
+  bool IsPlayingThroughTheAudioChannel() const;
 
   // Update the audio channel playing state
   void UpdateAudioChannelPlayingState();
@@ -1046,6 +1156,47 @@ protected:
   // Notifies the audio channel agent when the element starts or stops playing.
   void NotifyAudioChannelAgent(bool aPlaying);
 
+  // Creates the audio channel agent if needed.  Returns true if the audio
+  // channel agent is ready to be used.
+  bool MaybeCreateAudioChannelAgent();
+
+  /**
+   * We have different kinds of suspended cases,
+   * - SUSPENDED_PAUSE
+   * It's used when we temporary lost platform audio focus. MediaElement can
+   * only be resumed when we gain the audio focus again.
+   *
+   * - SUSPENDED_PAUSE_DISPOSABLE
+   * It's used when user press the pause botton on the remote media-control.
+   * MediaElement can be resumed by reomte media-control or via play().
+   *
+   * - SUSPENDED_BLOCK
+   * It's used to reduce the power comsuption, we won't play the auto-play
+   * audio/video in the page we have never visited before. MediaElement would
+   * be resumed when the page is active. See bug647429 for more details.
+   *
+   * - SUSPENDED_STOP_DISPOSABLE
+   * When we permanently lost platform audio focus, we shuold stop playing
+   * and stop the audio channel agent. MediaElement can only be restarted by
+   * play().
+   */
+  void PauseByAudioChannel(SuspendTypes aSuspend);
+  void BlockByAudioChannel();
+
+  void ResumeFromAudioChannel();
+  void ResumeFromAudioChannelPaused(SuspendTypes aSuspend);
+  void ResumeFromAudioChannelBlocked();
+
+  bool IsSuspendedByAudioChannel() const;
+  void SetAudioChannelSuspended(SuspendTypes aSuspend);
+
+  bool IsAllowedToPlay();
+
+  bool IsAudible() const;
+  bool HaveFailedWithSourceNotSupportedError() const;
+
+  void OpenUnsupportedMediaWithExtenalAppIfNeeded();
+
   class nsAsyncEventRunner;
   using nsGenericHTMLElement::DispatchEvent;
   // For nsAsyncEventRunner.
@@ -1053,65 +1204,68 @@ protected:
 
   // The current decoder. Load() has been called on this decoder.
   // At most one of mDecoder and mSrcStream can be non-null.
-  nsRefPtr<MediaDecoder> mDecoder;
+  RefPtr<MediaDecoder> mDecoder;
+
+  // Observers listening to changes to the mDecoder principal.
+  // Used by streams captured from this element.
+  nsTArray<DecoderPrincipalChangeObserver*> mDecoderPrincipalChangeObservers;
 
   // State-watching manager.
   WatchManager<HTMLMediaElement> mWatchManager;
 
   // A reference to the VideoFrameContainer which contains the current frame
   // of video to display.
-  nsRefPtr<VideoFrameContainer> mVideoFrameContainer;
+  RefPtr<VideoFrameContainer> mVideoFrameContainer;
 
   // Holds a reference to the DOM wrapper for the MediaStream that has been
   // set in the src attribute.
-  nsRefPtr<DOMMediaStream> mSrcAttrStream;
+  RefPtr<DOMMediaStream> mSrcAttrStream;
 
   // Holds a reference to the DOM wrapper for the MediaStream that we're
   // actually playing.
   // At most one of mDecoder and mSrcStream can be non-null.
-  nsRefPtr<DOMMediaStream> mSrcStream;
+  RefPtr<DOMMediaStream> mSrcStream;
 
-  // Holds a reference to a MediaInputPort connecting mSrcStream to mPlaybackStream.
-  nsRefPtr<MediaInputPort> mPlaybackStreamInputPort;
+  // If non-negative, the time we should return for currentTime while playing
+  // mSrcStream.
+  double mSrcStreamPausedCurrentTime;
 
-  // Holds a reference to a stream with mSrcStream as input but intended for
-  // playback. Used so we don't block playback of other video elements
-  // playing the same mSrcStream.
-  nsRefPtr<DOMMediaStream> mPlaybackStream;
+  // Holds a reference to the stream connecting this stream to the capture sink.
+  RefPtr<MediaInputPort> mCaptureStreamPort;
 
   // Holds references to the DOM wrappers for the MediaStreams that we're
   // writing to.
   struct OutputMediaStream {
-    nsRefPtr<DOMMediaStream> mStream;
+    RefPtr<DOMMediaStream> mStream;
     bool mFinishWhenEnded;
   };
   nsTArray<OutputMediaStream> mOutputStreams;
 
-  // Holds a reference to the MediaStreamListener attached to mPlaybackStream
-  // (or mSrcStream if mPlaybackStream is null).
-  nsRefPtr<StreamListener> mMediaStreamListener;
+  // Holds a reference to the MediaStreamListener attached to mSrcStream's
+  // playback stream.
+  RefPtr<StreamListener> mMediaStreamListener;
   // Holds a reference to the size-getting MediaStreamListener attached to
   // mSrcStream.
-  nsRefPtr<StreamSizeListener> mMediaStreamSizeListener;
+  RefPtr<StreamSizeListener> mMediaStreamSizeListener;
+  // The selected video stream track which contained mMediaStreamSizeListener.
+  RefPtr<VideoStreamTrack> mSelectedVideoStreamTrack;
+
+  const RefPtr<ShutdownObserver> mShutdownObserver;
 
   // Holds a reference to the MediaSource, if any, referenced by the src
   // attribute on the media element.
-  nsRefPtr<MediaSource> mSrcMediaSource;
+  RefPtr<MediaSource> mSrcMediaSource;
 
   // Holds a reference to the MediaSource supplying data for playback.  This
   // may either match mSrcMediaSource or come from Source element children.
   // This is set when and only when mLoadingSrc corresponds to an object url
   // that resolved to a MediaSource.
-  nsRefPtr<MediaSource> mMediaSource;
+  RefPtr<MediaSource> mMediaSource;
 
-  // Holds a reference to the first channel we open to the media resource.
-  // Once the decoder is created, control over the channel passes to the
-  // decoder, and we null out this reference. We must store this in case
-  // we need to cancel the channel before control of it passes to the decoder.
-  nsCOMPtr<nsIChannel> mChannel;
+  RefPtr<ChannelLoader> mChannelLoader;
 
   // Error attribute
-  nsRefPtr<MediaError> mError;
+  RefPtr<MediaError> mError;
 
   // The current media load ID. This is incremented every time we start a
   // new load. Async events note the ID when they're first sent, and only fire
@@ -1120,7 +1274,7 @@ protected:
 
   // Points to the child source elements, used to iterate through the children
   // when selecting a resource to load.
-  nsRefPtr<nsRange> mSourcePointer;
+  RefPtr<nsRange> mSourcePointer;
 
   // Points to the document whose load we're blocking. This is the document
   // we're bound to when loading starts.
@@ -1154,11 +1308,6 @@ protected:
   // Current audio volume
   double mVolume;
 
-  // Helper function to iterate over a hash table
-  // and convert it to a JSObject.
-  static PLDHashOperator BuildObjectFromTags(nsCStringHashKey::KeyType aKey,
-                                             nsCString aValue,
-                                             void* aUserArg);
   nsAutoPtr<const MetadataTags> mTags;
 
   // URI of the resource we're attempting to load. This stores the value we
@@ -1220,14 +1369,14 @@ protected:
   nsCOMPtr<nsIContent> mSourceLoadCandidate;
 
   // Range of time played.
-  nsRefPtr<TimeRanges> mPlayed;
+  RefPtr<TimeRanges> mPlayed;
 
   // Timer used for updating progress events
   nsCOMPtr<nsITimer> mProgressTimer;
 
 #ifdef MOZ_EME
   // Encrypted Media Extension media keys.
-  nsRefPtr<MediaKeys> mMediaKeys;
+  RefPtr<MediaKeys> mMediaKeys;
 #endif
 
   // Stores the time at the start of the current 'played' range.
@@ -1267,6 +1416,7 @@ protected:
   };
 
   uint32_t mMuted;
+  SuspendTypes mAudioChannelSuspended;
 
   // True if the media statistics are currently being shown by the builtin
   // video controls
@@ -1282,6 +1432,9 @@ protected:
 
   // True if the sound is being captured.
   bool mAudioCaptured;
+
+  // True if the sound is being captured by the window.
+  bool mAudioCapturedByWindow;
 
   // If TRUE then the media element was actively playing before the currently
   // in progress seeking. If FALSE then the media element is either not seeking
@@ -1354,6 +1507,9 @@ protected:
   // stored in mPreloadURI.
   bool mSuspendedForPreloadNone;
 
+  // True if we've connected mSrcStream to the media element output.
+  bool mSrcStreamIsPlaying;
+
   // True if a same-origin check has been done for the media element and resource.
   bool mMediaSecurityVerified;
 
@@ -1396,11 +1552,17 @@ protected:
   // An agent used to join audio channel service.
   nsCOMPtr<nsIAudioChannelAgent> mAudioChannelAgent;
 
-  nsRefPtr<TextTrackManager> mTextTrackManager;
+  RefPtr<TextTrackManager> mTextTrackManager;
 
-  nsRefPtr<AudioTrackList> mAudioTrackList;
+  RefPtr<AudioTrackList> mAudioTrackList;
 
-  nsRefPtr<VideoTrackList> mVideoTrackList;
+  RefPtr<VideoTrackList> mVideoTrackList;
+
+  nsAutoPtr<MediaStreamTrackListener> mMediaStreamTrackListener;
+
+  // The principal guarding mVideoFrameContainer access when playing a
+  // MediaStream.
+  nsCOMPtr<nsIPrincipal> mSrcStreamVideoPrincipal;
 
   enum ElementInTreeState {
     // The MediaElement is not in the DOM tree now.
@@ -1451,11 +1613,28 @@ public:
     uint32_t mCount;
   };
 private:
-  // Total time an MSE video has spent playing
+  // Total time a video has spent playing.
   TimeDurationAccumulator mPlayTime;
 
-  // Time spent between video load and video playback.
-  TimeDurationAccumulator mJoinLatency;
+  // Indicates if user has interacted with the element.
+  // Used to block autoplay when disabled.
+  bool mHasUserInteraction;
+
+  // True if the first frame has been successfully loaded.
+  bool mFirstFrameLoaded;
+
+  // Media elements also have a default playback start position, which must
+  // initially be set to zero seconds. This time is used to allow the element to
+  // be seeked even before the media is loaded.
+  double mDefaultPlaybackStartPosition;
+
+  // True if the audio track is not silent.
+  bool mIsAudioTrackAudible;
+
+  // True if media element is audible for users.
+  bool mAudible;
+
+  nsAutoCString mMimeType;
 };
 
 } // namespace dom

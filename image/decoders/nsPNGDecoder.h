@@ -8,14 +8,10 @@
 #define mozilla_image_decoders_nsPNGDecoder_h
 
 #include "Decoder.h"
-
-#include "gfxTypes.h"
-
-#include "nsCOMPtr.h"
-
 #include "png.h"
-
 #include "qcms.h"
+#include "StreamingLexer.h"
+#include "SurfacePipe.h"
 
 namespace mozilla {
 namespace image {
@@ -30,10 +26,33 @@ public:
   virtual void WriteInternal(const char* aBuffer, uint32_t aCount) override;
   virtual Telemetry::ID SpeedHistogram() override;
 
-  nsresult CreateFrame(png_uint_32 aXOffset, png_uint_32 aYOffset,
-                       int32_t aWidth, int32_t aHeight,
-                       gfx::SurfaceFormat aFormat);
+private:
+  friend class DecoderFactory;
+  friend class nsICODecoder;
+
+  // Decoders should only be instantiated via DecoderFactory.
+  // XXX(seth): nsICODecoder is temporarily an exception to this rule.
+  explicit nsPNGDecoder(RasterImage* aImage);
+
+  nsresult CreateFrame(gfx::SurfaceFormat aFormat,
+                       const gfx::IntRect& aFrameRect,
+                       bool aIsInterlaced);
   void EndImageFrame();
+
+  enum class TransparencyType
+  {
+    eNone,
+    eAlpha,
+    eFrameRect
+  };
+
+  TransparencyType GetTransparencyType(gfx::SurfaceFormat aFormat,
+                                       const gfx::IntRect& aFrameRect);
+  void PostHasTransparencyIfNeeded(TransparencyType aTransparencyType);
+
+  void PostInvalidationIfNeeded();
+
+  void WriteRow(uint8_t* aRow);
 
   // Check if PNG is valid ICO (32bpp RGBA)
   // http://blogs.msdn.com/b/oldnewthing/archive/2010/10/22/10079192.aspx
@@ -66,13 +85,16 @@ public:
     }
   }
 
-private:
-  friend class DecoderFactory;
-  friend class nsICODecoder;
+  enum class State
+  {
+    PNG_DATA,
+    FINISHED_PNG_DATA
+  };
 
-  // Decoders should only be instantiated via DecoderFactory.
-  // XXX(seth): nsICODecoder is temporarily an exception to this rule.
-  explicit nsPNGDecoder(RasterImage* aImage);
+  LexerTransition<State> ReadPNGData(const char* aData, size_t aLength);
+  LexerTransition<State> FinishedPNGData();
+
+  StreamingLexer<State> mLexer;
 
 public:
   png_structp mPNG;
@@ -85,14 +107,11 @@ public:
 
   gfx::SurfaceFormat format;
 
-  // For metadata decodes.
-  uint8_t mSizeBytes[8]; // Space for width and height, both 4 bytes
-  uint32_t mHeaderBytesRead;
-
   // whether CMS or premultiplied alpha are forced off
   uint32_t mCMSMode;
 
   uint8_t mChannels;
+  uint8_t mPass;
   bool mFrameIsHidden;
   bool mDisablePremultipliedAlpha;
 
@@ -109,6 +128,8 @@ public:
   };
 
   AnimFrameInfo mAnimInfo;
+
+  SurfacePipe mPipe;  /// The SurfacePipe used to write to the output surface.
 
   // The number of frames we've finished.
   uint32_t mNumFrames;

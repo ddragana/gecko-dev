@@ -11,6 +11,7 @@
 #include "mozilla/a11y/Role.h"
 #include "mozilla/a11y/States.h"
 
+#include "nsAutoPtr.h"
 #include "nsIContent.h"
 #include "nsString.h"
 #include "nsTArray.h"
@@ -33,6 +34,7 @@ class AccGroupInfo;
 class ApplicationAccessible;
 class DocAccessible;
 class EmbeddedObjCollector;
+class EventTree;
 class HTMLImageMapAccessible;
 class HTMLLIAccessible;
 class HyperTextAccessible;
@@ -47,6 +49,14 @@ class TableCellAccessible;
 class TextLeafAccessible;
 class XULLabelAccessible;
 class XULTreeAccessible;
+
+#ifdef A11Y_LOG
+namespace logging {
+  typedef const char* (*GetTreePrefix)(void* aData, Accessible*);
+  void Tree(const char* aTitle, const char* aMsgText, DocAccessible* aDoc,
+            GetTreePrefix aPrefixFunc, void* GetTreePrefixData);
+};
+#endif
 
 /**
  * Name type flags.
@@ -160,6 +170,8 @@ public:
     return DOMNode.forget();
   }
   nsIContent* GetContent() const { return mContent; }
+  mozilla::dom::Element* Elm() const
+    { return mContent && mContent->IsElement() ? mContent->AsElement() : nullptr; }
 
   /**
    * Return node type information of DOM node associated with the accessible.
@@ -224,7 +236,7 @@ public:
   /**
    * Retrun ARIA role map if any.
    */
-  nsRoleMapEntry* ARIARoleMap() const { return mRoleMapEntry; }
+  const nsRoleMapEntry* ARIARoleMap() const { return mRoleMapEntry; }
 
   /**
    * Return accessible role specified by ARIA (see constants in
@@ -370,21 +382,8 @@ public:
   /**
    * Set the ARIA role map entry for a new accessible.
    */
-  void SetRoleMapEntry(nsRoleMapEntry* aRoleMapEntry)
+  void SetRoleMapEntry(const nsRoleMapEntry* aRoleMapEntry)
     { mRoleMapEntry = aRoleMapEntry; }
-
-  /**
-   * Cache children if necessary.
-   */
-  void EnsureChildren();
-
-  /**
-   * Set the child count to -1 (unknown) and null out cached child pointers.
-   * Should be called when accessible tree is changed because document has
-   * transformed. Note, if accessible cares about its parent relation chain
-   * itself should override this method to do nothing.
-   */
-  virtual void InvalidateChildren();
 
   /**
    * Append/insert/remove a child. Return true if operation was successful.
@@ -392,7 +391,20 @@ public:
   bool AppendChild(Accessible* aChild)
     { return InsertChildAt(mChildren.Length(), aChild); }
   virtual bool InsertChildAt(uint32_t aIndex, Accessible* aChild);
+
+  bool InsertAfter(Accessible* aNewChild, Accessible* aRefChild)
+  {
+    MOZ_ASSERT(aNewChild, "No new child to insert");
+    return InsertChildAt(aRefChild ? aRefChild->IndexInParent() + 1 : 0,
+                         aNewChild);
+  }
+
   virtual bool RemoveChild(Accessible* aChild);
+
+  /**
+   * Reallocates the child withing its parent.
+   */
+  void MoveChild(uint32_t aNewIndex, Accessible* aChild);
 
   //////////////////////////////////////////////////////////////////////////////
   // Accessible tree traverse methods
@@ -468,12 +480,6 @@ public:
     { return mChildren.ElementAt(aIndex); }
 
   /**
-   * Return true if children were initialized.
-   */
-  inline bool AreChildrenCached() const
-    { return !IsChildrenFlag(eChildrenUninitialized); }
-
-  /**
    * Return true if the accessible is attached to tree.
    */
   bool IsBoundToParent() const { return !!mParent; }
@@ -488,14 +494,10 @@ public:
   virtual nsresult HandleAccEvent(AccEvent* aAccEvent);
 
   /**
-   * Return true if this accessible allows accessible children from anonymous subtree.
-   */
-  virtual bool CanHaveAnonChildren();
-
-  /**
    * Return true if the accessible is an acceptable child.
    */
-  virtual bool IsAcceptableChild(Accessible* aPossibleChild) const { return true; }
+  virtual bool IsAcceptableChild(nsIContent* aEl) const
+    { return true; }
 
   /**
    * Returns text of accessible if accessible has text role otherwise empty
@@ -511,12 +513,6 @@ public:
                             uint32_t aLength = UINT32_MAX);
 
   /**
-   * Assert if child not in parent's cache if the cache was initialized at this
-   * point.
-   */
-  void TestChildCache(Accessible* aCachedChild) const;
-
-  /**
    * Return boundaries in screen coordinates.
    */
   virtual nsIntRect Bounds() const;
@@ -530,11 +526,6 @@ public:
    * Selects the accessible within its container if applicable.
    */
   virtual void SetSelected(bool aSelect);
-
-  /**
-   * Extend selection to this accessible.
-   */
-  void ExtendSelection() { };
 
   /**
    * Select the accessible within its container.
@@ -570,6 +561,8 @@ public:
     return mContent->IsAnyOfHTMLElements(nsGkAtoms::abbr, nsGkAtoms::acronym);
   }
 
+  bool IsAlert() const { return HasGenericType(eAlert); }
+
   bool IsApplication() const { return mType == eApplicationType; }
   ApplicationAccessible* AsApplication();
 
@@ -590,6 +583,7 @@ public:
   HyperTextAccessible* AsHyperText();
 
   bool IsHTMLBr() const { return mType == eHTMLBRType; }
+  bool IsHTMLCaption() const { return mType == eHTMLCaptionType; }
   bool IsHTMLCombobox() const { return mType == eHTMLComboboxType; }
   bool IsHTMLFileInput() const { return mType == eHTMLFileInputType; }
 
@@ -621,6 +615,16 @@ public:
     MOZ_ASSERT(IsProxy());
     return mBits.proxy;
   }
+  uint32_t ProxyInterfaces() const
+  {
+    MOZ_ASSERT(IsProxy());
+    return mInt.mProxyInterfaces;
+  }
+  void SetProxyInterfaces(uint32_t aInterfaces)
+  {
+    MOZ_ASSERT(IsProxy());
+    mInt.mProxyInterfaces = aInterfaces;
+  }
 
   bool IsOuterDoc() const { return mType == eOuterDocType; }
   OuterDocAccessible* AsOuterDoc();
@@ -645,6 +649,8 @@ public:
   bool IsTableRow() const { return HasGenericType(eTableRow); }
 
   bool IsTextField() const { return mType == eHTMLTextFieldType; }
+
+  bool IsText() const { return mGenericTypes & eText; }
 
   bool IsTextLeaf() const { return mType == eTextLeafType; }
   TextLeafAccessible* AsTextLeaf();
@@ -751,6 +757,12 @@ public:
    */
   virtual already_AddRefed<nsIURI> AnchorURIAt(uint32_t aAnchorIndex);
 
+  /**
+   * Returns a text point for the accessible element.
+   */
+  void ToTextPoint(HyperTextAccessible** aContainer, int32_t* aOffset,
+                   bool aIsBefore = true) const;
+
   //////////////////////////////////////////////////////////////////////////////
   // SelectAccessible
 
@@ -851,7 +863,7 @@ public:
   bool IsDefunct() const { return mStateFlags & eIsDefunct; }
 
   /**
-   * Return true if the accessible is no longer in the document.
+   * Return false if the accessible is no longer in the document.
    */
   bool IsInDocument() const { return !(mStateFlags & eIsNotInDocument); }
 
@@ -900,6 +912,31 @@ public:
   }
 
   /**
+   * Get/set repositioned bit indicating that the accessible was moved in
+   * the accessible tree, i.e. the accessible tree structure differs from DOM.
+   */
+  bool IsRelocated() const { return mStateFlags & eRelocated; }
+  void SetRelocated(bool aRelocated)
+  {
+    if (aRelocated)
+      mStateFlags |= eRelocated;
+    else
+      mStateFlags &= ~eRelocated;
+  }
+
+  /**
+   * Return true if the accessible doesn't allow accessible children from XBL
+   * anonymous subtree.
+   */
+  bool NoXBLKids() const { return mStateFlags & eNoXBLKids; }
+
+  /**
+   * Return true if the accessible allows accessible children from subtree of
+   * a DOM element of this accessible.
+   */
+  bool KidsFromDOM() const { return !(mStateFlags & eNoKidsFromDOM); }
+
+  /**
    * Return true if this accessible has a parent whose name depends on this
    * accessible.
    */
@@ -913,8 +950,12 @@ public:
   bool IsARIAHidden() const { return mContextFlags & eARIAHidden; }
   void SetARIAHidden(bool aIsDefined);
 
-protected:
+  /**
+   * Return true if the element is inside an alert.
+   */
+  bool IsInsideAlert() const { return mContextFlags & eInsideAlert; }
 
+protected:
   virtual ~Accessible();
 
   /**
@@ -922,6 +963,12 @@ protected:
    * into account ARIA markup used to specify the name.
    */
   virtual mozilla::a11y::ENameValueFlag NativeName(nsString& aName);
+
+  /**
+   * Return the accessible description provided by native markup. It doesn't take
+   * into account ARIA markup used to specify the description.
+   */
+  virtual void NativeDescription(nsString& aDescription);
 
   /**
    * Return object attributes provided by native markup. It doesn't take into
@@ -938,15 +985,10 @@ protected:
   void LastRelease();
 
   /**
-   * Cache accessible children.
-   */
-  virtual void CacheChildren();
-
-  /**
    * Set accessible parent and index in parent.
    */
-  virtual void BindToParent(Accessible* aParent, uint32_t aIndexInParent);
-  virtual void UnbindFromParent();
+  void BindToParent(Accessible* aParent, uint32_t aIndexInParent);
+  void UnbindFromParent();
 
   /**
    * Return sibling accessible at the given offset.
@@ -955,30 +997,7 @@ protected:
                                          nsresult *aError = nullptr) const;
 
   /**
-   * Flags used to describe the state and type of children.
-   */
-  enum ChildrenFlags {
-    eChildrenUninitialized = 0, // children aren't initialized
-    eMixedChildren = 1 << 0, // text leaf children are presented
-    eEmbeddedChildren = 1 << 1, // all children are embedded objects
-
-    eLastChildrenFlag = eEmbeddedChildren
-  };
-
-  /**
-   * Return true if the children flag is set.
-   */
-  bool IsChildrenFlag(ChildrenFlags aFlag) const
-    { return static_cast<ChildrenFlags>(mChildrenFlags) == aFlag; }
-
-  /**
-   * Set children flag.
-   */
-  void SetChildrenFlag(ChildrenFlags aFlag) { mChildrenFlags = aFlag; }
-
-  /**
    * Flags used to describe the state of this accessible.
-   * @note keep these flags in sync with ChildrenFlags
    */
   enum StateFlags {
     eIsDefunct = 1 << 0, // accessible is defunct
@@ -987,11 +1006,15 @@ protected:
     eNotNodeMapEntry = 1 << 3, // accessible shouldn't be in document node map
     eHasNumericValue = 1 << 4, // accessible has a numeric value
     eGroupInfoDirty = 1 << 5, // accessible needs to update group info
-    eSubtreeMutating = 1 << 6, // subtree is being mutated
+    eKidsMutating = 1 << 6, // subtree is being mutated
     eIgnoreDOMUIEvent = 1 << 7, // don't process DOM UI events for a11y events
     eSurvivingInUpdate = 1 << 8, // parent drops children to recollect them
+    eRelocated = 1 << 9, // accessible was moved in tree
+    eNoXBLKids = 1 << 10, // accessible don't allows XBL children
+    eNoKidsFromDOM = 1 << 11, // accessible doesn't allow children from DOM
+    eHasTextKids = 1 << 12, // accessible have a text leaf in children
 
-    eLastStateFlag = eSurvivingInUpdate
+    eLastStateFlag = eNoKidsFromDOM
   };
 
   /**
@@ -1000,8 +1023,9 @@ protected:
   enum ContextFlags {
     eHasNameDependentParent = 1 << 0, // Parent's name depends on this accessible.
     eARIAHidden = 1 << 1,
+    eInsideAlert = 1 << 2,
 
-    eLastContextFlag = eARIAHidden
+    eLastContextFlag = eInsideAlert
   };
 
 protected:
@@ -1081,54 +1105,45 @@ protected:
    */
   AccGroupInfo* GetGroupInfo();
 
-  /**
-   * Set dirty state of the accessible's group info.
-   */
-  inline void SetDirtyGroupInfo(bool aIsDirty)
-  {
-    if (aIsDirty)
-      mStateFlags |= eGroupInfoDirty;
-    else
-      mStateFlags &= ~eGroupInfoDirty;
-  }
-
-  /**
-   * Flag all children group info as needing to be updated.
-   */
-  void InvalidateChildrenGroupInfo();
-
   // Data Members
   nsCOMPtr<nsIContent> mContent;
   DocAccessible* mDoc;
 
-  nsRefPtr<Accessible> mParent;
-  nsTArray<nsRefPtr<Accessible> > mChildren;
+  Accessible* mParent;
+  nsTArray<Accessible*> mChildren;
   int32_t mIndexInParent;
 
-  static const uint8_t kChildrenFlagsBits = 2;
-  static const uint8_t kStateFlagsBits = 9;
-  static const uint8_t kContextFlagsBits = 2;
+  static const uint8_t kStateFlagsBits = 13;
+  static const uint8_t kContextFlagsBits = 3;
   static const uint8_t kTypeBits = 6;
-  static const uint8_t kGenericTypesBits = 14;
+  static const uint8_t kGenericTypesBits = 16;
 
   /**
-   * Keep in sync with ChildrenFlags, StateFlags, ContextFlags, and AccTypes.
+   * Keep in sync with StateFlags, ContextFlags, and AccTypes.
    */
-  uint32_t mChildrenFlags : kChildrenFlagsBits;
   uint32_t mStateFlags : kStateFlagsBits;
   uint32_t mContextFlags : kContextFlagsBits;
   uint32_t mType : kTypeBits;
   uint32_t mGenericTypes : kGenericTypesBits;
 
   void StaticAsserts() const;
-  void AssertInMutatingSubtree() const;
 
+#ifdef A11Y_LOG
+  friend void logging::Tree(const char* aTitle, const char* aMsgText,
+                            DocAccessible* aDoc,
+                            logging::GetTreePrefix aPrefixFunc,
+                            void* aGetTreePrefixData);
+#endif
   friend class DocAccessible;
   friend class xpcAccessible;
-  friend class AutoTreeMutation;
+  friend class TreeMutation;
 
   nsAutoPtr<mozilla::a11y::EmbeddedObjCollector> mEmbeddedObjCollector;
-  int32_t mIndexOfEmbeddedChild;
+  union {
+    int32_t mIndexOfEmbeddedChild;
+    uint32_t mProxyInterfaces;
+  } mInt;
+
   friend class EmbeddedObjCollector;
 
   union
@@ -1141,7 +1156,7 @@ protected:
   /**
    * Non-null indicates author-supplied role; possibly state & value as well
    */
-  nsRoleMapEntry* mRoleMapEntry;
+  const nsRoleMapEntry* mRoleMapEntry;
 
 private:
   Accessible() = delete;
@@ -1211,35 +1226,6 @@ private:
 
   uint32_t mKey;
   uint32_t mModifierMask;
-};
-
-/**
- * This class makes sure required tasks are done before and after tree
- * mutations. Currently this only includes group info invalidation. You must
- * have an object of this class on the stack when calling methods that mutate
- * the accessible tree.
- */
-class AutoTreeMutation
-{
-public:
-  explicit AutoTreeMutation(Accessible* aRoot, bool aInvalidationRequired = true) :
-    mInvalidationRequired(aInvalidationRequired), mRoot(aRoot)
-  {
-    MOZ_ASSERT(!(mRoot->mStateFlags & Accessible::eSubtreeMutating));
-    mRoot->mStateFlags |= Accessible::eSubtreeMutating;
-  }
-  ~AutoTreeMutation()
-  {
-    if (mInvalidationRequired)
-      mRoot->InvalidateChildrenGroupInfo();
-
-    MOZ_ASSERT(mRoot->mStateFlags & Accessible::eSubtreeMutating);
-    mRoot->mStateFlags &= ~Accessible::eSubtreeMutating;
-  }
-
-  bool mInvalidationRequired;
-private:
-  Accessible* mRoot;
 };
 
 } // namespace a11y

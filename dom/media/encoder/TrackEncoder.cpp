@@ -5,6 +5,7 @@
 #include "TrackEncoder.h"
 #include "AudioChannelFormat.h"
 #include "MediaStreamGraph.h"
+#include "MediaStreamListener.h"
 #include "mozilla/Logging.h"
 #include "VideoUtils.h"
 
@@ -18,7 +19,7 @@
 
 namespace mozilla {
 
-PRLogModuleInfo* gTrackEncoderLog;
+LazyLogModule gTrackEncoderLog("TrackEncoder");
 #define TRACK_LOG(type, msg) MOZ_LOG(gTrackEncoderLog, type, msg)
 
 static const int DEFAULT_CHANNELS = 1;
@@ -26,6 +27,8 @@ static const int DEFAULT_SAMPLING_RATE = 16000;
 static const int DEFAULT_FRAME_WIDTH = 640;
 static const int DEFAULT_FRAME_HEIGHT = 480;
 static const int DEFAULT_TRACK_RATE = USECS_PER_S;
+// 30 seconds threshold if the encoder still can't not be initialized.
+static const int INIT_FAILED_DURATION = 30;
 
 TrackEncoder::TrackEncoder()
   : mReentrantMonitor("media.TrackEncoder")
@@ -34,11 +37,16 @@ TrackEncoder::TrackEncoder()
   , mInitialized(false)
   , mEndOfStream(false)
   , mCanceled(false)
-  , mAudioInitCounter(0)
-  , mVideoInitCounter(0)
+  , mInitCounter(0)
+  , mNotInitDuration(0)
 {
-  if (!gTrackEncoderLog) {
-    gTrackEncoderLog = PR_NewLogModule("TrackEncoder");
+}
+
+void TrackEncoder::NotifyEvent(MediaStreamGraph* aGraph,
+                 MediaStreamGraphEvent event)
+{
+  if (event == MediaStreamGraphEvent::EVENT_REMOVED) {
+    NotifyEndOfStream();
   }
 }
 
@@ -57,8 +65,8 @@ AudioTrackEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
 
   // Check and initialize parameters for codec encoder.
   if (!mInitialized) {
-    mAudioInitCounter++;
-    TRACK_LOG(LogLevel::Debug, ("Init the audio encoder %d times", mAudioInitCounter));
+    mInitCounter++;
+    TRACK_LOG(LogLevel::Debug, ("Init the audio encoder %d times", mInitCounter));
     AudioSegment::ChunkIterator iter(const_cast<AudioSegment&>(audio));
     while (!iter.IsEnded()) {
       AudioChunk chunk = *iter;
@@ -76,6 +84,15 @@ AudioTrackEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
 
       iter.Next();
     }
+
+    mNotInitDuration += aQueuedMedia.GetDuration();
+    if (!mInitialized &&
+        (mNotInitDuration / aGraph->GraphRate() > INIT_FAILED_DURATION) &&
+        mInitCounter > 1) {
+      LOG("[AudioTrackEncoder]: Initialize failed for 30s.");
+      NotifyEndOfStream();
+      return;
+    }
   }
 
   // Append and consume this raw segment.
@@ -83,7 +100,7 @@ AudioTrackEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
 
 
   // The stream has stopped and reached the end of track.
-  if (aTrackEvents == MediaStreamListener::TRACK_EVENT_ENDED) {
+  if (aTrackEvents == TrackEventCommand::TRACK_EVENT_ENDED) {
     LOG("[AudioTrackEncoder]: Receive TRACK_EVENT_ENDED .");
     NotifyEndOfStream();
   }
@@ -123,9 +140,6 @@ AudioTrackEncoder::AppendAudioSegment(const AudioSegment& aSegment)
   return NS_OK;
 }
 
-static const int AUDIO_PROCESSING_FRAMES = 640; /* > 10ms of 48KHz audio */
-static const uint8_t gZeroChannel[MAX_AUDIO_SAMPLE_SIZE*AUDIO_PROCESSING_FRAMES] = {0};
-
 /*static*/
 void
 AudioTrackEncoder::InterleaveTrackData(AudioChunk& aChunk,
@@ -133,19 +147,29 @@ AudioTrackEncoder::InterleaveTrackData(AudioChunk& aChunk,
                                        uint32_t aOutputChannels,
                                        AudioDataValue* aOutput)
 {
-  if (aChunk.mChannelData.Length() < aOutputChannels) {
-    // Up-mix. This might make the mChannelData have more than aChannels.
-    AudioChannelsUpMix(&aChunk.mChannelData, aOutputChannels, gZeroChannel);
-  }
-
-  if (aChunk.mChannelData.Length() > aOutputChannels) {
-    DownmixAndInterleave(aChunk.mChannelData, aChunk.mBufferFormat, aDuration,
-                         aChunk.mVolume, aOutputChannels, aOutput);
-  } else {
-    InterleaveAndConvertBuffer(aChunk.mChannelData.Elements(),
-                               aChunk.mBufferFormat, aDuration, aChunk.mVolume,
-                               aOutputChannels, aOutput);
-  }
+  switch(aChunk.mBufferFormat) {
+    case AUDIO_FORMAT_S16: {
+      AutoTArray<const int16_t*, 2> array;
+      array.SetLength(aOutputChannels);
+      for (uint32_t i = 0; i < array.Length(); i++) {
+        array[i] = static_cast<const int16_t*>(aChunk.mChannelData[i]);
+      }
+      InterleaveTrackData(array, aDuration, aOutputChannels, aOutput, aChunk.mVolume);
+      break;
+    }
+    case AUDIO_FORMAT_FLOAT32: {
+      AutoTArray<const float*, 2> array;
+      array.SetLength(aOutputChannels);
+      for (uint32_t i = 0; i < array.Length(); i++) {
+        array[i] = static_cast<const float*>(aChunk.mChannelData[i]);
+      }
+      InterleaveTrackData(array, aDuration, aOutputChannels, aOutput, aChunk.mVolume);
+      break;
+   }
+   case AUDIO_FORMAT_SILENCE: {
+      MOZ_ASSERT(false, "To implement.");
+    }
+  };
 }
 
 /*static*/
@@ -183,14 +207,14 @@ VideoTrackEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
 
    // Check and initialize parameters for codec encoder.
   if (!mInitialized) {
-    mVideoInitCounter++;
-    TRACK_LOG(LogLevel::Debug, ("Init the video encoder %d times", mVideoInitCounter));
+    mInitCounter++;
+    TRACK_LOG(LogLevel::Debug, ("Init the video encoder %d times", mInitCounter));
     VideoSegment::ChunkIterator iter(const_cast<VideoSegment&>(video));
     while (!iter.IsEnded()) {
       VideoChunk chunk = *iter;
       if (!chunk.IsNull()) {
         gfx::IntSize imgsize = chunk.mFrame.GetImage()->GetSize();
-        gfxIntSize intrinsicSize = chunk.mFrame.GetIntrinsicSize();
+        gfx::IntSize intrinsicSize = chunk.mFrame.GetIntrinsicSize();
         nsresult rv = Init(imgsize.width, imgsize.height,
                            intrinsicSize.width, intrinsicSize.height,
                            aGraph->GraphRate());
@@ -203,12 +227,21 @@ VideoTrackEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
 
       iter.Next();
     }
+
+    mNotInitDuration += aQueuedMedia.GetDuration();
+    if (!mInitialized &&
+        (mNotInitDuration / aGraph->GraphRate() > INIT_FAILED_DURATION) &&
+        mInitCounter > 1) {
+      LOG("[VideoTrackEncoder]: Initialize failed for 30s.");
+      NotifyEndOfStream();
+      return;
+    }
   }
 
   AppendVideoSegment(video);
 
   // The stream has stopped and reached the end of track.
-  if (aTrackEvents == MediaStreamListener::TRACK_EVENT_ENDED) {
+  if (aTrackEvents == TrackEventCommand::TRACK_EVENT_ENDED) {
     LOG("[VideoTrackEncoder]: Receive TRACK_EVENT_ENDED .");
     NotifyEndOfStream();
   }
@@ -225,11 +258,30 @@ VideoTrackEncoder::AppendVideoSegment(const VideoSegment& aSegment)
   VideoSegment::ChunkIterator iter(const_cast<VideoSegment&>(aSegment));
   while (!iter.IsEnded()) {
     VideoChunk chunk = *iter;
-    nsRefPtr<layers::Image> image = chunk.mFrame.GetImage();
-    mRawSegment.AppendFrame(image.forget(),
-                            chunk.GetDuration(),
-                            chunk.mFrame.GetIntrinsicSize(),
-                            chunk.mFrame.GetForceBlack());
+    mTotalFrameDuration += chunk.GetDuration();
+    mLastFrameDuration += chunk.GetDuration();
+    // Send only the unique video frames for encoding.
+    // Or if we got the same video chunks more than 1 seconds,
+    // force to send into encoder.
+    if ((mLastFrame != chunk.mFrame) ||
+        (mLastFrameDuration >= mTrackRate)) {
+      RefPtr<layers::Image> image = chunk.mFrame.GetImage();
+      // Because we may get chunks with a null image (due to input blocking),
+      // accumulate duration and give it to the next frame that arrives.
+      // Canonically incorrect - the duration should go to the previous frame
+      // - but that would require delaying until the next frame arrives.
+      // Best would be to do like OMXEncoder and pass an effective timestamp
+      // in with each frame.
+      if (image) {
+        mRawSegment.AppendFrame(image.forget(),
+                                mLastFrameDuration,
+                                chunk.mFrame.GetIntrinsicSize(),
+                                PRINCIPAL_HANDLE_NONE,
+                                chunk.mFrame.GetForceBlack());
+        mLastFrameDuration = 0;
+      }
+    }
+    mLastFrame.TakeFrom(&chunk.mFrame);
     iter.Next();
   }
 

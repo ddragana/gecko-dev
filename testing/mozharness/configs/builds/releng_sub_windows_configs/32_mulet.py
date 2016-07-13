@@ -10,6 +10,8 @@ config = {
         'sendchange',
     ],
     'stage_platform': 'win32-mulet',
+    'publish_nightly_en_US_routes': False,
+    'build_type': 'mulet-opt',
     'stage_product': 'b2g',
     'tooltool_manifest_src': "b2g/dev/config/tooltool-manifests/win32/releng.manifest",
     'enable_signing': False,
@@ -23,14 +25,15 @@ config = {
         'MOZ_AUTOMATION': '1',
         'MOZ_CRASHREPORTER_NO_REPORT': '1',
         'MOZ_OBJDIR': 'obj-firefox',
-        'PATH': 'C:/mozilla-build/nsis-3.0b1;C:/mozilla-build/nsis-2.46u;C:/mozilla-build/python27;'
+        'PATH': 'C:/mozilla-build/nsis-3.0b1;C:/mozilla-build/python27;'
                 'C:/mozilla-build/buildbotve/scripts;'
                 '%s' % (os.environ.get('path')),
         'PROPERTIES_FILE': os.path.join(os.getcwd(), 'buildprops.json'),
         'TINDERBOX_OUTPUT': '1',
         'XPCOM_DEBUG_BREAK': 'stack-and-abort',
+        'TOOLTOOL_CACHE': '/c/builds/tooltool_cache',
+        'TOOLTOOL_HOME': '/c/builds',
     },
     'src_mozconfig': 'b2g/dev/config/mozconfigs/win32/mulet',
-    'purge_minsize': 9,
     #######################
 }

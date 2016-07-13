@@ -535,7 +535,7 @@ TEST(IntervalSet, TimeRangesSeconds)
   i1.Add(media::TimeInterval(media::TimeUnit::FromSeconds(45), media::TimeUnit::FromSeconds(50)));
 
   media::TimeIntervals i(i0 + i1);
-  nsRefPtr<dom::TimeRanges> tr = new dom::TimeRanges();
+  RefPtr<dom::TimeRanges> tr = new dom::TimeRanges();
   i.ToTimeRanges(tr);
   EXPECT_EQ(tr->Length(), i.Length());
   for (dom::TimeRanges::index_type index = 0; index < tr->Length(); index++) {
@@ -549,7 +549,7 @@ TEST(IntervalSet, TimeRangesSeconds)
 
 static void CheckTimeRanges(dom::TimeRanges* aTr, const media::TimeIntervals& aTi)
 {
-  nsRefPtr<dom::TimeRanges> tr = new dom::TimeRanges;
+  RefPtr<dom::TimeRanges> tr = new dom::TimeRanges;
   tr->Union(aTr, 0); // This will normalize the time range.
   EXPECT_EQ(tr->Length(), aTi.Length());
   for (dom::TimeRanges::index_type i = 0; i < tr->Length(); i++) {
@@ -563,7 +563,7 @@ static void CheckTimeRanges(dom::TimeRanges* aTr, const media::TimeIntervals& aT
 
 TEST(IntervalSet, TimeRangesConversion)
 {
-  nsRefPtr<dom::TimeRanges> tr = new dom::TimeRanges();
+  RefPtr<dom::TimeRanges> tr = new dom::TimeRanges();
   tr->Add(20, 25);
   tr->Add(40, 60);
   tr->Add(5, 10);
@@ -610,7 +610,7 @@ TEST(IntervalSet, TimeRangesMicroseconds)
   i1.Add(media::TimeInterval(media::Microseconds(45), media::Microseconds(50)));
 
   media::TimeIntervals i(i0 + i1);
-  nsRefPtr<dom::TimeRanges> tr = new dom::TimeRanges();
+  RefPtr<dom::TimeRanges> tr = new dom::TimeRanges();
   i.ToTimeRanges(tr);
   EXPECT_EQ(tr->Length(), i.Length());
   for (dom::TimeRanges::index_type index = 0; index < tr->Length(); index++) {
@@ -636,7 +636,7 @@ TEST(IntervalSet, TimeRangesMicroseconds)
   tr->Add(0, 30);
   tr->Add(50, std::numeric_limits<double>::infinity());
   media::TimeIntervals i_oo{media::TimeIntervals::FromTimeRanges(tr)};
-  nsRefPtr<dom::TimeRanges> tr2 = new dom::TimeRanges();
+  RefPtr<dom::TimeRanges> tr2 = new dom::TimeRanges();
   i_oo.ToTimeRanges(tr2);
   EXPECT_EQ(tr->Length(), tr2->Length());
   for (dom::TimeRanges::index_type index = 0; index < tr->Length(); index++) {
@@ -776,4 +776,46 @@ TEST(IntervalSet, Substraction)
   EXPECT_EQ(1u, i0.Length());
   EXPECT_EQ(5, i0[0].mStart);
   EXPECT_EQ(8, i0[0].mEnd);
+
+  i0 = IntIntervals();
+  i0 += IntInterval(0, 10);
+  IntIntervals i2;
+  i2 += IntInterval(4, 6);
+  i0 -= i2;
+  EXPECT_EQ(2u, i0.Length());
+  EXPECT_EQ(0, i0[0].mStart);
+  EXPECT_EQ(4, i0[0].mEnd);
+  EXPECT_EQ(6, i0[1].mStart);
+  EXPECT_EQ(10, i0[1].mEnd);
+
+  i0 = IntIntervals();
+  i0 += IntInterval(0, 1);
+  i0 += IntInterval(3, 10);
+  EXPECT_EQ(2u, i0.Length());
+  // This fuzz should collapse i0 into [0,10).
+  i0.SetFuzz(1);
+  EXPECT_EQ(1u, i0.Length());
+  EXPECT_EQ(1, i0[0].mFuzz);
+  i2 = IntInterval(4, 6);
+  i0 -= i2;
+  EXPECT_EQ(2u, i0.Length());
+  EXPECT_EQ(0, i0[0].mStart);
+  EXPECT_EQ(4, i0[0].mEnd);
+  EXPECT_EQ(6, i0[1].mStart);
+  EXPECT_EQ(10, i0[1].mEnd);
+  EXPECT_EQ(1, i0[0].mFuzz);
+  EXPECT_EQ(1, i0[1].mFuzz);
+
+  i0 = IntIntervals();
+  i0 += IntInterval(0, 10);
+  // [4,6) with fuzz 1 used to fail because the complementary interval set
+  // [0,4)+[6,10) would collapse into [0,10).
+  i2 = IntInterval(4, 6);
+  i2.SetFuzz(1);
+  i0 -= i2;
+  EXPECT_EQ(2u, i0.Length());
+  EXPECT_EQ(0, i0[0].mStart);
+  EXPECT_EQ(4, i0[0].mEnd);
+  EXPECT_EQ(6, i0[1].mStart);
+  EXPECT_EQ(10, i0[1].mEnd);
 }

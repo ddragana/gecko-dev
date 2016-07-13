@@ -20,9 +20,9 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MobileConnectionArray)
 
-  explicit MobileConnectionArray(nsPIDOMWindow* aWindow);
+  explicit MobileConnectionArray(nsPIDOMWindowInner* aWindow);
 
-  nsPIDOMWindow*
+  nsPIDOMWindowInner*
   GetParentObject() const;
 
   // WrapperCache
@@ -44,8 +44,8 @@ private:
 
   bool mLengthInitialized;
 
-  nsCOMPtr<nsPIDOMWindow> mWindow;
-  nsTArray<nsRefPtr<MobileConnection>> mMobileConnections;
+  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsTArray<RefPtr<MobileConnection>> mMobileConnections;
 };
 
 } // namespace dom

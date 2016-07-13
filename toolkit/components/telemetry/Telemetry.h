@@ -12,9 +12,20 @@
 #include "nsTArray.h"
 #include "nsStringGlue.h"
 
-namespace base {
-  class Histogram;
-} // namespace base
+#include "mozilla/TelemetryHistogramEnums.h"
+#include "mozilla/TelemetryScalarEnums.h"
+
+/******************************************************************************
+ * This implements the Telemetry system.
+ * It allows recording into histograms as well some more specialized data
+ * points and gives access to the data.
+ *
+ * For documentation on how to add and use new Telemetry probes, see:
+ * https://developer.mozilla.org/en-US/docs/Mozilla/Performance/Adding_a_new_Telemetry_probe
+ *
+ * For more general information on Telemetry see:
+ * https://wiki.mozilla.org/Telemetry
+ *****************************************************************************/
 
 namespace mozilla {
 namespace HangMonitor {
@@ -22,12 +33,17 @@ namespace HangMonitor {
 } // namespace HangMonitor
 namespace Telemetry {
 
-#include "mozilla/TelemetryHistogramEnums.h"
-
 enum TimerResolution {
   Millisecond,
   Microsecond
 };
+
+/**
+ * Create and destroy the underlying base::StatisticsRecorder singleton.
+ * Creation has to be done very early in the startup sequence.
+ */
+void CreateStatisticsRecorder();
+void DestroyStatisticsRecorder();
 
 /**
  * Initialize the Telemetry service on the main thread at startup.
@@ -63,6 +79,18 @@ void Accumulate(ID id, const nsCString& key, uint32_t sample = 1);
 void Accumulate(const char* name, uint32_t sample);
 
 /**
+ * Adds a sample to a histogram defined in TelemetryHistograms.h.
+ * This function is here to support telemetry measurements from Java,
+ * where we have only names and not numeric IDs.  You should almost
+ * certainly be using the by-enum-id version instead of this one.
+ *
+ * @param name - histogram name
+ * @param key - the string key
+ * @param sample - sample - (optional) value to record, defaults to 1.
+ */
+void Accumulate(const char *name, const nsCString& key, uint32_t sample = 1);
+
+/**
  * Adds time delta in milliseconds to a histogram defined in TelemetryHistograms.h
  *
  * @param id - histogram id
@@ -72,14 +100,23 @@ void Accumulate(const char* name, uint32_t sample);
 void AccumulateTimeDelta(ID id, TimeStamp start, TimeStamp end = TimeStamp::Now());
 
 /**
- * Return a raw Histogram for direct manipulation for users who can not use Accumulate().
+ * This clears the data for a histogram in TelemetryHistograms.h.
+ *
+ * @param id - histogram id
  */
-base::Histogram* GetHistogramById(ID id);
+void ClearHistogram(ID id);
 
 /**
- * Return a raw histogram for keyed histograms.
+ * Enable/disable recording for this histogram at runtime.
+ * Recording is enabled by default, unless listed at kRecordingInitiallyDisabledIDs[].
+ * id must be a valid telemetry enum, otherwise an assertion is triggered.
+ *
+ * @param id - histogram id
+ * @param enabled - whether or not to enable recording from now on.
  */
-base::Histogram* GetKeyedHistogramById(ID id, const nsAString&);
+void SetHistogramRecordingEnabled(ID id, bool enabled);
+
+const char* GetHistogramName(ID id);
 
 /**
  * Those wrappers are needed because the VS versions we use do not support free
@@ -116,7 +153,7 @@ struct AccumulateDelta_impl<Microsecond>
 
 
 template<ID id, TimerResolution res = Millisecond>
-class AutoTimer {
+class MOZ_RAII AutoTimer {
 public:
   explicit AutoTimer(TimeStamp aStart = TimeStamp::Now() MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
      : start(aStart)
@@ -146,7 +183,7 @@ private:
 };
 
 template<ID id>
-class AutoCounter {
+class MOZ_RAII AutoCounter {
 public:
   explicit AutoCounter(uint32_t counterStart = 0 MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     : counter(counterStart)
@@ -196,6 +233,18 @@ void RecordSlowSQLStatement(const nsACString &statement,
                             uint32_t delay);
 
 /**
+ * Record Webrtc ICE candidate type combinations in a 17bit bitmask
+ *
+ * @param iceCandidateBitmask - the bitmask representing local and remote ICE
+ *                              candidate types present for the connection
+ * @param success - did the peer connection connected
+ * @param loop - was this a Firefox Hello AKA Loop call
+ */
+void
+RecordWebrtcIceCandidates(const uint32_t iceCandidateBitmask,
+                          const bool success,
+                          const bool loop);
+/**
  * Initialize I/O Reporting
  * Initially this only records I/O for files in the binary directory.
  *
@@ -237,7 +286,7 @@ class ProcessedStack;
  * @param aFirefoxUptime - Firefox uptime at the time of the hang, in minutes
  * @param aAnnotations - Any annotations to be added to the report
  */
-#if defined(MOZ_ENABLE_PROFILER_SPS) && !defined(MOZILLA_XPCOMRT_API)
+#if defined(MOZ_ENABLE_PROFILER_SPS)
 void RecordChromeHang(uint32_t aDuration,
                       ProcessedStack &aStack,
                       int32_t aSystemUptime,
@@ -266,6 +315,40 @@ void RecordThreadHangStats(ThreadHangStats& aStats);
  * @param aProfileDir The profile directory whose lock attempt failed
  */
 void WriteFailedProfileLock(nsIFile* aProfileDir);
+
+/**
+ * Adds the value to the given scalar.
+ *
+ * @param aId The scalar enum id.
+ * @param aValue The unsigned value to add to the scalar.
+ */
+void ScalarAdd(mozilla::Telemetry::ScalarID aId, uint32_t aValue);
+
+/**
+ * Sets the scalar to the given value.
+ *
+ * @param aId The scalar enum id.
+ * @param aValue The numeric, unsigned value to set the scalar to.
+ */
+void ScalarSet(mozilla::Telemetry::ScalarID aId, uint32_t aValue);
+
+/**
+ * Sets the scalar to the given value.
+ *
+ * @param aId The scalar enum id.
+ * @param aValue The string value to set the scalar to, truncated to
+ *        50 characters if exceeding that length.
+ */
+void ScalarSet(mozilla::Telemetry::ScalarID aId, const nsAString& aValue);
+
+/**
+ * Sets the scalar to the maximum of the current and the passed value.
+ *
+ * @param aId The scalar enum id.
+ * @param aValue The unsigned value the scalar is set to if its greater
+ *        than the current value.
+ */
+void ScalarSetMaximum(mozilla::Telemetry::ScalarID aId, uint32_t aValue);
 
 } // namespace Telemetry
 } // namespace mozilla

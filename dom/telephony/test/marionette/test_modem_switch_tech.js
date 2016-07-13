@@ -4,7 +4,7 @@
 MARIONETTE_TIMEOUT = 60000;
 MARIONETTE_HEAD_JS = "head.js";
 
-let settings = [
+var settings = [
   // "gsm/wcdma"
   {tech: "gsm",   mask: "gsm/wcdma"},
   {tech: "wcdma", mask: "gsm/wcdma"},
@@ -39,7 +39,7 @@ let settings = [
 startTest(function() {
 
   let promise = settings.reduce((aPromise, aSetting) => {
-    return aPromise.then(() => gChangeModemTech(aSetting.tech, aSetting.mask));
+    return aPromise.then(() => Modem.changeTech(aSetting.tech, aSetting.mask));
   }, Promise.resolve());
 
   return promise
@@ -47,7 +47,7 @@ startTest(function() {
     .catch(error => ok(false, "Promise reject: " + error))
 
     // Switch to the default modem tech
-    .then(() => gChangeModemTech("wcdma", "gsm/wcdma"))
+    .then(() => Modem.changeTech("wcdma", "gsm/wcdma"))
     .catch(error => ok(false, "Fetal Error: Promise reject: " + error))
 
     .then(finish);

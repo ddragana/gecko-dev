@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
 #include "nsCOMPtr.h"                   // for nsCOMPtr, do_QueryInterface, etc
 #include "nsCRT.h"                      // for nsCRT
 #include "nsComposerCommands.h"         // for nsSetDocumentOptionsCommand, etc
@@ -87,7 +86,7 @@ nsSetDocumentOptionsCommand::DoCommandParams(const char *aCommandName,
   nsCOMPtr<nsIEditor> editor = do_QueryInterface(refCon);
   NS_ENSURE_TRUE(editor, NS_ERROR_INVALID_ARG);
 
-  nsRefPtr<nsPresContext> presContext;
+  RefPtr<nsPresContext> presContext;
   nsresult rv = GetPresContextFromEditor(editor, getter_AddRefs(presContext));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(presContext, NS_ERROR_FAILURE);
@@ -134,7 +133,7 @@ nsSetDocumentOptionsCommand::GetCommandStateParams(const char *aCommandName,
   NS_ENSURE_SUCCESS(rv, rv);
 
   // get pres context
-  nsRefPtr<nsPresContext> presContext;
+  RefPtr<nsPresContext> presContext;
   rv = GetPresContextFromEditor(editor, getter_AddRefs(presContext));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(presContext, NS_ERROR_FAILURE);
@@ -400,7 +399,7 @@ nsSetDocumentStateCommand::GetCommandStateParams(const char *aCommandName,
  *  4. In the appropriate location in editorSession, editor, or commands code,
  *     trigger the notification of this observer by something like:
  *
- *  nsCOMPtr<nsICommandManager> commandManager = do_GetInterface(mDocShell);
+ *  nsCOMPtr<nsICommandManager> commandManager = mDocShell->GetCommandManager();
  *  nsCOMPtr<nsPICommandUpdater> commandUpdater = do_QueryInterface(commandManager);
  *  NS_ENSURE_TRUE(commandUpdater, NS_ERROR_FAILURE);
  *    commandUpdater->CommandStatusChanged(obs_documentCreated);

@@ -6,11 +6,13 @@ def test(mod, path, entity = None):
   import re
   # ignore anything but Firefox
   if mod not in ("netwerk", "dom", "toolkit", "security/manager",
-                 "browser", "webapprt",
+                 "devtools/client", "devtools/shared",
+                 "browser",
                  "extensions/reporter", "extensions/spellcheck",
                  "other-licenses/branding/firefox",
                  "browser/branding/official",
-                 "services/sync"):
+                 "services/sync",
+                 "browser/extensions/pocket"):
     return "ignore"
   if mod not in ("browser", "extensions/spellcheck"):
     # we only have exceptions for browser and extensions/spellcheck

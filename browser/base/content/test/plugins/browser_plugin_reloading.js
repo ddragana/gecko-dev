@@ -1,6 +1,6 @@
-let gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
-let gPluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
-let gTestBrowser = null;
+var gTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
+var gPluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
+var gTestBrowser = null;
 
 function updateAllTestPlugins(aState) {
   setTestPluginEnabledState(aState, "Test Plug-in");
@@ -65,19 +65,19 @@ add_task(function* () {
   is(pluginInfo.displayedType, Ci.nsIObjectLoadingContent.TYPE_PLUGIN, "Test 3, plugin should have started");
   ok(pluginInfo.activated, "Test 4, plugin node should not be activated");
 
-  let result = yield ContentTask.spawn(gTestBrowser, {}, function* () {
+  yield ContentTask.spawn(gTestBrowser, null, function* () {
     let plugin = content.document.getElementById("test");
     let npobj1 = Components.utils.waiveXrays(plugin).getObjectValue();
     plugin.src = plugin.src;
     let pluginsDiffer = false;
-     try {
-       Components.utils.waiveXrays(plugin).checkObjectValue(npobj1);
-     } catch (e) {
-       pluginsDiffer = true;
-     }
-     return pluginsDiffer;
+    try {
+      Components.utils.waiveXrays(plugin).checkObjectValue(npobj1);
+    } catch (e) {
+      pluginsDiffer = true;
+    }
+
+     Assert.ok(pluginsDiffer, "Test 5, plugins differ.");
   });
-  ok(result, "Test 5, plugins differ.");
 
   pluginInfo = yield promiseForPluginInfo("test");
   ok(pluginInfo.activated, "Test 6, Plugin should have retained activated state.");

@@ -178,7 +178,7 @@ GMPVideoEncoderChild::RecvEncodingComplete()
   }
 
   if (!mVideoEncoder) {
-    unused << Send__delete__(this);
+    Unused << Send__delete__(this);
     return false;
   }
 
@@ -189,7 +189,7 @@ GMPVideoEncoderChild::RecvEncodingComplete()
 
   mPlugin = nullptr;
 
-  unused << Send__delete__(this);
+  Unused << Send__delete__(this);
 
   return true;
 }
@@ -207,8 +207,8 @@ GMPVideoEncoderChild::Alloc(size_t aSize,
   rv = CallNeedShmem(aSize, aMem);
   --mNeedShmemIntrCount;
   if (mPendingEncodeComplete) {
-    auto t = NewRunnableMethod(this, &GMPVideoEncoderChild::RecvEncodingComplete);
-    mPlugin->GMPMessageLoop()->PostTask(FROM_HERE, t);
+    mPlugin->GMPMessageLoop()->PostTask(
+      NewRunnableMethod(this, &GMPVideoEncoderChild::RecvEncodingComplete));
   }
 #else
 #ifdef GMP_SAFE_SHMEM

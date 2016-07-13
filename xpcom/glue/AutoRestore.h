@@ -27,7 +27,7 @@ namespace mozilla {
  *   }
  */
 template<class T>
-class MOZ_STACK_CLASS AutoRestore
+class MOZ_RAII AutoRestore
 {
 private:
   T& mLocation;
@@ -43,6 +43,10 @@ public:
   ~AutoRestore()
   {
     mLocation = mValue;
+  }
+  T SavedValue() const
+  {
+    return mValue;
   }
 };
 

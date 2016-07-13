@@ -7,8 +7,8 @@
 #define MOZILLA_GFX_BASEPOINT_H_
 
 #include <cmath>
+#include <ostream>
 #include "mozilla/Attributes.h"
-#include "mozilla/ToString.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/TypeTraits.h"
 
@@ -22,7 +22,12 @@ namespace gfx {
  */
 template <class T, class Sub, class Coord = T>
 struct BasePoint {
-  T x, y;
+  union {
+    struct {
+      T x, y;
+    };
+    T components[2];
+  };
 
   // Constructors
   MOZ_CONSTEXPR BasePoint() : x(0), y(0) {}
@@ -69,8 +74,16 @@ struct BasePoint {
     return Sub(-x, -y);
   }
 
+  T DotProduct(const Sub& aPoint) const {
+      return x * aPoint.x + y * aPoint.y;
+  }
+
   T Length() const {
     return hypot(x, y);
+  }
+
+  T LengthSquare() const {
+    return x * x + y * y;
   }
 
   // Round() is *not* rounding to nearest integer if the values are negative.

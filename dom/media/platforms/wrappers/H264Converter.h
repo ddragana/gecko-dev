@@ -22,39 +22,50 @@ class H264Converter : public MediaDataDecoder {
 public:
 
   H264Converter(PlatformDecoderModule* aPDM,
-                const VideoInfo& aConfig,
-                layers::LayersBackend aLayersBackend,
-                layers::ImageContainer* aImageContainer,
-                FlushableTaskQueue* aVideoTaskQueue,
-                MediaDataDecoderCallback* aCallback);
+                const CreateDecoderParams& aParams);
   virtual ~H264Converter();
 
-  virtual nsresult Init() override;
-  virtual nsresult Input(MediaRawData* aSample) override;
-  virtual nsresult Flush() override;
-  virtual nsresult Drain() override;
-  virtual nsresult Shutdown() override;
-  virtual bool IsHardwareAccelerated() const override;
+  RefPtr<InitPromise> Init() override;
+  nsresult Input(MediaRawData* aSample) override;
+  nsresult Flush() override;
+  nsresult Drain() override;
+  nsresult Shutdown() override;
+  bool IsHardwareAccelerated(nsACString& aFailureReason) const override;
+  const char* GetDescriptionName() const override
+  {
+    if (mDecoder) {
+      return mDecoder->GetDescriptionName();
+    }
+    return "H264Converter decoder (pending)";
+  }
 
   // Return true if mimetype is H.264.
   static bool IsH264(const TrackInfo& aConfig);
+  nsresult GetLastError() const { return mLastError; }
 
 private:
   // Will create the required MediaDataDecoder if need AVCC and we have a SPS NAL.
   // Returns NS_ERROR_FAILURE if error is permanent and can't be recovered and
   // will set mError accordingly.
-  nsresult CreateDecoder();
+  nsresult CreateDecoder(DecoderDoctorDiagnostics* aDiagnostics);
   nsresult CreateDecoderAndInit(MediaRawData* aSample);
   nsresult CheckForSPSChange(MediaRawData* aSample);
   void UpdateConfigFromExtraData(MediaByteBuffer* aExtraData);
 
-  nsRefPtr<PlatformDecoderModule> mPDM;
+  void OnDecoderInitDone(const TrackType aTrackType);
+  void OnDecoderInitFailed(MediaDataDecoder::DecoderFailureReason aReason);
+
+  RefPtr<PlatformDecoderModule> mPDM;
+  VideoInfo mOriginalConfig;
   VideoInfo mCurrentConfig;
   layers::LayersBackend mLayersBackend;
-  nsRefPtr<layers::ImageContainer> mImageContainer;
-  nsRefPtr<FlushableTaskQueue> mVideoTaskQueue;
+  RefPtr<layers::ImageContainer> mImageContainer;
+  const RefPtr<TaskQueue> mTaskQueue;
+  nsTArray<RefPtr<MediaRawData>> mMediaRawSamples;
   MediaDataDecoderCallback* mCallback;
-  nsRefPtr<MediaDataDecoder> mDecoder;
+  RefPtr<MediaDataDecoder> mDecoder;
+  MozPromiseRequestHolder<InitPromise> mInitPromiseRequest;
+  RefPtr<GMPCrashHelper> mGMPCrashHelper;
   bool mNeedAVCC;
   nsresult mLastError;
 };

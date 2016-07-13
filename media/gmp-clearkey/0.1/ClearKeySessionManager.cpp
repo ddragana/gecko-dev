@@ -24,11 +24,6 @@
 #include "ClearKeyStorage.h"
 #include "ClearKeyPersistence.h"
 #include "gmp-task-utils.h"
-#if defined(ENABLE_WMF)
-#include "WMFUtils.h"
-#include <versionhelpers.h>
-#endif
-
 #include <assert.h>
 
 using namespace std;
@@ -50,43 +45,11 @@ ClearKeySessionManager::~ClearKeySessionManager()
   CK_LOGD("ClearKeySessionManager dtor %p", this);
 }
 
-static bool
-ShouldBeAbleToDecode()
-{
-#if !defined(ENABLE_WMF)
-  return false;
-#else
-  return IsWindowsVistaOrGreater();
-#endif
-}
-
-static bool
-CanDecode()
-{
-  return
-#if defined(ENABLE_WMF)
-    wmf::EnsureLibs() ||
-#endif
-    false;
-}
-
 void
 ClearKeySessionManager::Init(GMPDecryptorCallback* aCallback)
 {
   CK_LOGD("ClearKeySessionManager::Init");
   mCallback = aCallback;
-  if (ShouldBeAbleToDecode()) {
-    if (!CanDecode()) {
-      const char* err = "EME plugin can't load system decoder!";
-      mCallback->SessionError(nullptr, 0, kGMPAbortError, 0, err, strlen(err));
-    } else {
-      mCallback->SetCapabilities(GMP_EME_CAP_DECRYPT_AND_DECODE_AUDIO |
-                                 GMP_EME_CAP_DECRYPT_AND_DECODE_VIDEO);
-    }
-  } else {
-    mCallback->SetCapabilities(GMP_EME_CAP_DECRYPT_AUDIO |
-                               GMP_EME_CAP_DECRYPT_VIDEO);
-  }
   ClearKeyPersistence::EnsureInitialized();
 }
 
@@ -101,16 +64,21 @@ ClearKeySessionManager::CreateSession(uint32_t aCreateSessionToken,
 {
   CK_LOGD("ClearKeySessionManager::CreateSession type:%s", aInitDataType);
 
-  // initDataType must be "cenc".
-  if (strcmp("cenc", aInitDataType)) {
+  string initDataType(aInitDataType, aInitDataType + aInitDataTypeSize);
+  // initDataType must be "cenc", "keyids", or "webm".
+  if (initDataType != "cenc" &&
+      initDataType != "keyids" &&
+      initDataType != "webm") {
+    string message = "'" + initDataType + "' is an initDataType unsupported by ClearKey";
     mCallback->RejectPromise(aPromiseId, kGMPNotSupportedError,
-                             nullptr /* message */, 0 /* messageLen */);
+                             message.c_str(), message.size());
     return;
   }
 
   if (ClearKeyPersistence::DeferCreateSessionIfNotReady(this,
                                                         aCreateSessionToken,
                                                         aPromiseId,
+                                                        initDataType,
                                                         aInitData,
                                                         aInitDataSize,
                                                         aSessionType)) {
@@ -121,7 +89,7 @@ ClearKeySessionManager::CreateSession(uint32_t aCreateSessionToken,
   assert(mSessions.find(sessionId) == mSessions.end());
 
   ClearKeySession* session = new ClearKeySession(sessionId, mCallback, aSessionType);
-  session->Init(aCreateSessionToken, aPromiseId, aInitData, aInitDataSize);
+  session->Init(aCreateSessionToken, aPromiseId, initDataType, aInitData, aInitDataSize);
   mSessions[sessionId] = session;
 
   const vector<KeyId>& sessionKeys = session->GetKeyIds();
@@ -398,7 +366,7 @@ ClearKeySessionManager::DoDecrypt(GMPBuffer* aBuffer,
   CK_LOGD("ClearKeySessionManager::DoDecrypt");
 
   GMPErr rv = mDecryptionManager->Decrypt(aBuffer->Data(), aBuffer->Size(),
-                                              aMetadata);
+                                          CryptoMetaData(aMetadata));
   CK_LOGD("DeDecrypt finished with code %x\n", rv);
   mCallback->Decrypted(aBuffer, rv);
 }

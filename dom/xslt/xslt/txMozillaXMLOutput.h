@@ -35,7 +35,7 @@ public:
     NS_DECL_NSISCRIPTLOADEROBSERVER
     
     // nsICSSLoaderObserver
-    NS_IMETHOD StyleSheetLoaded(mozilla::CSSStyleSheet* aSheet,
+    NS_IMETHOD StyleSheetLoaded(mozilla::StyleSheetHandle aSheet,
                                 bool aWasAlternate,
                                 nsresult aStatus) override;
 
@@ -96,13 +96,13 @@ private:
                                         // until then the opened element is
                                         // kept in mOpenedElement
     nsCOMPtr<mozilla::dom::Element> mOpenedElement;
-    nsRefPtr<nsNodeInfoManager> mNodeInfoManager;
+    RefPtr<nsNodeInfoManager> mNodeInfoManager;
 
     nsCOMArray<nsINode> mCurrentNodeStack;
 
     nsCOMPtr<nsIContent> mNonAddedNode;
 
-    nsRefPtr<txTransformNotifier> mNotifier;
+    RefPtr<txTransformNotifier> mNotifier;
 
     uint32_t mTreeDepth, mBadChildLevel;
     nsCString mRefreshString;

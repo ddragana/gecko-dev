@@ -9,7 +9,6 @@
 #include "FrameMetrics.h"
 #include "mozilla/Maybe.h"
 #include "nsIDOMEventListener.h"
-#include "nsIDocument.h"
 #include "nsIObserver.h"
 #include "nsWeakPtr.h"
 
@@ -33,6 +32,7 @@ private:
 public:
   void Init(nsIPresShell* aPresShell, nsIDocument *aDocument);
   void Destroy();
+  void ScreenSizeChanged();
 
 private:
   void RefreshZoomConstraints();

@@ -7,6 +7,7 @@
 #define _LOADMANAGER_H_
 
 #include "LoadMonitor.h"
+#include "mozilla/WeakPtr.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Services.h"
@@ -16,32 +17,35 @@
 #include "webrtc/common_types.h"
 #include "webrtc/video_engine/include/vie_base.h"
 
-extern PRLogModuleInfo *gLoadManagerLog;
+extern mozilla::LazyLogModule gLoadManagerLog;
 
 namespace mozilla {
 
 class LoadManagerSingleton : public LoadNotificationCallback,
                              public webrtc::CPULoadStateCallbackInvoker,
                              public webrtc::CpuOveruseObserver,
+                             public SupportsWeakPtr<LoadManagerSingleton>,
                              public nsIObserver
 
 {
 public:
     static LoadManagerSingleton* Get();
 
+    MOZ_DECLARE_WEAKREFERENCE_TYPENAME(LoadManagerSingleton)
+
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIOBSERVER
 
     // LoadNotificationCallback interface
-    virtual void LoadChanged(float aSystemLoad, float aProcessLoad) override;
+    void LoadChanged(float aSystemLoad, float aProcessLoad) override;
     // CpuOveruseObserver interface
     // Called as soon as an overuse is detected.
-    virtual void OveruseDetected() override;
+    void OveruseDetected() override;
     // Called periodically when the system is not overused any longer.
-    virtual void NormalUsage() override;
+    void NormalUsage() override;
     // CPULoadStateCallbackInvoker interface
-    virtual void AddObserver(webrtc::CPULoadStateObserver * aObserver) override;
-    virtual void RemoveObserver(webrtc::CPULoadStateObserver * aObserver) override;
+    void AddObserver(webrtc::CPULoadStateObserver * aObserver) override;
+    void RemoveObserver(webrtc::CPULoadStateObserver * aObserver) override;
 
 private:
     LoadManagerSingleton(int aLoadMeasurementInterval,
@@ -50,15 +54,18 @@ private:
                          float aLowLoadThreshold);
     ~LoadManagerSingleton();
 
-    void LoadHasChanged();
+    void LoadHasChanged(webrtc::CPULoadState aNewState);
 
-    nsRefPtr<LoadMonitor> mLoadMonitor;
+    RefPtr<LoadMonitor> mLoadMonitor;
 
     // This protects access to the mObservers list, the current state, and
     // pretty much all the other members (below).
     Mutex mLock;
     nsTArray<webrtc::CPULoadStateObserver*> mObservers;
     webrtc::CPULoadState mCurrentState;
+    TimeStamp mLastStateChange;
+    float mTimeInState[static_cast<int>(webrtc::kLoadLast)];
+
     // Set when overuse was signaled to us, and hasn't been un-signaled yet.
     bool  mOveruseActive;
     float mLoadSum;
@@ -83,23 +90,31 @@ public:
 
     void AddObserver(webrtc::CPULoadStateObserver * aObserver) override
     {
-        mManager->AddObserver(aObserver);
+        if (mManager) {
+          mManager->AddObserver(aObserver);
+        }
     }
     void RemoveObserver(webrtc::CPULoadStateObserver * aObserver) override
     {
-        mManager->RemoveObserver(aObserver);
+        if (mManager) {
+          mManager->RemoveObserver(aObserver);
+        }
     }
     void OveruseDetected() override
     {
-        mManager->OveruseDetected();
+        if (mManager) {
+          mManager->OveruseDetected();
+        }
     }
     void NormalUsage() override
     {
-        mManager->NormalUsage();
+        if (mManager) {
+          mManager->NormalUsage();
+        }
     }
 
 private:
-    LoadManagerSingleton* mManager;
+    WeakPtr<LoadManagerSingleton> mManager;
 };
 
 } //namespace

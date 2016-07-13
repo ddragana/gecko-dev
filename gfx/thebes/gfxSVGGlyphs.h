@@ -8,14 +8,12 @@
 #include "gfxFontUtils.h"
 #include "mozilla/gfx/2D.h"
 #include "nsString.h"
-#include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
 #include "nsBaseHashtable.h"
 #include "nsHashKeys.h"
 #include "gfxPattern.h"
 #include "mozilla/gfx/UserData.h"
 #include "nsRefreshDriver.h"
-#include "DrawMode.h"
 
 class nsIDocument;
 class nsIContentViewer;
@@ -51,6 +49,8 @@ public:
 
     virtual void DidRefresh() override;
 
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+
 private:
     nsresult ParseDocument(const uint8_t *aBuffer, uint32_t aBufLen);
 
@@ -68,7 +68,7 @@ private:
 
     nsBaseHashtable<nsUint32HashKey, Element*, Element*> mGlyphIdMap;
 
-    nsAutoCString mSVGGlyphsDocumentURI;
+    nsCString mSVGGlyphsDocumentURI;
 };
 
 /**
@@ -116,11 +116,10 @@ public:
 
     /**
      * Render the SVG glyph for |aGlyphId|
-     * @param aDrawMode Whether to fill or stroke or both; see DrawMode
      * @param aContextPaint Information on text context paints.
      *   See |gfxTextContextPaint|.
      */
-    bool RenderGlyph(gfxContext *aContext, uint32_t aGlyphId, DrawMode aDrawMode,
+    bool RenderGlyph(gfxContext *aContext, uint32_t aGlyphId,
                      gfxTextContextPaint *aContextPaint);
 
     /**
@@ -130,6 +129,8 @@ public:
      */
     bool GetGlyphExtents(uint32_t aGlyphId, const gfxMatrix& aSVGToAppSpace,
                          gfxRect *aResult);
+
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
 private:
     Element *GetGlyphElement(uint32_t aGlyphId);
@@ -229,7 +230,7 @@ private:
 class SimpleTextContextPaint : public gfxTextContextPaint
 {
 private:
-    static const gfxRGBA sZero;
+    static const mozilla::gfx::Color sZero;
 
 public:
     static gfxMatrix SetupDeviceToPatternMatrix(gfxPattern *aPattern,
@@ -260,7 +261,7 @@ public:
         if (mFillPattern) {
             mFillPattern->SetMatrix(aCTM * mFillMatrix);
         }
-        nsRefPtr<gfxPattern> fillPattern = mFillPattern;
+        RefPtr<gfxPattern> fillPattern = mFillPattern;
         return fillPattern.forget();
     }
 
@@ -270,7 +271,7 @@ public:
         if (mStrokePattern) {
             mStrokePattern->SetMatrix(aCTM * mStrokeMatrix);
         }
-        nsRefPtr<gfxPattern> strokePattern = mStrokePattern;
+        RefPtr<gfxPattern> strokePattern = mStrokePattern;
         return strokePattern.forget();
     }
 
@@ -283,8 +284,8 @@ public:
     }
 
 private:
-    nsRefPtr<gfxPattern> mFillPattern;
-    nsRefPtr<gfxPattern> mStrokePattern;
+    RefPtr<gfxPattern> mFillPattern;
+    RefPtr<gfxPattern> mStrokePattern;
 
     // Device space to pattern space transforms
     gfxMatrix mFillMatrix;

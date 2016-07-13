@@ -13,18 +13,19 @@ namespace mozilla {
 class OggDecoder : public MediaDecoder
 {
 public:
-  OggDecoder()
-    : mShutdownBitMonitor("mShutdownBitMonitor")
+  explicit OggDecoder(MediaDecoderOwner* aOwner)
+    : MediaDecoder(aOwner)
+    , mShutdownBitMonitor("mShutdownBitMonitor")
     , mShutdownBit(false)
   {}
 
-  virtual MediaDecoder* Clone() override {
+  MediaDecoder* Clone(MediaDecoderOwner* aOwner) override {
     if (!IsOggEnabled()) {
       return nullptr;
     }
-    return new OggDecoder();
+    return new OggDecoder(aOwner);
   }
-  virtual MediaDecoderStateMachine* CreateStateMachine() override;
+  MediaDecoderStateMachine* CreateStateMachine() override;
 
   // For yucky legacy reasons, the ogg decoder needs to do a cross-thread read
   // to check for shutdown while it hogs its own task queue. We don't want to

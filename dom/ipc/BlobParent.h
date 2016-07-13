@@ -10,7 +10,6 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/dom/PBlobParent.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
 
@@ -74,7 +73,7 @@ class BlobParent final
   // destructor will cancel any stream events that are currently in flight.
   nsTArray<nsRevocableEventPtr<OpenStreamRunnable>> mOpenStreamRunnables;
 
-  nsRefPtr<IDTableEntry> mIDTableEntry;
+  RefPtr<IDTableEntry> mIDTableEntry;
 
   bool mOwnsBlobImpl;
 

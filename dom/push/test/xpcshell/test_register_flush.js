@@ -15,10 +15,6 @@ function run_test() {
     requestTimeout: 1000,
     retryBaseInterval: 150
   });
-  disableServiceWorkerEvents(
-    'https://example.com/page/1',
-    'https://example.com/page/2'
-  );
   run_next_test();
 }
 
@@ -32,16 +28,16 @@ add_task(function* test_register_flush() {
     originAttributes: '',
     version: 2,
     quota: Infinity,
+    systemRecord: true,
   };
   yield db.put(record);
 
-  let notifyPromise = promiseObserverNotification('push-notification');
+  let notifyPromise = promiseObserverNotification(PushServiceComponent.pushTopic);
 
-  let ackDefer = Promise.defer();
-  let ackDone = after(2, ackDefer.resolve);
+  let ackDone;
+  let ackPromise = new Promise(resolve => ackDone = after(2, resolve));
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -76,19 +72,17 @@ add_task(function* test_register_flush() {
     }
   });
 
-  let newRecord = yield PushNotificationService.register(
-    'https://example.com/page/2', '');
-  equal(newRecord.pushEndpoint, 'https://example.org/update/2',
+  let newRecord = yield PushService.register({
+    scope: 'https://example.com/page/2',
+    originAttributes: '',
+  });
+  equal(newRecord.endpoint, 'https://example.org/update/2',
     'Wrong push endpoint in record');
-  equal(newRecord.scope, 'https://example.com/page/2',
-    'Wrong scope in record');
 
-  let {data: scope} = yield waitForPromise(notifyPromise, DEFAULT_TIMEOUT,
-    'Timed out waiting for notification');
+  let {data: scope} = yield notifyPromise;
   equal(scope, 'https://example.com/page/1', 'Wrong notification scope');
 
-  yield waitForPromise(ackDefer.promise, DEFAULT_TIMEOUT,
-     'Timed out waiting for acknowledgements');
+  yield ackPromise;
 
   let prevRecord = yield db.getByKeyID(
     '9bcc7efb-86c7-4457-93ea-e24e6eb59b74');
@@ -97,8 +91,6 @@ add_task(function* test_register_flush() {
   strictEqual(prevRecord.version, 3,
     'Should record version updates sent before register responses');
 
-  let registeredRecord = yield db.getByKeyID(newRecord.channelID);
-  equal(registeredRecord.pushEndpoint, 'https://example.org/update/2',
-    'Wrong new push endpoint');
+  let registeredRecord = yield db.getByPushEndpoint('https://example.org/update/2');
   ok(!registeredRecord.version, 'Should not record premature updates');
 });

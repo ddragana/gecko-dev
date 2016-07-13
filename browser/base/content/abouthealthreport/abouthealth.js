@@ -4,22 +4,21 @@
 
 "use strict";
 
-const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 const prefs = new Preferences("datareporting.healthreport.");
 
-let healthReportWrapper = {
+const PREF_UNIFIED = "toolkit.telemetry.unified";
+const PREF_REPORTING_URL = "datareporting.healthreport.about.reportUrl";
+
+var healthReportWrapper = {
   init: function () {
     let iframe = document.getElementById("remote-report");
     iframe.addEventListener("load", healthReportWrapper.initRemotePage, false);
     iframe.src = this._getReportURI().spec;
-    iframe.onload = () => {
-      MozSelfSupport.getHealthReportPayload().then(this.updatePayload,
-                                                   this.handleInitFailure);
-    };
     prefs.observe("uploadEnabled", this.updatePrefState, healthReportWrapper);
   },
 
@@ -28,7 +27,7 @@ let healthReportWrapper = {
   },
 
   _getReportURI: function () {
-    let url = Services.urlFormatter.formatURLPref("datareporting.healthreport.about.reportUrl");
+    let url = Services.urlFormatter.formatURLPref(PREF_REPORTING_URL);
     return Services.io.newURI(url, null, null);
   },
 
@@ -94,15 +93,6 @@ let healthReportWrapper = {
     });
   },
 
-  refreshPayload: function () {
-    MozSelfSupport.getHealthReportPayload().then(this.updatePayload,
-                                                 this.handlePayloadFailure);
-  },
-
-  updatePayload: function (payload) {
-    healthReportWrapper.injectData("payload", JSON.stringify(payload));
-  },
-
   injectData: function (type, content) {
     let report = this._getReportURI();
 
@@ -120,6 +110,15 @@ let healthReportWrapper = {
   },
 
   handleRemoteCommand: function (evt) {
+    // Do an origin check to harden against the frame content being loaded from unexpected locations.
+    let allowedPrincipal = Services.scriptSecurityManager.getCodebasePrincipal(this._getReportURI());
+    let targetPrincipal = evt.target.nodePrincipal;
+    if (!allowedPrincipal.equals(targetPrincipal)) {
+      Cu.reportError(`Origin check failed for message "${evt.detail.command}": ` +
+                     `target origin is "${targetPrincipal.origin}", expected "${allowedPrincipal.origin}"`);
+      return;
+    }
+
     switch (evt.detail.command) {
       case "DisableDataSubmission":
         this.setDataSubmission(false);
@@ -129,9 +128,6 @@ let healthReportWrapper = {
         break;
       case "RequestCurrentPrefs":
         this.updatePrefState();
-        break;
-      case "RequestCurrentPayload":
-        this.refreshPayload();
         break;
       case "RequestTelemetryPingList":
         this.sendTelemetryPingList();

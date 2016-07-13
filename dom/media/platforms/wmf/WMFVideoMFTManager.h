@@ -9,6 +9,7 @@
 
 #include "WMF.h"
 #include "MFTDecoder.h"
+#include "nsAutoPtr.h"
 #include "nsRect.h"
 #include "WMFMediaDataDecoder.h"
 #include "mozilla/RefPtr.h"
@@ -25,22 +26,34 @@ public:
                      bool aDXVAEnabled);
   ~WMFVideoMFTManager();
 
-  virtual already_AddRefed<MFTDecoder> Init() override;
+  bool Init();
 
-  virtual HRESULT Input(MediaRawData* aSample) override;
+  HRESULT Input(MediaRawData* aSample) override;
 
-  virtual HRESULT Output(int64_t aStreamOffset,
-                         nsRefPtr<MediaData>& aOutput) override;
+  HRESULT Output(int64_t aStreamOffset, RefPtr<MediaData>& aOutput) override;
 
-  virtual void Shutdown() override;
+  void Shutdown() override;
 
-  virtual bool IsHardwareAccelerated() const override;
+  bool IsHardwareAccelerated(nsACString& aFailureReason) const override;
+
+  TrackInfo::TrackType GetType() override {
+    return TrackInfo::kVideoTrack;
+  }
+
+  void ConfigurationChanged(const TrackInfo& aConfig) override;
+
+  const char* GetDescriptionName() const override
+  {
+    nsCString failureReason;
+    return IsHardwareAccelerated(failureReason)
+      ? "wmf hardware video decoder" : "wmf software video decoder";
+  }
 
 private:
 
   bool InitializeDXVA(bool aForceD3D9);
 
-  already_AddRefed<MFTDecoder> InitInternal(bool aForceD3D9);
+  bool InitInternal(bool aForceD3D9);
 
   HRESULT ConfigureVideoFrameGeometry();
 
@@ -52,20 +65,26 @@ private:
                               int64_t aStreamOffset,
                               VideoData** aOutVideoData);
 
+  HRESULT SetDecoderMediaTypes();
+
+  bool CanUseDXVA(IMFMediaType* aType);
+
   // Video frame geometry.
   VideoInfo mVideoInfo;
   uint32_t mVideoStride;
-  uint32_t mVideoWidth;
-  uint32_t mVideoHeight;
-  nsIntRect mPictureRegion;
+  nsIntSize mImageSize;
 
-  RefPtr<MFTDecoder> mDecoder;
   RefPtr<layers::ImageContainer> mImageContainer;
   nsAutoPtr<DXVA2Manager> mDXVA2Manager;
 
-  const bool mDXVAEnabled;
+  RefPtr<IMFSample> mLastInput;
+  float mLastDuration;
+
+  bool mDXVAEnabled;
   const layers::LayersBackend mLayersBackend;
   bool mUseHwAccel;
+
+  nsCString mDXVAFailureReason;
 
   enum StreamType {
     Unknown,
@@ -78,6 +97,10 @@ private:
 
   const GUID& GetMFTGUID();
   const GUID& GetMediaSubtypeGUID();
+
+  uint32_t mNullOutputCount;
+  bool mGotValidOutputAfterNullOutput;
+  bool mGotExcessiveNullOutput;
 };
 
 } // namespace mozilla

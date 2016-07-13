@@ -14,6 +14,9 @@
 #include "WebGLStrongTypes.h"
 
 namespace mozilla {
+namespace webgl {
+struct FormatUsageInfo;
+}
 
 class WebGLRenderbuffer final
     : public nsWrapperCache
@@ -23,76 +26,68 @@ class WebGLRenderbuffer final
     , public WebGLContextBoundObject
     , public WebGLFramebufferAttachable
 {
+    friend class WebGLContext;
+    friend class WebGLFramebuffer;
+    friend class WebGLFBAttachPoint;
+
 public:
+    const GLuint mPrimaryRB;
+protected:
+    const bool mEmulatePackedDepthStencil;
+    GLuint mSecondaryRB;
+    const webgl::FormatUsageInfo* mFormat;
+    GLsizei mSamples;
+
+    WebGLImageDataStatus mImageDataStatus;
+
+    bool mHasBeenBound;
+
+public:
+    NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLRenderbuffer)
+    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLRenderbuffer)
+
     explicit WebGLRenderbuffer(WebGLContext* webgl);
 
     void Delete();
 
     bool HasUninitializedImageData() const {
+        MOZ_ASSERT(mImageDataStatus != WebGLImageDataStatus::NoImageData);
         return mImageDataStatus == WebGLImageDataStatus::UninitializedImageData;
     }
-    void SetImageDataStatus(WebGLImageDataStatus x) {
-        // there is no way to go from having image data to not having any
-        MOZ_ASSERT(x != WebGLImageDataStatus::NoImageData ||
-                   mImageDataStatus == WebGLImageDataStatus::NoImageData);
-        mImageDataStatus = x;
+
+    bool IsDefined() const {
+        if (!mFormat) {
+            MOZ_ASSERT(!mWidth && !mHeight);
+            return false;
+        }
+        return true;
     }
 
     GLsizei Samples() const { return mSamples; }
-    void SetSamples(GLsizei samples) { mSamples = samples; }
 
-    GLuint PrimaryGLName() const { return mPrimaryRB; }
-
-    GLenum InternalFormat() const { return mInternalFormat; }
-    void SetInternalFormat(GLenum internalFormat) {
-        mInternalFormat = internalFormat;
-    }
-
-    GLenum InternalFormatForGL() const { return mInternalFormatForGL; }
-    void SetInternalFormatForGL(GLenum internalFormatForGL) {
-        mInternalFormatForGL = internalFormatForGL;
-    }
+    const webgl::FormatUsageInfo* Format() const { return mFormat; }
 
     int64_t MemoryUsage() const;
 
     WebGLContext* GetParentObject() const {
-        return Context();
+        return mContext;
     }
 
-    void BindRenderbuffer() const;
-    void RenderbufferStorage(GLsizei samples, GLenum internalFormat,
-                             GLsizei width, GLsizei height) const;
-    void FramebufferRenderbuffer(FBAttachment attachment) const;
+    void RenderbufferStorage(const char* funcName, uint32_t samples,
+                             GLenum internalFormat, uint32_t width, uint32_t height);
     // Only handles a subset of `pname`s.
     GLint GetRenderbufferParameter(RBTarget target, RBParam pname) const;
 
     virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto) override;
-
-    NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLRenderbuffer)
-    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLRenderbuffer)
 
 protected:
     ~WebGLRenderbuffer() {
         DeleteOnce();
     }
 
-    GLuint mPrimaryRB;
-    GLuint mSecondaryRB;
-    GLenum mInternalFormat;
-    GLenum mInternalFormatForGL;
-    WebGLImageDataStatus mImageDataStatus;
-    GLsizei mSamples;
-#ifdef ANDROID
-    // Bug 1140459: Some drivers (including our test slaves!) don't
-    // give reasonable answers for IsRenderbuffer, maybe others.
-    // This shows up on Android 2.3 emulator.
-    //
-    // So we track the `is a Renderbuffer` state ourselves.
-    bool mIsRB;
-#endif
-
-    friend class WebGLContext;
-    friend class WebGLFramebuffer;
+    void DoFramebufferRenderbuffer(GLenum attachment) const;
+    GLenum DoRenderbufferStorage(uint32_t samples, const webgl::FormatUsageInfo* format,
+                                 uint32_t width, uint32_t height);
 };
 
 } // namespace mozilla

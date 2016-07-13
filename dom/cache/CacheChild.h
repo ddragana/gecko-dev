@@ -22,12 +22,29 @@ namespace cache {
 
 class Cache;
 class CacheOpArgs;
-class CachePushStreamChild;
 
 class CacheChild final : public PCacheChild
                        , public ActorChild
 {
 public:
+  class MOZ_RAII AutoLock final
+  {
+    CacheChild* mActor;
+
+  public:
+    explicit AutoLock(CacheChild* aActor)
+      : mActor(aActor)
+    {
+      MOZ_ASSERT(mActor);
+      mActor->Lock();
+    }
+
+    ~AutoLock()
+    {
+      mActor->Unlock();
+    }
+  };
+
   CacheChild();
   ~CacheChild();
 
@@ -42,16 +59,13 @@ public:
   ExecuteOp(nsIGlobalObject* aGlobal, Promise* aPromise,
             nsISupports* aParent, const CacheOpArgs& aArgs);
 
-  CachePushStreamChild*
-  CreatePushStream(nsISupports* aParent, nsIAsyncInputStream* aStream);
-
   // Our parent Listener object has gone out of scope and is being destroyed.
   void StartDestroyFromListener();
 
 private:
   // ActorChild methods
 
-  // Feature is trying to destroy due to worker shutdown.
+  // WorkerHolder is trying to destroy due to worker shutdown.
   virtual void StartDestroy() override;
 
   // PCacheChild methods
@@ -64,15 +78,20 @@ private:
   virtual bool
   DeallocPCacheOpChild(PCacheOpChild* aActor) override;
 
-  virtual PCachePushStreamChild*
-  AllocPCachePushStreamChild() override;
-
-  virtual bool
-  DeallocPCachePushStreamChild(PCachePushStreamChild* aActor) override;
-
   // utility methods
   void
   NoteDeletedActor();
+
+  void
+  MaybeFlushDelayedDestroy();
+
+  // Methods used to temporarily force the actor alive.  Only called from
+  // AutoLock.
+  void
+  Lock();
+
+  void
+  Unlock();
 
   // Use a weak ref so actor does not hold DOM object alive past content use.
   // The Cache object must call ClearListener() to null this before its
@@ -80,6 +99,7 @@ private:
   Cache* MOZ_NON_OWNING_REF mListener;
   uint32_t mNumChildActors;
   bool mDelayedDestroy;
+  bool mLocked;
 
   NS_DECL_OWNINGTHREAD
 };

@@ -6,6 +6,8 @@
 #include "gfxQuartzSurface.h"
 #include "gfxContext.h"
 #include "gfxImageSurface.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/HelpersCairo.h"
 
 #include "cairo-quartz.h"
 
@@ -15,45 +17,20 @@ gfxQuartzSurface::MakeInvalid()
     mSize = mozilla::gfx::IntSize(-1, -1);
 }
 
-gfxQuartzSurface::gfxQuartzSurface(const gfxSize& desiredSize, gfxImageFormat format)
+gfxQuartzSurface::gfxQuartzSurface(const mozilla::gfx::IntSize& desiredSize,
+                                   gfxImageFormat format)
     : mCGContext(nullptr), mSize(desiredSize)
 {
-    mozilla::gfx::IntSize size((unsigned int) floor(desiredSize.width),
-                    (unsigned int) floor(desiredSize.height));
-    if (!CheckSurfaceSize(size))
+    if (!mozilla::gfx::Factory::CheckSurfaceSize(desiredSize))
         MakeInvalid();
 
     unsigned int width = static_cast<unsigned int>(mSize.width);
     unsigned int height = static_cast<unsigned int>(mSize.height);
 
-    cairo_surface_t *surf = cairo_quartz_surface_create
-        ((cairo_format_t) format, width, height);
+    cairo_format_t cformat = GfxFormatToCairoFormat(format);
+    cairo_surface_t *surf = cairo_quartz_surface_create(cformat, width, height);
 
     mCGContext = cairo_quartz_surface_get_cg_context (surf);
-
-    CGContextRetain(mCGContext);
-
-    Init(surf);
-    if (mSurfaceValid) {
-      RecordMemoryUsed(mSize.height * 4 + sizeof(gfxQuartzSurface));
-    }
-}
-
-gfxQuartzSurface::gfxQuartzSurface(CGContextRef context,
-                                   const gfxSize& desiredSize)
-    : mCGContext(context), mSize(desiredSize)
-{
-    mozilla::gfx::IntSize size((unsigned int) floor(desiredSize.width),
-                    (unsigned int) floor(desiredSize.height));
-    if (!CheckSurfaceSize(size))
-        MakeInvalid();
-
-    unsigned int width = static_cast<unsigned int>(mSize.width);
-    unsigned int height = static_cast<unsigned int>(mSize.height);
-
-    cairo_surface_t *surf =
-        cairo_quartz_surface_create_for_cg_context(context,
-                                                   width, height);
 
     CGContextRetain(mCGContext);
 
@@ -67,7 +44,7 @@ gfxQuartzSurface::gfxQuartzSurface(CGContextRef context,
                                    const mozilla::gfx::IntSize& size)
     : mCGContext(context), mSize(size)
 {
-    if (!CheckSurfaceSize(size))
+    if (!mozilla::gfx::Factory::CheckSurfaceSize(size))
         MakeInvalid();
 
     unsigned int width = static_cast<unsigned int>(mSize.width);
@@ -96,43 +73,17 @@ gfxQuartzSurface::gfxQuartzSurface(cairo_surface_t *csurf,
 }
 
 gfxQuartzSurface::gfxQuartzSurface(unsigned char *data,
-                                   const gfxSize& desiredSize,
-                                   long stride,
-                                   gfxImageFormat format)
-    : mCGContext(nullptr), mSize(desiredSize)
-{
-    mozilla::gfx::IntSize size((unsigned int) floor(desiredSize.width),
-                    (unsigned int) floor(desiredSize.height));
-    if (!CheckSurfaceSize(size))
-        MakeInvalid();
-
-    unsigned int width = static_cast<unsigned int>(mSize.width);
-    unsigned int height = static_cast<unsigned int>(mSize.height);
-
-    cairo_surface_t *surf = cairo_quartz_surface_create_for_data
-        (data, (cairo_format_t) format, width, height, stride);
-
-    mCGContext = cairo_quartz_surface_get_cg_context (surf);
-
-    CGContextRetain(mCGContext);
-
-    Init(surf);
-    if (mSurfaceValid) {
-      RecordMemoryUsed(mSize.height * stride + sizeof(gfxQuartzSurface));
-    }
-}
-
-gfxQuartzSurface::gfxQuartzSurface(unsigned char *data,
                                    const mozilla::gfx::IntSize& aSize,
                                    long stride,
                                    gfxImageFormat format)
     : mCGContext(nullptr), mSize(aSize.width, aSize.height)
 {
-    if (!CheckSurfaceSize(aSize))
+    if (!mozilla::gfx::Factory::CheckSurfaceSize(aSize))
         MakeInvalid();
 
+    cairo_format_t cformat = GfxFormatToCairoFormat(format);
     cairo_surface_t *surf = cairo_quartz_surface_create_for_data
-        (data, (cairo_format_t) format, aSize.width, aSize.height, stride);
+        (data, cformat, aSize.width, aSize.height, stride);
 
     mCGContext = cairo_quartz_surface_get_cg_context (surf);
 
@@ -156,15 +107,9 @@ gfxQuartzSurface::CreateSimilarSurface(gfxContentType aType,
         return nullptr;
     }
 
-    nsRefPtr<gfxASurface> result = Wrap(surface, aSize);
+    RefPtr<gfxASurface> result = Wrap(surface, aSize);
     cairo_surface_destroy(surface);
     return result.forget();
-}
-
-CGContextRef
-gfxQuartzSurface::GetCGContextWithClip(gfxContext *ctx)
-{
-    return cairo_quartz_get_cg_context_with_clip(ctx->GetCairo());
 }
 
 already_AddRefed<gfxImageSurface> gfxQuartzSurface::GetAsImageSurface()
@@ -173,7 +118,7 @@ already_AddRefed<gfxImageSurface> gfxQuartzSurface::GetAsImageSurface()
     if (!surface || cairo_surface_status(surface))
         return nullptr;
 
-    nsRefPtr<gfxASurface> img = Wrap(surface);
+    RefPtr<gfxASurface> img = Wrap(surface);
 
     // cairo_quartz_surface_get_image returns a referenced image, and thebes
     // shares the refcounts of Cairo surfaces. However, Wrap also adds a

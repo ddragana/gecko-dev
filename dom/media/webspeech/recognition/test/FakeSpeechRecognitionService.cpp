@@ -7,6 +7,7 @@
 #include "nsThreadUtils.h"
 
 #include "FakeSpeechRecognitionService.h"
+#include "MediaPrefs.h"
 
 #include "SpeechRecognition.h"
 #include "SpeechRecognitionAlternative.h"
@@ -66,7 +67,7 @@ FakeSpeechRecognitionService::Abort()
 NS_IMETHODIMP
 FakeSpeechRecognitionService::Observe(nsISupports* aSubject, const char* aTopic, const char16_t* aData)
 {
-  MOZ_ASSERT(mRecognition->mTestConfig.mFakeRecognitionService,
+  MOZ_ASSERT(MediaPrefs::WebSpeechFakeRecognitionService(),
              "Got request to fake recognition service event, but "
              TEST_PREFERENCE_FAKE_RECOGNITION_SERVICE " is not set");
 
@@ -86,7 +87,7 @@ FakeSpeechRecognitionService::Observe(nsISupports* aSubject, const char* aTopic,
                                 NS_LITERAL_STRING("RECOGNITIONSERVICE_ERROR test event"));
 
   } else if (eventName.EqualsLiteral("EVENT_RECOGNITIONSERVICE_FINAL_RESULT")) {
-    nsRefPtr<SpeechEvent> event =
+    RefPtr<SpeechEvent> event =
       new SpeechEvent(mRecognition,
                       SpeechRecognition::EVENT_RECOGNITIONSERVICE_FINAL_RESULT);
 
@@ -102,12 +103,14 @@ FakeSpeechRecognitionService::BuildMockResultList()
 {
   SpeechRecognitionResultList* resultList = new SpeechRecognitionResultList(mRecognition);
   SpeechRecognitionResult* result = new SpeechRecognitionResult(mRecognition);
-  SpeechRecognitionAlternative* alternative = new SpeechRecognitionAlternative(mRecognition);
+  if (0 < mRecognition->MaxAlternatives()) {
+    SpeechRecognitionAlternative* alternative = new SpeechRecognitionAlternative(mRecognition);
 
-  alternative->mTranscript = NS_LITERAL_STRING("Mock final result");
-  alternative->mConfidence = 0.0f;
+    alternative->mTranscript = NS_LITERAL_STRING("Mock final result");
+    alternative->mConfidence = 0.0f;
 
-  result->mItems.AppendElement(alternative);
+    result->mItems.AppendElement(alternative);
+  }
   resultList->mItems.AppendElement(result);
 
   return resultList;

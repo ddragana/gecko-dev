@@ -24,21 +24,9 @@ namespace jit {
     _(TypeUpdate_ObjectGroup)                    \
     _(TypeUpdate_PrimitiveSet)                   \
                                                  \
-    _(This_Fallback)                             \
-                                                 \
     _(NewArray_Fallback)                         \
     _(NewObject_Fallback)                        \
     _(NewObject_WithTemplate)                    \
-                                                 \
-    _(Compare_Fallback)                          \
-    _(Compare_Int32)                             \
-    _(Compare_Double)                            \
-    _(Compare_NumberWithUndefined)               \
-    _(Compare_String)                            \
-    _(Compare_Boolean)                           \
-    _(Compare_Object)                            \
-    _(Compare_ObjectWithUndefined)               \
-    _(Compare_Int32WithBoolean)                  \
                                                  \
     _(ToBool_Fallback)                           \
     _(ToBool_Int32)                              \
@@ -48,18 +36,6 @@ namespace jit {
     _(ToBool_Object)                             \
                                                  \
     _(ToNumber_Fallback)                         \
-                                                 \
-    _(BinaryArith_Fallback)                      \
-    _(BinaryArith_Int32)                         \
-    _(BinaryArith_Double)                        \
-    _(BinaryArith_StringConcat)                  \
-    _(BinaryArith_StringObjectConcat)            \
-    _(BinaryArith_BooleanWithInt32)              \
-    _(BinaryArith_DoubleWithInt32)               \
-                                                 \
-    _(UnaryArith_Fallback)                       \
-    _(UnaryArith_Int32)                          \
-    _(UnaryArith_Double)                         \
                                                  \
     _(Call_Fallback)                             \
     _(Call_Scripted)                             \
@@ -73,11 +49,15 @@ namespace jit {
     _(Call_IsSuspendedStarGenerator)             \
                                                  \
     _(GetElem_Fallback)                          \
-    _(GetElem_NativeSlot)                        \
-    _(GetElem_NativePrototypeSlot)               \
-    _(GetElem_NativePrototypeCallNative)         \
-    _(GetElem_NativePrototypeCallScripted)       \
-    _(GetElem_UnboxedProperty)                   \
+    _(GetElem_NativeSlotName)                    \
+    _(GetElem_NativeSlotSymbol)                  \
+    _(GetElem_NativePrototypeSlotName)           \
+    _(GetElem_NativePrototypeSlotSymbol)         \
+    _(GetElem_NativePrototypeCallNativeName)     \
+    _(GetElem_NativePrototypeCallNativeSymbol)   \
+    _(GetElem_NativePrototypeCallScriptedName)   \
+    _(GetElem_NativePrototypeCallScriptedSymbol) \
+    _(GetElem_UnboxedPropertyName)               \
     _(GetElem_String)                            \
     _(GetElem_Dense)                             \
     _(GetElem_UnboxedArray)                      \
@@ -96,6 +76,7 @@ namespace jit {
     _(In_Dense)                                  \
                                                  \
     _(GetName_Fallback)                          \
+    _(GetName_GlobalLexical)                     \
     _(GetName_Global)                            \
     _(GetName_Scope0)                            \
     _(GetName_Scope1)                            \
@@ -109,25 +90,6 @@ namespace jit {
                                                  \
     _(GetIntrinsic_Fallback)                     \
     _(GetIntrinsic_Constant)                     \
-                                                 \
-    _(GetProp_Fallback)                          \
-    _(GetProp_ArrayLength)                       \
-    _(GetProp_UnboxedArrayLength)                \
-    _(GetProp_Primitive)                         \
-    _(GetProp_StringLength)                      \
-    _(GetProp_Native)                            \
-    _(GetProp_NativeDoesNotExist)                \
-    _(GetProp_NativePrototype)                   \
-    _(GetProp_Unboxed)                           \
-    _(GetProp_TypedObject)                       \
-    _(GetProp_CallScripted)                      \
-    _(GetProp_CallNative)                        \
-    _(GetProp_CallDOMProxyNative)                \
-    _(GetProp_CallDOMProxyWithGenerationNative)  \
-    _(GetProp_DOMProxyShadowed)                  \
-    _(GetProp_ArgumentsLength)                   \
-    _(GetProp_ArgumentsCallee)                   \
-    _(GetProp_Generic)                           \
                                                  \
     _(SetProp_Fallback)                          \
     _(SetProp_Native)                            \

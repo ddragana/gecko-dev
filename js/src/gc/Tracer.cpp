@@ -24,6 +24,7 @@
 #include "vm/Shape.h"
 #include "vm/Symbol.h"
 
+#include "jscompartmentinlines.h"
 #include "jsgcinlines.h"
 
 #include "vm/ObjectGroup-inl.h"
@@ -52,13 +53,13 @@ DoCallback(JS::CallbackTracer* trc, T* thingp, const char* name)
 }
 #define INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS(name, type, _) \
     template type* DoCallback<type*>(JS::CallbackTracer*, type**, const char*);
-FOR_EACH_GC_LAYOUT(INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS);
+JS_FOR_EACH_TRACEKIND(INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS);
 #undef INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS
 
 template <typename S>
 struct DoCallbackFunctor : public IdentityDefaultAdaptor<S> {
     template <typename T> S operator()(T* t, JS::CallbackTracer* trc, const char* name) {
-        return js::gc::RewrapValueOrId<S, T*>::wrap(DoCallback(trc, &t, name));
+        return js::gc::RewrapTaggedPointer<S, T>::wrap(DoCallback(trc, &t, name));
     }
 };
 
@@ -66,7 +67,7 @@ template <>
 Value
 DoCallback<Value>(JS::CallbackTracer* trc, Value* vp, const char* name)
 {
-    *vp = DispatchValueTyped(DoCallbackFunctor<Value>(), *vp, trc, name);
+    *vp = DispatchTyped(DoCallbackFunctor<Value>(), *vp, trc, name);
     return *vp;
 }
 
@@ -74,8 +75,16 @@ template <>
 jsid
 DoCallback<jsid>(JS::CallbackTracer* trc, jsid* idp, const char* name)
 {
-    *idp = DispatchIdTyped(DoCallbackFunctor<jsid>(), *idp, trc, name);
+    *idp = DispatchTyped(DoCallbackFunctor<jsid>(), *idp, trc, name);
     return *idp;
+}
+
+template <>
+TaggedProto
+DoCallback<TaggedProto>(JS::CallbackTracer* trc, TaggedProto* protop, const char* name)
+{
+    *protop = DispatchTyped(DoCallbackFunctor<TaggedProto>(), *protop, trc, name);
+    return *protop;
 }
 
 void
@@ -97,87 +106,9 @@ JS::CallbackTracer::getTracingEdgeName(char* buffer, size_t bufferSize)
 /*** Public Tracing API **************************************************************************/
 
 JS_PUBLIC_API(void)
-JS_CallUnbarrieredValueTracer(JSTracer* trc, Value* valuep, const char* name)
+JS::TraceChildren(JSTracer* trc, GCCellPtr thing)
 {
-    TraceManuallyBarrieredEdge(trc, valuep, name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallUnbarrieredIdTracer(JSTracer* trc, jsid* idp, const char* name)
-{
-    TraceManuallyBarrieredEdge(trc, idp, name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallUnbarrieredObjectTracer(JSTracer* trc, JSObject** objp, const char* name)
-{
-    TraceManuallyBarrieredEdge(trc, objp, name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallUnbarrieredStringTracer(JSTracer* trc, JSString** strp, const char* name)
-{
-    TraceManuallyBarrieredEdge(trc, strp, name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallUnbarrieredScriptTracer(JSTracer* trc, JSScript** scriptp, const char* name)
-{
-    TraceManuallyBarrieredEdge(trc, scriptp, name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallValueTracer(JSTracer* trc, JS::Heap<JS::Value>* valuep, const char* name)
-{
-    TraceManuallyBarrieredEdge(trc, valuep->unsafeGet(), name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallIdTracer(JSTracer* trc, JS::Heap<jsid>* idp, const char* name)
-{
-    TraceManuallyBarrieredEdge(trc, idp->unsafeGet(), name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallObjectTracer(JSTracer* trc, JS::Heap<JSObject*>* objp, const char* name)
-{
-    TraceManuallyBarrieredEdge(trc, objp->unsafeGet(), name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallStringTracer(JSTracer* trc, JS::Heap<JSString*>* strp, const char* name)
-{
-    TraceManuallyBarrieredEdge(trc, strp->unsafeGet(), name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallScriptTracer(JSTracer* trc, JS::Heap<JSScript*>* scriptp, const char* name)
-{
-    TraceManuallyBarrieredEdge(trc, scriptp->unsafeGet(), name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallFunctionTracer(JSTracer* trc, JS::Heap<JSFunction*>* funp, const char* name)
-{
-    TraceManuallyBarrieredEdge(trc, funp->unsafeGet(), name);
-}
-
-JS_PUBLIC_API(void)
-JS_CallTenuredObjectTracer(JSTracer* trc, JS::TenuredHeap<JSObject*>* objp, const char* name)
-{
-    JSObject* obj = objp->getPtr();
-    if (!obj)
-        return;
-
-    TraceManuallyBarrieredEdge(trc, &obj, name);
-
-    objp->setPtr(obj);
-}
-
-JS_PUBLIC_API(void)
-JS_TraceChildren(JSTracer* trc, void* thing, JS::TraceKind kind)
-{
-    js::TraceChildren(trc, thing, kind);
+    js::TraceChildren(trc, thing.asCell(), thing.kind());
 }
 
 struct TraceChildrenFunctor {
@@ -192,66 +123,41 @@ js::TraceChildren(JSTracer* trc, void* thing, JS::TraceKind kind)
 {
     MOZ_ASSERT(thing);
     TraceChildrenFunctor f;
-    CallTyped(f, kind, trc, thing);
+    DispatchTraceKindTyped(f, kind, trc, thing);
 }
 
-JS_PUBLIC_API(void)
-JS_TraceRuntime(JSTracer* trc)
-{
-    AssertHeapIsIdle(trc->runtime());
-    TraceRuntime(trc);
-}
+namespace {
+struct TraceIncomingFunctor {
+    JSTracer* trc_;
+    const JS::CompartmentSet& compartments_;
+    TraceIncomingFunctor(JSTracer* trc, const JS::CompartmentSet& compartments)
+      : trc_(trc), compartments_(compartments)
+    {}
+    using ReturnType = void;
+    template <typename T>
+    ReturnType operator()(T tp) {
+        if (!compartments_.has((*tp)->compartment()))
+            return;
+        TraceManuallyBarrieredEdge(trc_, tp, "cross-compartment wrapper");
+    }
+    // StringWrappers are just used to avoid copying strings
+    // across zones multiple times, and don't hold a strong
+    // reference.
+    ReturnType operator()(JSString** tp) {}
+};
+} // namespace (anonymous)
 
 JS_PUBLIC_API(void)
-JS_TraceIncomingCCWs(JSTracer* trc, const JS::ZoneSet& zones)
+JS::TraceIncomingCCWs(JSTracer* trc, const JS::CompartmentSet& compartments)
 {
-    for (js::ZonesIter z(trc->runtime(), SkipAtoms); !z.done(); z.next()) {
-        Zone* zone = z.get();
-        if (!zone || zones.has(zone))
+    for (js::CompartmentsIter comp(trc->runtime(), SkipAtoms); !comp.done(); comp.next()) {
+        if (compartments.has(comp))
             continue;
 
-        for (js::CompartmentsInZoneIter c(zone); !c.done(); c.next()) {
-            JSCompartment* comp = c.get();
-            if (!comp)
-                continue;
-
-            for (JSCompartment::WrapperEnum e(comp); !e.empty(); e.popFront()) {
-                const CrossCompartmentKey& key = e.front().key();
-                JSObject* obj;
-                JSScript* script;
-
-                switch (key.kind) {
-                  case CrossCompartmentKey::StringWrapper:
-                    // StringWrappers are just used to avoid copying strings
-                    // across zones multiple times, and don't hold a strong
-                    // reference.
-                    continue;
-
-                  case CrossCompartmentKey::ObjectWrapper:
-                  case CrossCompartmentKey::DebuggerObject:
-                  case CrossCompartmentKey::DebuggerSource:
-                  case CrossCompartmentKey::DebuggerEnvironment:
-                    obj = static_cast<JSObject*>(key.wrapped);
-                    // Ignore CCWs whose wrapped value doesn't live in our given
-                    // set of zones.
-                    if (!zones.has(obj->zone()))
-                        continue;
-
-                    TraceManuallyBarrieredEdge(trc, &obj, "cross-compartment wrapper");
-                    MOZ_ASSERT(obj == key.wrapped);
-                    break;
-
-                  case CrossCompartmentKey::DebuggerScript:
-                    script = static_cast<JSScript*>(key.wrapped);
-                    // Ignore CCWs whose wrapped value doesn't live in our given
-                    // set of zones.
-                    if (!zones.has(script->zone()))
-                        continue;
-                    TraceManuallyBarrieredEdge(trc, &script, "cross-compartment wrapper");
-                    MOZ_ASSERT(script == key.wrapped);
-                    break;
-                }
-            }
+        for (JSCompartment::WrapperEnum e(comp); !e.empty(); e.popFront()) {
+            mozilla::DebugOnly<const CrossCompartmentKey> prior = e.front().key();
+            e.front().mutableKey().applyToWrapped(TraceIncomingFunctor(trc, compartments));
+            MOZ_ASSERT(e.front().key() == prior);
         }
     }
 }
@@ -305,10 +211,6 @@ gc::TraceCycleCollectorChildren(JS::CallbackTracer* trc, Shape* shape)
     } while (shape);
 }
 
-void
-TraceObjectGroupCycleCollectorChildrenCallback(JS::CallbackTracer* trc,
-                                               void** thingp, JS::TraceKind kind);
-
 // Object groups can point to other object groups via an UnboxedLayout or the
 // the original unboxed group link. There can potentially be deep or cyclic
 // chains of such groups to trace through without going through a thing that
@@ -330,23 +232,29 @@ struct ObjectGroupCycleCollectorTracer : public JS::CallbackTracer
 void
 ObjectGroupCycleCollectorTracer::onChild(const JS::GCCellPtr& thing)
 {
-    if (thing.isObject() || thing.isScript()) {
+    if (thing.is<BaseShape>()) {
+        // The CC does not care about BaseShapes, and no additional GC things
+        // will be reached by following this edge.
+        return;
+    }
+
+    if (thing.is<JSObject>() || thing.is<JSScript>()) {
         // Invoke the inner cycle collector callback on this child. It will not
         // recurse back into TraceChildren.
         innerTracer->onChild(thing);
         return;
     }
 
-    if (thing.isObjectGroup()) {
+    if (thing.is<ObjectGroup>()) {
         // If this group is required to be in an ObjectGroup chain, trace it
         // via the provided worklist rather than continuing to recurse.
-        ObjectGroup* group = static_cast<ObjectGroup*>(thing.asCell());
-        if (group->maybeUnboxedLayout()) {
+        ObjectGroup& group = thing.as<ObjectGroup>();
+        if (group.maybeUnboxedLayout()) {
             for (size_t i = 0; i < seen.length(); i++) {
-                if (seen[i] == group)
+                if (seen[i] == &group)
                     return;
             }
-            if (seen.append(group) && worklist.append(group)) {
+            if (seen.append(&group) && worklist.append(&group)) {
                 return;
             } else {
                 // If append fails, keep tracing normally. The worst that will
@@ -492,15 +400,15 @@ JS_GetTraceThingInfo(char* buf, size_t bufsize, JSTracer* trc, void* thing,
                 bool willFit = str->length() + strlen("<length > ") +
                                CountDecimalDigits(str->length()) < bufsize;
 
-                n = JS_snprintf(buf, bufsize, "<length %d%s> ",
-                                (int)str->length(),
+                n = JS_snprintf(buf, bufsize, "<length %" PRIuSIZE "%s> ",
+                                str->length(),
                                 willFit ? "" : " (truncated)");
                 buf += n;
                 bufsize -= n;
 
                 PutEscapedString(buf, bufsize, &str->asLinear(), 0);
             } else {
-                JS_snprintf(buf, bufsize, "<rope: length %d>", (int)str->length());
+                JS_snprintf(buf, bufsize, "<rope: length %" PRIuSIZE ">", str->length());
             }
             break;
           }

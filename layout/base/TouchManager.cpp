@@ -6,9 +6,15 @@
  */
 
 #include "TouchManager.h"
-#include "nsPresShell.h"
 
-bool TouchManager::gPreventMouseEvents = false;
+#include "mozilla/TouchEvents.h"
+#include "mozilla/dom/EventTarget.h"
+#include "nsIFrame.h"
+#include "nsPresShell.h"
+#include "nsView.h"
+
+namespace mozilla {
+
 nsRefPtrHashtable<nsUint32HashKey, dom::Touch>* TouchManager::gCaptureTouchList;
 
 /*static*/ void
@@ -42,12 +48,12 @@ TouchManager::Destroy()
 }
 
 static void
-EvictTouchPoint(nsRefPtr<dom::Touch>& aTouch,
+EvictTouchPoint(RefPtr<dom::Touch>& aTouch,
                 nsIDocument* aLimitToDocument = nullptr)
 {
   nsCOMPtr<nsINode> node(do_QueryInterface(aTouch->mTarget));
   if (node) {
-    nsIDocument* doc = node->GetCurrentDoc();
+    nsIDocument* doc = node->GetUncomposedDoc();
     if (doc && (!aLimitToDocument || aLimitToDocument == doc)) {
       nsIPresShell* presShell = doc->GetShell();
       if (presShell) {
@@ -56,10 +62,9 @@ EvictTouchPoint(nsRefPtr<dom::Touch>& aTouch,
           nsPoint pt(aTouch->mRefPoint.x, aTouch->mRefPoint.y);
           nsCOMPtr<nsIWidget> widget = frame->GetView()->GetNearestWidget(&pt);
           if (widget) {
-            WidgetTouchEvent event(true, NS_TOUCH_END, widget);
-            event.widget = widget;
-            event.time = PR_IntervalNow();
-            event.touches.AppendElement(aTouch);
+            WidgetTouchEvent event(true, eTouchEnd, widget);
+            event.mTime = PR_IntervalNow();
+            event.mTouches.AppendElement(aTouch);
             nsEventStatus status;
             widget->DispatchEvent(&event, status);
             return;
@@ -74,21 +79,23 @@ EvictTouchPoint(nsRefPtr<dom::Touch>& aTouch,
   }
 }
 
-static PLDHashOperator
-AppendToTouchList(const uint32_t& aKey, nsRefPtr<dom::Touch>& aData, void *aTouchList)
+static void
+AppendToTouchList(WidgetTouchEvent::TouchArray* aTouchList)
 {
-  WidgetTouchEvent::TouchArray* touches =
-    static_cast<WidgetTouchEvent::TouchArray*>(aTouchList);
-  aData->mChanged = false;
-  touches->AppendElement(aData);
-  return PL_DHASH_NEXT;
+  for (auto iter = TouchManager::gCaptureTouchList->Iter();
+       !iter.Done();
+       iter.Next()) {
+    RefPtr<dom::Touch>& touch = iter.Data();
+    touch->mChanged = false;
+    aTouchList->AppendElement(touch);
+  }
 }
 
 void
 TouchManager::EvictTouches()
 {
   WidgetTouchEvent::AutoTouchArray touches;
-  gCaptureTouchList->Enumerate(&AppendToTouchList, &touches);
+  AppendToTouchList(&touches);
   for (uint32_t i = 0; i < touches.Length(); ++i) {
     EvictTouchPoint(touches[i], mDocument);
   }
@@ -101,37 +108,37 @@ TouchManager::PreHandleEvent(WidgetEvent* aEvent,
                              bool& aIsHandlingUserInput,
                              nsCOMPtr<nsIContent>& aCurrentEventContent)
 {
-  switch (aEvent->message) {
-    case NS_TOUCH_START: {
+  switch (aEvent->mMessage) {
+    case eTouchStart: {
       aIsHandlingUserInput = true;
       WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
       // if there is only one touch in this touchstart event, assume that it is
       // the start of a new touch session and evict any old touches in the
       // queue
-      if (touchEvent->touches.Length() == 1) {
+      if (touchEvent->mTouches.Length() == 1) {
         WidgetTouchEvent::AutoTouchArray touches;
-        gCaptureTouchList->Enumerate(&AppendToTouchList, (void *)&touches);
+        AppendToTouchList(&touches);
         for (uint32_t i = 0; i < touches.Length(); ++i) {
           EvictTouchPoint(touches[i]);
         }
       }
       // Add any new touches to the queue
-      for (uint32_t i = 0; i < touchEvent->touches.Length(); ++i) {
-        dom::Touch* touch = touchEvent->touches[i];
+      for (uint32_t i = 0; i < touchEvent->mTouches.Length(); ++i) {
+        dom::Touch* touch = touchEvent->mTouches[i];
         int32_t id = touch->Identifier();
         if (!gCaptureTouchList->Get(id, nullptr)) {
           // If it is not already in the queue, it is a new touch
           touch->mChanged = true;
         }
-        touch->mMessage = aEvent->message;
+        touch->mMessage = aEvent->mMessage;
         gCaptureTouchList->Put(id, touch);
       }
       break;
     }
-    case NS_TOUCH_MOVE: {
+    case eTouchMove: {
       // Check for touches that changed. Mark them add to queue
       WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
-      WidgetTouchEvent::TouchArray& touches = touchEvent->touches;
+      WidgetTouchEvent::TouchArray& touches = touchEvent->mTouches;
       bool haveChanged = false;
       for (int32_t i = touches.Length(); i; ) {
         --i;
@@ -140,9 +147,9 @@ TouchManager::PreHandleEvent(WidgetEvent* aEvent,
           continue;
         }
         int32_t id = touch->Identifier();
-        touch->mMessage = aEvent->message;
+        touch->mMessage = aEvent->mMessage;
 
-        nsRefPtr<dom::Touch> oldTouch = gCaptureTouchList->GetWeak(id);
+        RefPtr<dom::Touch> oldTouch = gCaptureTouchList->GetWeak(id);
         if (!oldTouch) {
           touches.RemoveElementAt(i);
           continue;
@@ -175,39 +182,37 @@ TouchManager::PreHandleEvent(WidgetEvent* aEvent,
           // arbitrarily pick the first touch point to be the "changed"
           // touch because firing an event with no changed events doesn't
           // work.
-          for (uint32_t i = 0; i < touchEvent->touches.Length(); ++i) {
-            if (touchEvent->touches[i]) {
-              touchEvent->touches[i]->mChanged = true;
+          for (uint32_t i = 0; i < touchEvent->mTouches.Length(); ++i) {
+            if (touchEvent->mTouches[i]) {
+              touchEvent->mTouches[i]->mChanged = true;
               break;
             }
           }
         } else {
-          if (gPreventMouseEvents) {
-            *aStatus = nsEventStatus_eConsumeNoDefault;
-          }
           return false;
         }
       }
       break;
     }
-    case NS_TOUCH_END:
+    case eTouchEnd:
       aIsHandlingUserInput = true;
       // Fall through to touchcancel code
-    case NS_TOUCH_CANCEL: {
+      MOZ_FALLTHROUGH;
+    case eTouchCancel: {
       // Remove the changed touches
       // need to make sure we only remove touches that are ending here
       WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
-      WidgetTouchEvent::TouchArray& touches = touchEvent->touches;
+      WidgetTouchEvent::TouchArray& touches = touchEvent->mTouches;
       for (uint32_t i = 0; i < touches.Length(); ++i) {
         dom::Touch* touch = touches[i];
         if (!touch) {
           continue;
         }
-        touch->mMessage = aEvent->message;
+        touch->mMessage = aEvent->mMessage;
         touch->mChanged = true;
 
         int32_t id = touch->Identifier();
-        nsRefPtr<dom::Touch> oldTouch = gCaptureTouchList->GetWeak(id);
+        RefPtr<dom::Touch> oldTouch = gCaptureTouchList->GetWeak(id);
         if (!oldTouch) {
           continue;
         }
@@ -218,7 +223,7 @@ TouchManager::PreHandleEvent(WidgetEvent* aEvent,
         gCaptureTouchList->Remove(id);
       }
       // add any touches left in the touch list, but ensure changed=false
-      gCaptureTouchList->Enumerate(&AppendToTouchList, (void *)&touches);
+      AppendToTouchList(&touches);
       break;
     }
     default:
@@ -226,3 +231,5 @@ TouchManager::PreHandleEvent(WidgetEvent* aEvent,
   }
   return true;
 }
+
+} // namespace mozilla

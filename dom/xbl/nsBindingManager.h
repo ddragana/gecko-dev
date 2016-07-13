@@ -7,6 +7,7 @@
 #ifndef nsBindingManager_h_
 #define nsBindingManager_h_
 
+#include "nsAutoPtr.h"
 #include "nsIContent.h"
 #include "nsStubMutationObserver.h"
 #include "nsHashKeys.h"
@@ -17,6 +18,7 @@
 #include "nsXBLBinding.h"
 #include "nsTArray.h"
 #include "nsThreadUtils.h"
+#include "mozilla/StyleSheetHandle.h"
 
 struct ElementDependentRuleProcessorData;
 class nsIXPConnectWrappedJS;
@@ -27,14 +29,9 @@ class nsIURI;
 class nsXBLDocumentInfo;
 class nsIStreamListener;
 class nsXBLBinding;
-template<class E> class nsRefPtr;
-typedef nsTArray<nsRefPtr<nsXBLBinding> > nsBindingList;
+typedef nsTArray<RefPtr<nsXBLBinding> > nsBindingList;
 class nsIPrincipal;
 class nsITimer;
-
-namespace mozilla {
-class CSSStyleSheet;
-} // namespace mozilla
 
 class nsBindingManager final : public nsStubMutationObserver
 {
@@ -63,15 +60,24 @@ public:
    * @param aContent the element that's being moved
    * @param aOldDocument the old document in which the
    *   content resided.
+   * @param aDestructorHandling whether or not to run the possible XBL
+   *        destructor.
    */
-  void RemovedFromDocument(nsIContent* aContent, nsIDocument* aOldDocument)
+
+ enum DestructorHandling {
+   eRunDtor,
+   eDoNotRunDtor
+ };
+  void RemovedFromDocument(nsIContent* aContent, nsIDocument* aOldDocument,
+                           DestructorHandling aDestructorHandling)
   {
     if (aContent->HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
-      RemovedFromDocumentInternal(aContent, aOldDocument);
+      RemovedFromDocumentInternal(aContent, aOldDocument, aDestructorHandling);
     }
   }
   void RemovedFromDocumentInternal(nsIContent* aContent,
-                                   nsIDocument* aOldDocument);
+                                   nsIDocument* aOldDocument,
+                                   DestructorHandling aDestructorHandling);
 
   nsIAtom* ResolveTag(nsIContent* aContent, int32_t* aNameSpaceID);
 
@@ -90,7 +96,18 @@ public:
 
   nsresult AddToAttachedQueue(nsXBLBinding* aBinding);
   void RemoveFromAttachedQueue(nsXBLBinding* aBinding);
-  void ProcessAttachedQueue(uint32_t aSkipSize = 0);
+  void ProcessAttachedQueue(uint32_t aSkipSize = 0)
+  {
+    if (mProcessingAttachedStack || mAttachedStack.Length() <= aSkipSize) {
+      return;
+    }
+
+    ProcessAttachedQueueInternal(aSkipSize);
+  }
+private:
+  void ProcessAttachedQueueInternal(uint32_t aSkipSize);
+
+public:
 
   void ExecuteDetachedHandlers();
 
@@ -121,7 +138,7 @@ public:
   nsresult MediumFeaturesChanged(nsPresContext* aPresContext,
                                  bool* aRulesChanged);
 
-  void AppendAllSheets(nsTArray<mozilla::CSSStyleSheet*>& aArray);
+  void AppendAllSheets(nsTArray<mozilla::StyleSheetHandle>& aArray);
 
   void Traverse(nsIContent *aContent,
                             nsCycleCollectionTraversalCallback &cb);
@@ -130,8 +147,18 @@ public:
 
   // Notify the binding manager when an outermost update begins and
   // ends.  The end method can execute script.
-  void BeginOutermostUpdate();
-  void EndOutermostUpdate();
+  void BeginOutermostUpdate()
+  {
+    mAttachedStackSizeOnOutermost = mAttachedStack.Length();
+  }
+
+  void EndOutermostUpdate()
+  {
+    if (!mProcessingAttachedStack) {
+      ProcessAttachedQueue(mAttachedStackSizeOnOutermost);
+      mAttachedStackSizeOnOutermost = 0;
+    }
+  }
 
   // When removing an insertion point or a parent of one, clear the insertion
   // points and their insertion parents.
@@ -199,7 +226,7 @@ protected:
 
   // Our posted event to process the attached queue, if any
   friend class nsRunnableMethod<nsBindingManager>;
-  nsRefPtr< nsRunnableMethod<nsBindingManager> > mProcessAttachedQueueEvent;
+  RefPtr< nsRunnableMethod<nsBindingManager> > mProcessAttachedQueueEvent;
 
   // Our document.  This is a weak ref; the document owns us
   nsIDocument* mDocument;
