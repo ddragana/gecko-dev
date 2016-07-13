@@ -43,6 +43,9 @@
 #include "sslerr.h"
 #include "sslproto.h"
 
+#include "nsISocketProviderService.h"
+#include "nsNetCID.h"
+
 using namespace mozilla;
 using namespace mozilla::psm;
 
